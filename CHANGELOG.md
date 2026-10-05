@@ -1,8 +1,11 @@
 # Changelog
 
-## 0.2.2 — 2026-10-05
+## 0.2.4 — 2026-10-05
 
 - Resolve the Playwright rendering runtime automatically: `SLIDESTUDIO_PLAYWRIGHT_RUNTIME`, the repo copy, a managed dir under the DSH data dir, a self-consistent `~/.codex` seed, or a machine-wide Playwright install. A stale codex seed no longer claims the runtime, and machines with nothing usable get a background download of the pinned runtime (npm registry tarballs plus Playwright's own browser installer, npmmirror fallback, no npm required on the host).
+
+## 0.2.2 — 2026-10-05
+
 - Keep freely adopted design sources through the strict planning gate and later outline updates, fixing repeated `missing_theme_pack` rejections.
 - Read image-input capability from the Harness-resolved model metadata. Distinguish missing page rendering, disconnected providers, disabled visual review, and text-only models.
 - Refuse to start generation when its required rendering runtime is missing; discussion remains available.
