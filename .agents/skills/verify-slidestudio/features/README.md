@@ -48,6 +48,12 @@ how to run, the fake-kernel boundary, doctor and evidence rules.
 | `assistant-attachments.md` | Composer attachments | `assistant` |
 | `assistant-model.md` | Model picker | `assistant` |
 
+## Host integration (outside the 28 editor drivers)
+
+| File | Surface | Verification |
+| --- | --- | --- |
+| `work-session-entry.md` | Grouped generation history, read-only Work composer, return to the correct PPT | Built-client fixture, scoped server tests, native Desktop acceptance |
+
 ## Not mapped
 
 - Real generation, provider login/OAuth, model output: needs credentials (`SKILL.md`).

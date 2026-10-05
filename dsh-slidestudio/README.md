@@ -41,3 +41,5 @@ New installations keep projects under `$DSH_HOME/data/dsh-slidestudio/workspace`
 [Repository](https://github.com/aa2246740/dsh-slidestudio) · [Releases](https://github.com/aa2246740/dsh-slidestudio/releases) · [Issues](https://github.com/aa2246740/dsh-slidestudio/issues)
 
 Apache-2.0.
+
+生成会话会归入「演示文稿 · SlideStudio」工作区；侧栏使用「按工作区分组」即可收起记录。误点记录时，通过「在演示文稿中继续」打开对应 PPT，工作区输入框不再接受编辑指令。来自不同旧目录的会话可能分组显示，已有工作区名称会保留。

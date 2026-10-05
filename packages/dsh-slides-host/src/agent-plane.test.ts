@@ -6,7 +6,7 @@ import path from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import { createScope, scopeTarget } from "@deepseek-ai/dsh-scope";
 import type { AskUserQuestionAnswer, AskUserQuestionRequest } from "@deepseek-ai/dsh-user-questions";
-import { ToolCallId } from "@deepseek-ai/dsh-llm";
+import { ToolCallId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import ToolRuntime, { defineTool } from "@deepseek-ai/dsh-tools";
 import type { PresentationRun } from "@open-slidestudio/presentation-run";
@@ -438,5 +438,32 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
     } finally {
       await h.dispose();
     }
+  });
+});
+
+describe("Slides Work-entry guard", () => {
+  it("rejects Work RPC prompts before the model; editor prompts and ordinary agents still run", async () => {
+    const h = await harness();
+    try {
+      h.store.openProject({ dshSessionId: h.slidesA.id, title: "guard", design: { kind: "self-directed" }, provider: { providerId: "pi-xai", modelId: "grok-4.6" } });
+      wireSlidesAgentPlane(h.scopeA.ctx, h.deps);
+      let modelSteps = 0;
+      const step = (agent: FakeAgent, fromWork: boolean, includeOldWorkInput = false) => {
+        // The API Session Controller adds this receipt to ordinary Work input.
+        const message = createUserMessage({ content: [{ type: "text", text: "edit the deck" }], source: { kind: "user", ...(fromWork ? { rpcId: "work-request" } : {}) } });
+        const messages = includeOldWorkInput
+          ? [createUserMessage({ content: [{ type: "text", text: "old Work input" }], source: { kind: "user", rpcId: "old-request" } }), message]
+          : [message];
+        return h.ctx.waterfall(scopeTarget(h.ctx, agent as never) as never,
+          "agent/pre-step", { agent, messages, turn: 1, step: 1, signal: new AbortController().signal } as never,
+          async () => { modelSteps++; return { kind: "enter" as const, messages: [message] }; });
+      };
+      await assert.rejects(step(h.slidesA, true), /请在演示文稿中继续/);
+      assert.equal(modelSteps, 0);
+      await step(h.slidesA, false);
+      await step(h.slidesA, false, true);
+      await step(h.creator, true);
+      assert.equal(modelSteps, 3);
+    } finally { await h.dispose(); }
   });
 });

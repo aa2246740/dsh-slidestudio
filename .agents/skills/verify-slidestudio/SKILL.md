@@ -29,6 +29,16 @@ Prerequisite for Codex verification: the existing shared runtime at
 Set `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` to that path if another local runtime exists.
 Do not install a project-local browser or fall back to system Chrome.
 
+## Work history and Personal entry
+
+`features/work-session-entry.md` covers the Host-facing surface separately from the 28 editor
+features. Run `npm run test:client --prefix dsh-slidestudio` for the built client and
+`npm run test -w @open-slidestudio/dsh-slides-host` for workspace ownership and input guards.
+The client fixture uses a real `SliceSessionStore.inspect()` payload, a mocked Host slot registry,
+and the shared pinned browser. It proves both Personal and standalone routing, not native Host
+activation. Use native Codex CUA for the installed Desktop path; record its actual package and
+runtime separately. A successful install alone does not prove updated server code is loaded.
+
 ## RC2 isolation probe
 
 `scripts/rc2-isolation/` verifies the Slides agent-plane session-isolation fix end to end inside a
@@ -37,7 +47,7 @@ roster, `open_project` execution, shell denial, normal-agent independence):
 
 ```bash
 DSH_RC2_HOST=<dir with @deepseek-ai/dsh@rc.2 installed> \
-  node .agents/skills/verify-slidestudio/scripts/rc2-isolation/run.mjs [--keep] [--timeout 90000]
+  node .agents/skills/verify-slidestudio/scripts/rc2-isolation/run.mjs [--timeout 90000]
 ```
 
 It needs `dsh-slidestudio/lib` built (`npx tsc -p tsconfig.json` +
@@ -49,7 +59,8 @@ and runs `probe.js` in-process — a slides agent then a normal agent with real 
 `open_project` really executes, non-slides agents keep native tools and get no slides plane,
 `ask_user_question` only routes for the bound session, `bash` denied for a stale-bound session,
 no `MountConflict`/plane warnings, clean dispose. Log: `output/rc2-isolation/run-*.log`;
-`--keep` leaves the Host running for manual poking. Exit 1 on any FAIL.
+Never use `--keep`: verification must stop its temporary Host and preserve only evidence.
+Exit 1 on any FAIL.
 
 A Host that only reports the static roster does not prove isolation — the probe executes a tool
 call and a denied call to prove the binding, per HANDOFF.

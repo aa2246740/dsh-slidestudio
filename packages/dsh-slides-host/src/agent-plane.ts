@@ -48,6 +48,24 @@ interface SessionProjectionProbe {
  * store binding.
  */
 export function attachSlidesAgentPlane(ctx: Context, deps: SlidesAgentPlaneDeps): () => void {
+  // Ordinary Work chat sends user input with an RPC receipt. SlideStudio's
+  // own validated routes send directly, after acquiring the project lease.
+  // Refuse accidental Work prompts before any model step or tool mutation.
+  const disposeInputGuard = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
+    // Pre-step contains the whole conversation. An old rejected Work prompt
+    // must not prevent a later, valid instruction sent from the slide editor.
+    let latestInputFromWork = false;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const source = messages[i]!.source;
+      if (source.kind !== "user") continue;
+      latestInputFromWork = "rpcId" in source && source.rpcId !== undefined;
+      break;
+    }
+    if (deps.store.bindingFor(agent.id) && latestInputFromWork) {
+      throw new Error("请在演示文稿中继续此 PPT；工作区对话为生成记录，不接受编辑指令。Open this deck in SlideStudio to continue.");
+    }
+    return next();
+  }, { prepend: true });
   // `ctx.get` resolves services without an inject declaration: a scope
   // context (preset generation or agent) has no `inject` list of its own,
   // while the resolved runtime still registers into the caller's own scope
@@ -73,6 +91,7 @@ export function attachSlidesAgentPlane(ctx: Context, deps: SlidesAgentPlaneDeps)
     { prepend: true },
   );
   return () => {
+    disposeInputGuard();
     disposeTools();
     disposeQuestions();
     disposeAssemble();

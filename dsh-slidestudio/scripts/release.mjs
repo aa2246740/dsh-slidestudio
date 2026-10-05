@@ -40,7 +40,9 @@ const BUNDLED_NODE_MODULES = [
   ...RUNTIME_PACKAGES.map((p) => `@open-slidestudio/${p}`),
 ];
 
-rmSync(output, { recursive: true, force: true });
+// The official local installer records the archive path as a file dependency.
+// Keep earlier archives: deleting them can break its next add/remove operation.
+// Only this run's temporary stage is removed below.
 mkdirSync(output, { recursive: true });
 const stage = mkdtempSync(join(output, "stage-"));
 const pkg = join(stage, "package");

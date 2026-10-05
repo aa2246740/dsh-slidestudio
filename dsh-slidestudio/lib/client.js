@@ -4,8 +4,30 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+		//#region \0rolldown/runtime.js
+		var __create = Object.create;
+		var __defProp = Object.defineProperty;
+		var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+		var __getOwnPropNames = Object.getOwnPropertyNames;
+		var __getProtoOf = Object.getPrototypeOf;
+		var __hasOwnProp = Object.prototype.hasOwnProperty;
+		var __copyProps = (to, from, except, desc) => {
+			if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+				key = keys[i];
+				if (!__hasOwnProp.call(to, key) && key !== except) __defProp(to, key, {
+					get: ((k) => from[k]).bind(null, key),
+					enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+				});
+			}
+			return to;
+		};
+		var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", {
+			value: mod,
+			enumerable: true
+		}) : target, mod));
 		//#endregion
-		require("react");
+		let react = require("react");
+		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
 		//#region src/client/index.tsx
 		const name = "dsh-slidestudio-client";
@@ -157,10 +179,18 @@ window.__ModuleLoader__.load({
 			const deadline = window.setTimeout(done, 6e5);
 			ctx.effect(() => done);
 		}
+		let pageDestination;
+		const pageListeners = /* @__PURE__ */ new Set();
 		function SlidesPage() {
+			const destination = react.default.useSyncExternalStore((listener) => {
+				pageListeners.add(listener);
+				return () => {
+					pageListeners.delete(listener);
+				};
+			}, () => pageDestination);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
 				title: "DSH SlideStudio",
-				src: `/app/hub.html?lang=${currentLang}`,
+				src: destination ?? `/app/hub.html?lang=${currentLang}`,
 				style: {
 					display: "block",
 					width: "100%",
@@ -195,6 +225,104 @@ window.__ModuleLoader__.load({
 			});
 		}
 		const PANEL = "slides";
+		/** Public composer takeover: accidental Work entry remains readable, with no
+		* prompt box that can bypass the editor's project/intent checks. */
+		function registerSessionEntry(ctx) {
+			ctx.inject(["sessions"], (inner) => {
+				const sessions = inner.get("sessions");
+				const ReadOnlyComposer = ({ matched }) => {
+					const [busy, setBusy] = react.default.useState(false);
+					const [error, setError] = react.default.useState("");
+					const english = currentLang === "en";
+					const open = async () => {
+						setBusy(true);
+						setError("");
+						try {
+							const response = await fetch(`/slides/state/${encodeURIComponent(matched)}`);
+							const state = await response.json();
+							if (!response.ok || !state.binding?.projectRoot) throw new Error(state.error || (english ? "Deck unavailable" : "找不到对应的演示文稿"));
+							pageDestination = `/app/index.html?${new URLSearchParams({
+								project: state.binding.projectRoot,
+								session: matched,
+								workspace: "1",
+								live: "1",
+								lang: currentLang
+							})}`;
+							pageListeners.forEach((listener) => listener());
+							if (!ctx.get("personal")?.open?.(PANEL)) ctx.get("layout")?.selectPanel(PANEL);
+						} catch (cause) {
+							setError(cause instanceof Error ? cause.message : String(cause));
+						} finally {
+							setBusy(false);
+						}
+					};
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+						"aria-label": english ? "SlideStudio generation history" : "演示文稿生成记录",
+						style: {
+							padding: "16px 20px",
+							border: "1px solid var(--dsw-alias-border-l3, #ddd)",
+							borderRadius: 12,
+							background: "var(--dsw-alias-button-elevated-fill, #fff)",
+							color: "var(--dsw-alias-label-primary, #222)"
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: english ? "Continue editing in SlideStudio" : "请在演示文稿中继续编辑" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+								style: {
+									margin: "8px 0 12px",
+									fontSize: 13
+								},
+								children: english ? "This conversation is the generation history. Open the deck to edit, continue generation or stop it." : "这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								disabled: busy,
+								onClick: () => {
+									open();
+								},
+								style: {
+									font: "inherit",
+									padding: "8px 14px",
+									border: "1px solid var(--dsw-alias-border-l3, #ddd)",
+									borderRadius: 8,
+									background: "transparent",
+									color: "inherit",
+									cursor: "pointer"
+								},
+								children: busy ? english ? "Opening…" : "正在打开…" : english ? "Open in SlideStudio" : "在演示文稿中继续"
+							}),
+							error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+								role: "alert",
+								children: error
+							})
+						]
+					});
+				};
+				inner.slots.inject("conversation.composer", () => {
+					let remove;
+					let signature = "";
+					const update = () => {
+						const owned = Object.entries(sessions.list.getSnapshot().byId).filter(([, row]) => row.projectionValues?.agentPreset === "slides").map(([id]) => id).sort();
+						const next = JSON.stringify(owned);
+						if (next === signature) return;
+						signature = next;
+						remove?.();
+						const ids = new Set(owned);
+						remove = inner.slots.register({
+							name: "conversation.composer",
+							priority: -100,
+							select: (owner) => owner.sessionId && ids.has(owner.sessionId) ? owner.sessionId : null
+						}, ReadOnlyComposer);
+					};
+					update();
+					const off = sessions.list.subscribe(update);
+					return () => {
+						off();
+						remove?.();
+					};
+				});
+			});
+		}
 		/** Main panels must reserve the official desktop window-chrome strip. */
 		function StandaloneSlidesPage() {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -208,10 +336,7 @@ window.__ModuleLoader__.load({
 		}
 		/** Standalone mode: 演示文稿 sits in the official sidebar panel list itself. */
 		function registerStandalone(ctx) {
-			const stops = [ctx.slots.inject("main", () => ctx.slots.register({
-				name: "main",
-				key: PANEL
-			}, StandaloneSlidesPage)), ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
+			const stops = [ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
 				name: "sidebar.panellist",
 				id: PANEL,
 				order: -9,
@@ -223,6 +348,11 @@ window.__ModuleLoader__.load({
 		}
 		function apply(ctx) {
 			currentLang = activeLang(ctx);
+			ctx.slots.inject("main", () => ctx.slots.register({
+				name: "main",
+				key: PANEL
+			}, StandaloneSlidesPage));
+			registerSessionEntry(ctx);
 			ctx.effect(() => {
 				const onMessage = (event) => {
 					if (event.origin !== location.origin || event.data?.type !== "oss:open-dsh-settings") return;

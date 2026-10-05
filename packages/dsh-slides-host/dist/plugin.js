@@ -1,4 +1,5 @@
 import { AssistantQuestions } from "./assistant-questions.js";
+import { organizeSlidesSessions } from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -79,6 +80,14 @@ export function apply(ctx, config = {}) {
     }
     const store = new SliceSessionStore(dataRoot);
     store.rebuild();
+    const workspaceRegistry = () => ctx.get("workspaceRegistry");
+    // Cold metadata reads do not resume old agents or send model requests.
+    ctx.inject(["workspaceRegistry", "sessionQuery"], async () => {
+        const query = ctx.get("sessionQuery");
+        const result = await organizeSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
+        for (const failure of result.failures)
+            console.warn("[slides-host] workspace organization:", failure);
+    });
     const presentation = createPresentationRun({
         repoRoot: workspaceRoot,
     });
@@ -651,9 +660,13 @@ export function apply(ctx, config = {}) {
             await presentation.open({ projectRoot, sessionId, brief: input.brief, editorBaseUrl, design, provider });
             const prepared = produceSetup(provider, reasoningEffort);
             const handle = await ctx.agents.create({
-                sessionId, meta: { cwd: workspaceRoot, agentPreset: "slides" },
+                // A stable data directory keeps generation sessions grouped across upgrades.
+                sessionId, meta: { cwd: store.slicesRoot(), agentPreset: "slides" },
                 agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
             });
+            const registry = workspaceRegistry();
+            if (registry)
+                await (await registry.create(store.slicesRoot(), "演示文稿 · SlideStudio")).attachSession(sessionId);
             if (reasoningEffort)
                 efforts.set(sessionId, reasoningEffort);
             selections.set(sessionId, prepared.selection);
