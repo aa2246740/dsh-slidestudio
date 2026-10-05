@@ -1,5 +1,11 @@
 import { AssistantQuestions } from "./assistant-questions.js";
-import { organizeSlidesSessions, type SlidesWorkspaceRegistry, type SlidesSessionHeader } from "./session-workspace.js";
+import {
+  ensureSessionUnarchived,
+  hideSlidesSessions,
+  slidesSessionMeta,
+  type SlidesWorkspaceRegistry,
+  type SlidesSessionHeader,
+} from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -187,13 +193,13 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     // runtime up as soon as provisioning finishes writing it.
     process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
     runtimeProvision = provisionManagedRuntime(slidesStateDir, {
-      log: (message) => console.log(message),
+      log: (message: string) => console.log(message),
       // A playwright module/browsers already on the machine saves the
       // matching download (e.g. the reporter's global playwright).
       reuse: machineRuntimeReuse(process.env, runtimeRoots),
     }).then(
       () => undefined,
-      (error) => {
+      (error: unknown) => {
         runtimeProvisionError = error instanceof Error ? error.message : String(error);
         console.warn("[slides] playwright runtime auto-setup failed:", runtimeProvisionError);
         // Release the exclusive env pin so a later resolve can adopt a runtime
@@ -208,9 +214,9 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   // Cold metadata reads do not resume old agents or send model requests.
   ctx.inject(["workspaceRegistry", "sessionQuery"] as never, async () => {
     const query = ctx.get("sessionQuery") as { listSessions(): Promise<{ header: SlidesSessionHeader }[]> };
-    const result = await organizeSlidesSessions(workspaceRegistry()!,
+    const result = await hideSlidesSessions(workspaceRegistry()!,
       (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
-    for (const failure of result.failures) console.warn("[slides-host] workspace organization:", failure);
+    for (const failure of result.failures) console.warn("[slides-host] hiding slides sessions:", failure);
   });
   const presentation = createPresentationRun({
     repoRoot: workspaceRoot,
@@ -854,11 +860,9 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       const prepared = produceSetup(provider, reasoningEffort);
       const handle = await ctx.agents.create({
         // A stable data directory keeps generation sessions grouped across upgrades.
-        sessionId, meta: { cwd: store.slicesRoot(), agentPreset: "slides" },
+        sessionId, meta: slidesSessionMeta(store.slicesRoot()),
         agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
       });
-      const registry = workspaceRegistry();
-      if (registry) await (await registry.create(store.slicesRoot(), "演示文稿 · SlideStudio")).attachSession(sessionId);
       if (reasoningEffort) efforts.set(sessionId, reasoningEffort);
       selections.set(sessionId, prepared.selection);
       live.set(sessionId, handle.agent);
@@ -895,6 +899,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         provider,
         reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog),
       );
+      await ensureSessionUnarchived(workspaceRegistry(), sessionId);
       const handle = await ctx.agents.resume({
         resumeSessionId: sessionId as Agent["id"],
         agentOptions: { ...agentOptionsForRoute(route), model },

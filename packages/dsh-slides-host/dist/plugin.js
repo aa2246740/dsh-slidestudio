@@ -1,5 +1,5 @@
 import { AssistantQuestions } from "./assistant-questions.js";
-import { organizeSlidesSessions } from "./session-workspace.js";
+import { ensureSessionUnarchived, hideSlidesSessions, slidesSessionMeta, } from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -111,9 +111,9 @@ export function apply(ctx, config = {}) {
     // Cold metadata reads do not resume old agents or send model requests.
     ctx.inject(["workspaceRegistry", "sessionQuery"], async () => {
         const query = ctx.get("sessionQuery");
-        const result = await organizeSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
+        const result = await hideSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
         for (const failure of result.failures)
-            console.warn("[slides-host] workspace organization:", failure);
+            console.warn("[slides-host] hiding slides sessions:", failure);
     });
     const presentation = createPresentationRun({
         repoRoot: workspaceRoot,
@@ -690,12 +690,9 @@ export function apply(ctx, config = {}) {
             const prepared = produceSetup(provider, reasoningEffort);
             const handle = await ctx.agents.create({
                 // A stable data directory keeps generation sessions grouped across upgrades.
-                sessionId, meta: { cwd: store.slicesRoot(), agentPreset: "slides" },
+                sessionId, meta: slidesSessionMeta(store.slicesRoot()),
                 agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
             });
-            const registry = workspaceRegistry();
-            if (registry)
-                await (await registry.create(store.slicesRoot(), "演示文稿 · SlideStudio")).attachSession(sessionId);
             if (reasoningEffort)
                 efforts.set(sessionId, reasoningEffort);
             selections.set(sessionId, prepared.selection);
@@ -731,6 +728,7 @@ export function apply(ctx, config = {}) {
                 presentation.hydrate(root);
             }
             const prepared = produceSetup(provider, reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog));
+            await ensureSessionUnarchived(workspaceRegistry(), sessionId);
             const handle = await ctx.agents.resume({
                 resumeSessionId: sessionId,
                 agentOptions: { ...agentOptionsForRoute(route), model },
