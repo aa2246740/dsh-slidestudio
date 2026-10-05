@@ -52,7 +52,7 @@ how to run, the fake-kernel boundary, doctor and evidence rules.
 
 | File | Surface | Verification |
 | --- | --- | --- |
-| `work-session-entry.md` | Grouped generation history, read-only Work composer, return to the correct PPT | Built-client fixture, scoped server tests, native Desktop acceptance |
+| `work-session-entry.md` | Generation sessions hidden from Work (subagent origin / archive + re-hide), project history in the Hub, composer takeover on the archived path | Built-client fixture, scoped server tests, native Desktop acceptance |
 
 ## Not mapped
 
