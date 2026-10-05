@@ -689,7 +689,7 @@ export function apply(ctx, config = {}) {
             await presentation.open({ projectRoot, sessionId, brief: input.brief, editorBaseUrl, design, provider });
             const prepared = produceSetup(provider, reasoningEffort);
             const handle = await ctx.agents.create({
-                // A stable data directory keeps generation sessions grouped across upgrades.
+                // Subagent origin keeps generation sessions out of every Work sidebar view.
                 sessionId, meta: slidesSessionMeta(store.slicesRoot()),
                 agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
             });
