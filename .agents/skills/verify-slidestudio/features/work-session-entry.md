@@ -21,7 +21,8 @@ unaffected.
 ## Source
 
 - `packages/dsh-slides-host/src/session-workspace.ts`: `slidesSessionMeta` (`origin: "subagent"`),
-  `hideSlidesSessions` startup sweep (preset `slides` + bound or cwd under `output/dsh-slices`),
+  `hideSlidesSessions` startup sweep (preset `slides` + bound, cwd under `output/dsh-slices`, or
+  cwd equal to the plugin's workspace/data root — the pre-per-project layout),
   `LegacySessionHider`.
 - `packages/dsh-slides-host/src/plugin.ts`: `ctx.agents.create` uses `slidesSessionMeta`; idle and
   disposed hooks feed `onSettled`.

@@ -111,7 +111,7 @@ export function apply(ctx, config = {}) {
     // Cold metadata reads do not resume old agents or send model requests.
     ctx.inject(["workspaceRegistry", "sessionQuery"], async () => {
         const query = ctx.get("sessionQuery");
-        const result = await hideSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
+        const result = await hideSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()), new Set([workspaceRoot, dataRoot]));
         for (const failure of result.failures)
             console.warn("[slides-host] hiding slides sessions:", failure);
     });

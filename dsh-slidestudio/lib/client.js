@@ -21,7 +21,7 @@ window.__ModuleLoader__.load({
 			}
 			return to;
 		};
-		var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", {
+		var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", {
 			value: mod,
 			enumerable: true
 		}) : target, mod));
@@ -182,14 +182,15 @@ window.__ModuleLoader__.load({
 		let pageDestination;
 		const pageListeners = /* @__PURE__ */ new Set();
 		function SlidesPage() {
+			const destination = react.default.useSyncExternalStore((listener) => {
+				pageListeners.add(listener);
+				return () => {
+					pageListeners.delete(listener);
+				};
+			}, () => pageDestination);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
 				title: "DSH SlideStudio",
-				src: react.default.useSyncExternalStore((listener) => {
-					pageListeners.add(listener);
-					return () => {
-						pageListeners.delete(listener);
-					};
-				}, () => pageDestination) ?? `/app/hub.html?lang=${currentLang}`,
+				src: destination ?? `/app/hub.html?lang=${currentLang}`,
 				style: {
 					display: "block",
 					width: "100%",

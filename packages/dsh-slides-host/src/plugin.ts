@@ -215,7 +215,8 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   ctx.inject(["workspaceRegistry", "sessionQuery"] as never, async () => {
     const query = ctx.get("sessionQuery") as { listSessions(): Promise<{ header: SlidesSessionHeader }[]> };
     const result = await hideSlidesSessions(workspaceRegistry()!,
-      (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
+      (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()),
+      new Set([workspaceRoot, dataRoot]));
     for (const failure of result.failures) console.warn("[slides-host] hiding slides sessions:", failure);
   });
   const presentation = createPresentationRun({

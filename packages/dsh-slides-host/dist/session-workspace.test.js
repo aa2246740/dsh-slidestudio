@@ -24,14 +24,17 @@ test("archives slides sessions; skips subagents, children, archived, non-slides 
         { id: "owned", agentPreset: "slides", cwd: "/anywhere" },
         { id: "pool", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
         { id: "pool-sep", agentPreset: "slides", cwd: "C:\\x\\output\\dsh-slices\\" },
+        { id: "root-era", agentPreset: "slides", cwd: "/pkg/root" },
+        { id: "root-sep", agentPreset: "slides", cwd: "/data/root/" },
+        { id: "root-subdir", agentPreset: "slides", cwd: "/pkg/root/sub" },
         { id: "sub", agentPreset: "slides", cwd: "/x/output/dsh-slices", origin: "subagent" },
         { id: "child", agentPreset: "slides", cwd: "/x/output/dsh-slices", parentSession: "p" },
         { id: "old", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
-        { id: "other", agentPreset: "standard", cwd: "/x/output/dsh-slices" },
+        { id: "other", agentPreset: "standard", cwd: "/pkg/root" },
         { id: "user", agentPreset: "slides", cwd: "/home/user/project" },
-    ], new Set(["owned"]));
-    assert.deepEqual(calls.archived.sort(), ["owned", "pool", "pool-sep"].sort());
-    assert.deepEqual(result, { archived: 3, removedWorkspaces: 0, failures: [] });
+    ], new Set(["owned"]), new Set(["/pkg/root", "/data/root"]));
+    assert.deepEqual(calls.archived.sort(), ["owned", "pool", "pool-sep", "root-era", "root-sep"].sort());
+    assert.deepEqual(result, { archived: 5, removedWorkspaces: 0, failures: [] });
 });
 test("one archive failure is recorded and the sweep continues", async () => {
     const { registry } = fakeRegistry({
@@ -43,7 +46,7 @@ test("one archive failure is recorded and the sweep continues", async () => {
     const result = await hideSlidesSessions(registry, [
         { id: "busy", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
         { id: "fine", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
-    ], new Set());
+    ], new Set(), new Set());
     assert.equal(result.archived, 1);
     assert.deepEqual(result.failures, ["busy: session is active"]);
 });
@@ -59,7 +62,7 @@ test("deletes SlideStudio-titled workspaces holding only slides sessions", async
     const result = await hideSlidesSessions(registry, [
         { id: "a", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
         { id: "b", agentPreset: "slides", cwd: "/x/output/dsh-slices" },
-    ], new Set());
+    ], new Set(), new Set());
     assert.deepEqual(calls.deleted, ["w-all", "w-empty"]);
     assert.equal(result.removedWorkspaces, 2);
     assert.deepEqual(result.failures, []);
@@ -104,7 +107,7 @@ test("workspace delete failures are recorded", async () => {
             throw new Error("locked");
         },
     });
-    const result = await hideSlidesSessions(registry, [], new Set());
+    const result = await hideSlidesSessions(registry, [], new Set(), new Set());
     assert.equal(result.removedWorkspaces, 0);
     assert.deepEqual(result.failures, ["w1: locked"]);
 });

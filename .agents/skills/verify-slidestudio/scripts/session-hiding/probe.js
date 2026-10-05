@@ -54,7 +54,7 @@ export async function apply(ctx) {
       }
       for (const handle of agents) await handle.dispose().catch(() => undefined);
 
-      const res = await hideSlidesSessions(registry, await headers(), new Set());
+      const res = await hideSlidesSessions(registry, await headers(), new Set(), new Set());
       console.log(
         `[probe] sweep archived=${res.archived} removedWorkspaces=${res.removedWorkspaces} failures=${res.failures.length}`,
       );

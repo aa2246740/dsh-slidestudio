@@ -56,8 +56,10 @@ export declare class LegacySessionHider {
 }
 /** Archive every pre-subagent slides session the host still lists, then remove
  * SlideStudio-titled workspaces that hold only slides sessions. Per-session
- * and per-workspace failures are recorded and never stop the sweep. */
-export declare function hideSlidesSessions(registry: SlidesWorkspaceRegistry, headers: readonly SlidesSessionHeader[], owned: ReadonlySet<string>): Promise<{
+ * and per-workspace failures are recorded and never stop the sweep. `roots`
+ * are the resolved plugin workspace and data roots, which legacy sessions used
+ * as their cwd before generation moved under `output/dsh-slices`. */
+export declare function hideSlidesSessions(registry: SlidesWorkspaceRegistry, headers: readonly SlidesSessionHeader[], owned: ReadonlySet<string>, roots: ReadonlySet<string>): Promise<{
     archived: number;
     removedWorkspaces: number;
     failures: string[];

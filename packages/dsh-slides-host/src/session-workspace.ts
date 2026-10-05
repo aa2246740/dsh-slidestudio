@@ -101,25 +101,37 @@ export class LegacySessionHider {
 /** A cwd belongs to our generation pool only under `<...>/output/dsh-slices`. */
 const SLICES_CWD = /(^|[\\/])output[\\/]dsh-slices[\\/]?$/;
 
-function isSlidesSession(header: SlidesSessionHeader, owned: ReadonlySet<string>): boolean {
+function isSlidesSession(
+  header: SlidesSessionHeader,
+  owned: ReadonlySet<string>,
+  roots: ReadonlySet<string>,
+): boolean {
   if (header.agentPreset !== "slides") return false;
-  return owned.has(header.id) || (!!header.cwd && SLICES_CWD.test(header.cwd));
+  if (owned.has(header.id)) return true;
+  if (!header.cwd) return false;
+  if (SLICES_CWD.test(header.cwd)) return true;
+  // Sessions created before per-project directories ran at the plugin's own
+  // root: the packaged install dir or the resolved data root.
+  return roots.has(header.cwd.replace(/[\\/]+$/, ""));
 }
 
 /** Archive every pre-subagent slides session the host still lists, then remove
  * SlideStudio-titled workspaces that hold only slides sessions. Per-session
- * and per-workspace failures are recorded and never stop the sweep. */
+ * and per-workspace failures are recorded and never stop the sweep. `roots`
+ * are the resolved plugin workspace and data roots, which legacy sessions used
+ * as their cwd before generation moved under `output/dsh-slices`. */
 export async function hideSlidesSessions(
   registry: SlidesWorkspaceRegistry,
   headers: readonly SlidesSessionHeader[],
   owned: ReadonlySet<string>,
+  roots: ReadonlySet<string>,
 ): Promise<{ archived: number; removedWorkspaces: number; failures: string[] }> {
   let archived = 0;
   let removedWorkspaces = 0;
   const failures: string[] = [];
   const slidesIds = new Set<string>();
   for (const header of headers) {
-    if (!isSlidesSession(header, owned)) continue;
+    if (!isSlidesSession(header, owned, roots)) continue;
     slidesIds.add(header.id);
     if (header.origin === "subagent" || header.parentSession) continue;
     if (registry.archivedSessionIds.includes(header.id)) continue;
