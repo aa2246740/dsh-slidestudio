@@ -19,6 +19,7 @@
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@open-slidestudio/exporter-native": "0.1.0",
     "@open-slidestudio/pptd-v2": "0.1.0",
+    "@open-slidestudio/presentation-run": "0.1.0",
     "@open-slidestudio/project-store": "0.1.0"
   },
   "devDependencies": {

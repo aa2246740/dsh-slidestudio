@@ -25,22 +25,29 @@ const browsersPath = path.join(runtimeRoot, "browsers");
 const runtimeFile = repoPlaywrightRuntimeFile(ROOT);
 const seedEnv = String(process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME_SOURCE || "").trim();
 
+// Same runtime.mjs contract as playwrightRuntimeSource() in
+// packages/presentation-run/src/domain/playwright-runtime.ts — keep aligned.
 const runtimeSource = `import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PINNED_PLAYWRIGHT_VERSION = ${JSON.stringify(PINNED_PLAYWRIGHT_VERSION)};
 const PINNED_CHROMIUM_REVISION = ${JSON.stringify(PINNED_CHROMIUM_REVISION)};
+const BROWSER_DIR_NAME = ${JSON.stringify(`chromium_headless_shell-${PINNED_CHROMIUM_REVISION}`)};
 const root = fileURLToPath(new URL(".", import.meta.url));
-const localBrowsersPath = join(root, "browsers");
-const localChromiumRoot = join(localBrowsersPath, "chromium_headless_shell-" + PINNED_CHROMIUM_REVISION);
-const browsersPath =
-  process.env.PLAYWRIGHT_BROWSERS_PATH ||
-  (existsSync(localChromiumRoot) ? localBrowsersPath : process.env.PLAYWRIGHT_BROWSERS_PATH) ||
-  localBrowsersPath;
-const chromiumRoot = join(browsersPath, "chromium_headless_shell-" + PINNED_CHROMIUM_REVISION);
-const modulePath = join(root, "node_modules", "playwright", "index.mjs");
-const packagePath = join(root, "node_modules", "playwright", "package.json");
+const MODULE_DIR = join(root, "node_modules");
+const BROWSERS_DIR = join(root, "browsers");
+const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_DIR;
+const chromiumRoot = join(browsersPath, BROWSER_DIR_NAME);
+const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
+const packagePath = join(MODULE_DIR, "playwright", "package.json");
+const EXECUTABLE_NAMES = new Set([
+  "chrome-headless-shell",
+  "headless_shell.exe",
+  "chrome",
+  "Chromium",
+  "chrome.exe",
+]);
 
 function findExecutable(directory) {
   if (!existsSync(directory)) return "";
@@ -49,7 +56,7 @@ function findExecutable(directory) {
     if (entry.isDirectory()) {
       const found = findExecutable(p);
       if (found) return found;
-    } else if (entry.isFile() && ["chrome-headless-shell", "headless_shell.exe"].includes(entry.name)) {
+    } else if (entry.isFile() && EXECUTABLE_NAMES.has(entry.name)) {
       return p;
     }
   }
@@ -78,14 +85,11 @@ export function verifyPinnedRuntime() {
     );
   }
   if (!pinnedRuntime.executablePath || !existsSync(pinnedRuntime.executablePath)) {
-    throw new Error("Pinned Chromium Headless Shell is missing under " + chromiumRoot);
+    throw new Error("Pinned Chromium executable is missing under " + chromiumRoot);
   }
-  if (!pinnedRuntime.executablePath.includes("chromium_headless_shell-" + PINNED_CHROMIUM_REVISION)) {
+  if (!pinnedRuntime.executablePath.includes(BROWSER_DIR_NAME)) {
     throw new Error(
-      "Pinned Chromium executable resolved outside revision " +
-        PINNED_CHROMIUM_REVISION +
-        ": " +
-        pinnedRuntime.executablePath,
+      "Pinned Chromium executable resolved outside " + BROWSER_DIR_NAME + ": " + pinnedRuntime.executablePath,
     );
   }
   return pinnedRuntime;
@@ -93,7 +97,7 @@ export function verifyPinnedRuntime() {
 
 export async function launchPinnedChromium(options = {}) {
   verifyPinnedRuntime();
-  if (options.headless === false) throw new Error("Hub render_page Playwright runtime is headless-only.");
+  if (options.headless === false) throw new Error("SlideStudio render_page Playwright runtime is headless-only.");
   process.env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
   const { chromium } = await import(pathToFileURL(modulePath).href);
   return chromium.launch({ ...options, headless: true, executablePath: pinnedRuntime.executablePath });

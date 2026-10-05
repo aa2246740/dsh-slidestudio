@@ -4,14 +4,15 @@ import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
 import { discussionInstruction, discussionOnly, recordConversationMessage } from "./assistant-conversation.js";
-import { relative as pathRelative, resolve as pathResolve } from "node:path";
+import { join as pathJoin, relative as pathRelative, resolve as pathResolve } from "node:path";
+import os from "node:os";
 import z from "@deepseek-ai/schemastery";
 import { createUserMessage, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import "@deepseek-ai/dsh-agent";
 import "@deepseek-ai/dsh-tools";
 import "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-attachment";
-import { createPresentationRun, buildCatalogDto, persistPresentationRunProvider, pinnedPlaywrightRuntimePath, rasterRuntimeReady, } from "@open-slidestudio/presentation-run";
+import { createPresentationRun, buildCatalogDto, persistPresentationRunProvider, machineRuntimeReuse, provisionManagedRuntime, resolvePlaywrightRuntime, rasterRuntimeReady, } from "@open-slidestudio/presentation-run";
 import { bindToolProviderToModelSelection, createSlidesProduceSetup, } from "./produce-agent-setup.js";
 import { reconcileSlidesAgentPlane, wireSlidesAgentPlaneForAgent, } from "./agent-plane.js";
 import { writeSliceRuntime } from "./runtime.js";
@@ -74,9 +75,35 @@ export function apply(ctx, config = {}) {
         "http://127.0.0.1:55200";
     process.env.SLIDESTUDIO_EDITOR_URL = editorBaseUrl;
     process.env.OPEN_SLIDESTUDIO_ROOT = workspaceRoot;
-    const playwrightRuntime = pinnedPlaywrightRuntimePath(process.env, { repoRoot: workspaceRoot });
-    if (rasterRuntimeReady(process.env, playwrightRuntime)) {
-        process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = playwrightRuntime;
+    // Render runtime: resolve an existing one first (repo .runtime, the managed
+    // dir under the DSH data root, a healthy ~/.codex seed, or any playwright
+    // already installed on this machine). When nothing works, provision the
+    // pinned runtime into the managed dir in the background — packaged installs
+    // must not depend on a Codex homedir or a manual setup step.
+    const slidesStateDir = pathJoin(dshHome, "data", "dsh-slidestudio");
+    const runtimeRoots = { repoRoot: workspaceRoot, homeDir: os.homedir(), stateDir: slidesStateDir };
+    const runtimeResolution = resolvePlaywrightRuntime(process.env, runtimeRoots);
+    if (runtimeResolution.ready) {
+        process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
+    }
+    let runtimeProvisionError;
+    let runtimeProvision;
+    if (!runtimeResolution.ready && !process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim()) {
+        // Point env-only lookups at the managed path so the raster port picks the
+        // runtime up as soon as provisioning finishes writing it.
+        process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
+        runtimeProvision = provisionManagedRuntime(slidesStateDir, {
+            log: (message) => console.log(message),
+            // A playwright module/browsers already on the machine saves the
+            // matching download (e.g. the reporter's global playwright).
+            reuse: machineRuntimeReuse(process.env, runtimeRoots),
+        }).then(() => undefined, (error) => {
+            runtimeProvisionError = error instanceof Error ? error.message : String(error);
+            console.warn("[slides] playwright runtime auto-setup failed:", runtimeProvisionError);
+            // Release the exclusive env pin so a later resolve can adopt a runtime
+            // the user installs after this attempt failed.
+            delete process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
+        });
     }
     const store = new SliceSessionStore(dataRoot);
     store.rebuild();
@@ -610,7 +637,9 @@ export function apply(ctx, config = {}) {
             }
         },
         async createAgent(input) {
-            assertGenerationRenderingReady({ render: rasterRuntimeReady() }, input.conversationMode);
+            if (runtimeProvision && !rasterRuntimeReady())
+                await runtimeProvision;
+            assertGenerationRenderingReady({ render: rasterRuntimeReady() }, input.conversationMode, runtimeProvisionError);
             assertHubProduceGatesReady(workspaceRoot);
             bindGrokProduce();
             if (input.provider === "mimo-desktop")
