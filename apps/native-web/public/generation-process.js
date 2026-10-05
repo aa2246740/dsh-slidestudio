@@ -79,6 +79,41 @@ export function humanizeGenerationFault(activity = {}) {
   return stripped.replace(/\{[\s\S]*$/, "").trim() || raw.trim();
 }
 
+function unfinishedGenerationReason(activity, inspection) {
+  const blockers = Array.isArray(activity?.execution?.blockers) ? activity.execution.blockers : [];
+  const messages = [];
+  const pageCountFor = (code) => new Set(blockers.filter((row) => row.code === code).flatMap((row) => row.pageIds || [])).size;
+  for (const code of new Set(blockers.map((row) => row.code))) {
+    const n = pageCountFor(code);
+    const message = {
+      missing_plan: t("页面规划尚未完成"),
+      legacy_incomplete_plan: t("页面规划需要补全"),
+      missing_pages: t("还有 {n} 页尚未写入", { n }),
+      extra_pages: t("页面与当前规划不一致，需要核对"),
+      page_render_needed: t("有 {n} 页尚未完成截图与排版检查", { n }),
+      page_image_needed: t("有 {n} 页的截图尚未送达当前模型", { n }),
+      page_visual_review_needed: t("有 {n} 页尚未完成视觉检查", { n }),
+      page_needs_revision: t("有 {n} 页未通过检查，需要修订", { n }),
+      structural_review_needed: t("整稿结构检查尚未通过"),
+      compose_needed: t("页面检查已通过，尚未完成合稿"),
+      export_needed: t("文稿已合稿，尚未完成导出"),
+      missing_references: t("必需参考资料尚未读完"),
+      project_unreadable: t("项目暂时无法读取，请检查文件是否可访问"),
+      identity_collision: t("项目中存在重复页面标识，需要修复后继续"),
+      activity_unknown: t("暂时无法确认生成会话状态，请等待连接恢复"),
+    }[code];
+    if (message) messages.push(message);
+  }
+  if (!messages.length && Array.isArray(inspection.composeBlockers)) {
+    if (inspection.composeBlockers.some((value) => /rendered layout/i.test(text(value)))) {
+      messages.push(t("页面截图或排版检查尚未通过"));
+    } else if (inspection.composeBlockers.some((value) => /visual review|image content/i.test(text(value)))) {
+      messages.push(t("页面截图尚未送达模型，或视觉检查尚未完成"));
+    }
+  }
+  return messages.length ? messages.join(t("；")) : t("模型已结束本轮回复，但尚未完成整稿检查与合稿");
+}
+
 /** Describe a terminal generation without hiding usable partial output. */
 export function generationTerminalPresentation(activity = {}) {
   const phase = text(activity?.phase);
@@ -99,7 +134,10 @@ export function generationTerminalPresentation(activity = {}) {
       : t("已写入 {n} 页", { n: pageCount })
     : t("尚未写入页面");
   const finishingBlocked = pageCount > 0 && !composed;
-  const reason = humanizeGenerationFault(activity);
+  const faultReason = activity.error ? humanizeGenerationFault(activity) : "";
+  const reason = faultReason || (finishingBlocked && phase !== "cancelled" && phase !== "canceled"
+    ? unfinishedGenerationReason(activity, inspection)
+    : "");
   const status = phase === "paused"
     ? finishingBlocked
       ? t("已生成 {n} 页，收尾未完成", { n: pageCount })
@@ -132,7 +170,7 @@ export function generationTerminalPresentation(activity = {}) {
       : "",
     reason,
   ].filter(Boolean).join(t("；")) + t("。");
-  return { status, action, output, detail, pageCount, reviewedPageCount, missingReferenceCount, composed };
+  return { status, action, output, detail, reason, pageCount, reviewedPageCount, missingReferenceCount, composed };
 }
 
 function generationLedger(snapshot = {}) {
@@ -230,7 +268,7 @@ export function generationResumeInstruction(state = {}) {
   }
 
   if (pageCount === 0 && (execution?.plan?.kind === "missing" || execution?.plan?.kind === "legacy-incomplete" || state?.allowZeroPage)) {
-    return "继续完成当前演示文稿的生成任务。目前尚未建立完整页面。请先完成页面规划，然后依次写入页面、执行 render_page 和 review_page，完成全套页面后执行 compose_deck 与 export_deck；遇到真实阻断时明确报告。";
+    return "继续完成当前演示文稿的生成任务。目前尚未建立完整页面。先调用 inspect_capabilities 确认当前能力。完成页面规划后依次写入页面并执行 render_page；仅在视觉检查可用时执行 review_page，否则执行确定性的排版与 review_pages 检查。完成全套页面后执行 compose_deck 与 export_deck；遇到真实阻断时明确报告。";
   }
 
   const missing = Array.isArray(ledger.missingReferenceChunks) ? ledger.missingReferenceChunks : [];

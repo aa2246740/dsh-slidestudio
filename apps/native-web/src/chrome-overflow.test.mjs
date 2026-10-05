@@ -273,7 +273,12 @@ describe("generate/editor chrome overflow on the real page", { skip: !hasPlaywri
           "opening Agent before selecting an object should keep the compact empty property affordance");
         await page.locator("#slide .el.text").first().dispatchEvent("click");
       }
-      await page.waitForTimeout(220);
+      await page.waitForFunction((expected) => {
+        const panel = document.getElementById("property-panel");
+        const width = panel?.getBoundingClientRect().width || 0;
+        return panel?.hasAttribute("data-agent-auto-collapsed") === expected
+          && (expected ? width > 0 && width <= 52 : width >= 290);
+      }, shouldAutoCollapse);
       const facts = await page.evaluate(() => ({
         autoCollapsed: document.getElementById("property-panel")?.hasAttribute("data-agent-auto-collapsed"),
         panelWidth: document.getElementById("property-panel")?.getBoundingClientRect().width || 0,

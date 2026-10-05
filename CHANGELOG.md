@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 — 2026-10-05
+
+- Keep freely adopted design sources through the strict planning gate and later outline updates, fixing repeated `missing_theme_pack` rejections.
+- Read image-input capability from the Harness-resolved model metadata. Distinguish missing page rendering, disconnected providers, disabled visual review, and text-only models.
+- Refuse to start generation when its required rendering runtime is missing; discussion remains available.
+- Show concrete unfinished checks and the recovery action below a stopped generation, including when the model ended without reporting an exception.
+
 ## Unreleased
 
 - DSH kernel upgraded to `@deepseek-ai/dsh` 0.2.0-rc.2 (was rc.1); vendored `dsh-llm-pi-ai` rebased to upstream rc.2 with the three Open SlideStudio patches re-applied; `dsh-oauth-login` vendor refreshed to upstream main `1b64aa8`

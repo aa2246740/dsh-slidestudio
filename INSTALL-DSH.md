@@ -38,6 +38,15 @@ node --input-type=module -e 'import { homedir } from "node:os"; import { pathToF
 
 在 **DSH 设置 → 模型** 中完成模型配置。SlideStudio 的模型选择器读取当前 Harness 的目录和凭据，不另建一套模型配置。在插件中点击设置会打开 DSH 设置；关闭后返回原入口。
 
+### 页面截图与视觉检查
+
+页面截图需要上面的渲染运行时；让模型看图还需要当前 **provider / model** 在 Harness 中声明支持图片输入。插件按 Harness 解析后的模型能力开放视觉工具，不根据模型名字猜测。
+
+- 渲染环境缺失：开始生成前会提示配置运行时，避免生成到最后才发现无法检查页面。
+- 模型支持图片：`render_page` 把页面 PNG 作为图片附件交给模型，再由 `review_page` 记录检查结果。
+- 模型只支持文本：仍可生成，通过截图、确定性排版检查和整稿检查后合稿、导出；不会宣称已完成模型视觉检查。
+- 显示“已生成 N 页，收尾未完成”：状态下方会列出尚未完成的检查，可点击“继续完成生成”。这不一定伴随模型异常；模型提前结束回复也会留下未完成步骤。
+
 ## 数据位置
 
 - 新安装：`$DSH_HOME/data/dsh-slidestudio/workspace/output/dsh-slices/` 保存生成项目，`output/attachments/` 保存上传材料。

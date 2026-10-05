@@ -424,7 +424,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper)
   border-color: var(--n-150);
   color: var(--n-600);
 }
-.generation-turn-end.is-info::before { background-color: var(--n-400); }
+.generation-turn-end.is-info::before { background: var(--n-400); content: "!"; color: var(--n-0); font-size: 11px; line-height: 15px; text-align: center; }
 @keyframes turn-end-pop {
   from { opacity: 0; transform: translateY(6px) scale(0.96); }
   to { opacity: 1; transform: none; }
@@ -3533,6 +3533,8 @@ body.is-presenting #ctx-menu { display: none !important; }
 .assistant-reply-actions button { font: inherit; color: var(--muted); background: transparent; border: 0; padding: 5px 0; cursor: pointer; }
 .assistant-reply-actions button:hover { color: var(--ink); text-decoration: underline; }
 .assistant-reply-actions button:focus-visible { outline: 2px solid var(--selected); outline-offset: 3px; border-radius: 3px; }
+.generation-turn-end-detail { margin: 8px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-line; }
+.generation-turn-end-detail[hidden] { display: none; }
 
 /* Native DSH question, inside the one conversation timeline. */
 .assistant-question-card { border: 1px solid var(--border, var(--n-150)); border-radius: 14px; padding: 14px; background: var(--n-0); color: var(--ink); min-width: 0; }

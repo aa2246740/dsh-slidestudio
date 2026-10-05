@@ -320,7 +320,10 @@ export function createPresentationRun(deps = {}) {
             }
             if (name === "commit_design" || name === "write_todo") {
                 const binding = readBinding(context.projectRoot);
-                const adopted = sourceIdList(args.adoptedSourceIds, args.adopt);
+                const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
+                const adopted = requestedSources.length ? requestedSources : sourceIdList(listSourceReceipts(context.projectRoot)
+                    .filter((row) => row.state === "adopted" || row.state === "executed")
+                    .map((row) => row.sourceId));
                 const preflight = planningReferencePreflight(repoRoot, context.projectRoot, name, adopted);
                 if (preflight)
                     return preflight;
@@ -352,7 +355,9 @@ export function createPresentationRun(deps = {}) {
                     };
                 }
                 if (readRunLedger(context.projectRoot)) {
-                    const committed = await invokeDomain("write_todo", { items }, context);
+                    // Validate the same chosen sources at both layers. Persist their
+                    // adoption only after the domain plan commit succeeds.
+                    const committed = await invokeDomain("write_todo", { items, adoptedSourceIds: adopted }, context);
                     if (!committed.ok)
                         return { ...committed, name };
                 }

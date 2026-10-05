@@ -14,6 +14,7 @@ import { createPresentationRun, buildCatalogDto, persistPresentationRunProvider,
 import { bindToolProviderToModelSelection, createSlidesProduceSetup, } from "./produce-agent-setup.js";
 import { reconcileSlidesAgentPlane, wireSlidesAgentPlaneForAgent, } from "./agent-plane.js";
 import { writeSliceRuntime } from "./runtime.js";
+import { assertGenerationRenderingReady } from "./hub-capability.js";
 import { deckTitleFromBrief, SliceSessionStore } from "./slice-session.js";
 import { handleProductRequest, handleSlidesRequest, turnTextWithAttachments } from "./routes.js";
 import { redirectRootToProductHome } from "./product-proxy.js";
@@ -154,7 +155,7 @@ export function apply(ctx, config = {}) {
                 const info = await ctx.llm.resolveModelInfo(provider.id, model.id).catch(() => undefined);
                 byId.set(model.id, {
                     name: model.name || model.id,
-                    inputModalities: [...(model.inputModalities ?? [])],
+                    inputModalities: [...(info?.inputModalities ?? model.inputModalities ?? [])],
                     efforts: info?.reasoning?.efforts.map((effort) => String(effort.id)) ?? [],
                 });
             }
@@ -600,6 +601,7 @@ export function apply(ctx, config = {}) {
             }
         },
         async createAgent(input) {
+            assertGenerationRenderingReady({ render: rasterRuntimeReady() }, input.conversationMode);
             assertHubProduceGatesReady(workspaceRoot);
             bindGrokProduce();
             if (input.provider === "mimo-desktop")

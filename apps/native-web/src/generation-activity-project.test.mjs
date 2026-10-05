@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
+import * as pptd from "../../../packages/pptd-v2/dist/index.js";
+import { initializeRunLedger } from "../../../packages/presentation-run/dist/index.js";
+import { writeSliceRuntime } from "../../../packages/dsh-slides-host/dist/runtime.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "generation-activity-project-"));
@@ -43,6 +46,19 @@ const readActivity = async (_native, root) => ({
 });
 
 describe("project-bound generation activity", () => {
+  it("returns the real execution blockers so the UI can explain an unfinished run", async () => {
+    const root = path.join(scratch, "unfinished");
+    pptd.createEmptyProject(root, { title: "Unfinished regression" });
+    writeSliceRuntime(root, { brief: "A simple deck", design: { kind: "self-directed" }, editorBaseUrl: "http://127.0.0.1:1", strictExecution: true });
+    initializeRunLedger(root);
+    fs.writeFileSync(path.join(root, "_agent", "presentation-run.v1.json"), JSON.stringify({ sessionId: "unfinished" }));
+    const activity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } }, request(root, "unfinished"), root,
+    );
+    assert.equal(activity.project.pageCount, 0);
+    assert.ok(activity.execution?.blockers.some((blocker) => blocker.code === "missing_plan"), JSON.stringify(activity.execution));
+  });
+
   it("keeps two interleaved project polls bound to their own sessions", async () => {
     const first = await generationActivityForRequest({}, request(firstRoot, "session-first"), secondRoot, readActivity);
     const second = await generationActivityForRequest({}, request(secondRoot, "session-second"), firstRoot, readActivity);

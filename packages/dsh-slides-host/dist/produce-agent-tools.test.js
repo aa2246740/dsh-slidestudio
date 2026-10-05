@@ -7,7 +7,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import ToolRuntime, { defineTool, } from "@deepseek-ai/dsh-tools";
-import { persistPresentationRunProvider, savePageRaster, toolSchemaHasQueriesArray, initializeRunLedger, readRunLedger, recordTodo } from "@open-slidestudio/presentation-run";
+import { createPresentationRun, persistPresentationRunProvider, savePageRaster, toolSchemaHasQueriesArray, initializeRunLedger, readRunLedger, recordTodo } from "@open-slidestudio/presentation-run";
 import { decideWritePage } from "./write-page.js";
 import { inject, runModelSwitchTransaction } from "./plugin.js";
 import { SLICE_TOOL_NAMES } from "./protocol.js";
@@ -62,6 +62,46 @@ function stubPresentation() {
     };
 }
 describe("planning preflight ordering", () => {
+    it("keeps the freely adopted teaching pack through the Host tool and later outline updates", async (t) => {
+        const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "host-freestyle-plan-"));
+        t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+        const store = new SliceSessionStore(workspace);
+        const sessionId = "host-freestyle-plan";
+        const brief = "Windows 批处理教学课件，15 分钟，包含概念、例子和课堂练习。";
+        const design = { kind: "self-directed" };
+        const provider = { providerId: "test", modelId: "test" };
+        const opened = store.openProject({ dshSessionId: sessionId, title: brief, design, provider });
+        const projectRoot = store.resolveRoot(opened.binding);
+        const editorBaseUrl = "http://127.0.0.1:1";
+        writeSliceRuntime(projectRoot, { brief, design, editorBaseUrl, strictExecution: true });
+        const repoRoot = path.resolve(import.meta.dirname, "../../..");
+        const presentation = createPresentationRun({ repoRoot });
+        await presentation.open({ projectRoot, sessionId, brief, design, provider, editorBaseUrl });
+        const { defs, runtime } = fakeTools();
+        registerSliceTools(runtime, { store, presentation, workspaceRoot: repoRoot, editorBaseUrl, faults: new AgentFaults(), provider });
+        let sequence = 0;
+        const execute = async (name, args) => {
+            const tool = defs.find((def) => def.name === name);
+            return asJsonValue(await tool.execute(args, {
+                agent: { id: sessionId }, callId: `freestyle-${++sequence}`, signal: new AbortController().signal,
+            }));
+        };
+        const plan = [{ pageId: "cover", title: "认识批处理", layoutFamily: "cover", exhibits: [] }];
+        const args = { slidePlan: plan, adoptedSourceIds: ["openkimi:reference/design_system/academic/blue-line-courseware/design.md"] };
+        let committed = await execute("commit_design", args);
+        assert.equal(committed.error, "required_source_chunks_unread");
+        for (let attempt = 0; attempt < 3 && committed.outcome !== "committed"; attempt++) {
+            const missing = committed.missingReferenceChunks;
+            assert.ok(missing?.length, JSON.stringify(committed));
+            for (const chunk of missing)
+                await execute("read_reference", chunk);
+            committed = await execute("commit_design", args);
+        }
+        assert.equal(committed.outcome, "committed", JSON.stringify(committed));
+        const updated = await execute("write_todo", { items: [...plan, { pageId: "practice", title: "课堂练习", layoutFamily: "content", exhibits: [] }] });
+        assert.equal(updated.outcome, "committed", JSON.stringify(updated));
+        assert.deepEqual(updated.plannedPageIds, ["cover", "practice"]);
+    });
     it("runs the real Host planning tool through PresentationRun before recording todo", async () => {
         const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "planning-preflight-order-"));
         const store = new SliceSessionStore(workspace);

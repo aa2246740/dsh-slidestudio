@@ -462,10 +462,13 @@ function runtimeKindThemeInput(projectRoot) {
 }
 function rejectKindThemePack(projectRoot, args) {
     const runtime = runtimeKindThemeInput(projectRoot);
+    const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
     const issue = kindThemePackIssue({
         brief: runtime.brief,
         designSystemId: runtime.designSystemId,
-        adoptedSourceIds: sourceIdList(args.adoptedSourceIds, args.adopt),
+        adoptedSourceIds: requestedSources.length ? requestedSources : sourceIdList(listSourceReceipts(projectRoot)
+            .filter((row) => row.state === "adopted" || row.state === "executed")
+            .map((row) => row.sourceId)),
         userExplicitPack: runtime.userExplicitPack,
     });
     if (!issue)

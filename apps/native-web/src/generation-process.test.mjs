@@ -54,6 +54,27 @@ describe("generation activity progress signature", () => {
 });
 
 describe("generation terminal presentation", () => {
+  it("explains unfinished output from authoritative blockers even without a provider error", () => {
+    const result = generationTerminalPresentation({
+      phase: "paused", project: { pageCount: 5 },
+      inspection: { composed: false, pages: Array.from({ length: 5 }, () => ({})) },
+      execution: { blockers: [
+        { code: "page_render_needed", pageIds: ["p1"] },
+        { code: "page_render_needed", pageIds: ["p2"] },
+        { code: "structural_review_needed", pageIds: ["p1", "p2"] },
+      ] },
+    });
+    assert.match(result.status, /已生成 5 页/);
+    assert.match(result.detail, /有 2 页尚未完成截图与排版检查/);
+    assert.match(result.detail, /整稿结构检查尚未通过/);
+    assert.match(result.action, /继续完成生成/);
+  });
+
+  it("states that the model stopped before wrap-up when no error or blocker was recorded", () => {
+    const result = generationTerminalPresentation({ phase: "paused", project: { pageCount: 5 }, inspection: { composed: false } });
+    assert.match(result.detail, /模型已结束本轮回复/);
+    assert.doesNotMatch(result.detail, /全部完成/);
+  });
   it("reports preserved reviewed pages separately from an unfinished final compose", () => {
     const pages = Array.from({ length: 10 }, (_, index) => ({
       pageId: String(index + 1).padStart(2, "0"),
@@ -109,6 +130,7 @@ describe("generation terminal presentation", () => {
       action: "项目文件不存在",
       output: "尚未写入页面",
       detail: "尚未写入页面；项目文件不存在。",
+      reason: "项目文件不存在",
       pageCount: 0,
       reviewedPageCount: 0,
       missingReferenceCount: 0,

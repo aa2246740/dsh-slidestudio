@@ -22,6 +22,11 @@ Requires DeepSeek Harness 0.2.0-rc.2 through 0.2.x and Node.js ^22.19.0 or >=24.
 
 Configure a model in **DSH Settings → Models**. Rendering also needs the separately managed **Playwright 1.61.1 / Chromium Headless Shell 1228** runtime. The plugin does not bundle or download a browser. It reads `~/.codex/playwright-runtime/runtime.mjs` by default; set `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` for another location. See the [runtime and migration guide](https://github.com/aa2246740/dsh-slidestudio/blob/main/INSTALL-DSH.md).
 
+Generation checks for this rendering runtime before starting. Model visual review additionally
+requires image input in the Harness-resolved model capabilities. Text-only models can complete
+deterministic page and deck checks, then compose and export; they do not perform model visual review.
+If a model stops early, the conversation shows which checks remain and how to continue.
+
 ## Features
 
 - Live AI generation with progress, stop and continue controls

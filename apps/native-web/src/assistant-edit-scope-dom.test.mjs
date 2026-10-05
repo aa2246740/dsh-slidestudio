@@ -26,11 +26,11 @@ test('model scope survives to the actual lock and turn; edit feedback stays in o
  const base=`http://127.0.0.1:${port}`;
  const server=spawn(process.execPath,['apps/native-web/src/server.mjs'],{cwd:ROOT,env:{...process.env,PORT:String(port),OPEN_SLIDESTUDIO_PROJECT:project,SLIDESTUDIO_RETENTION_DAYS:'0'},stdio:'ignore'});
  const out=process.env.SLIDESTUDIO_QA_OUTPUT_DIR || path.join(ROOT,'output/conversation-stability-acceptance-2026-09-20');fs.mkdirSync(out,{recursive:true});
- let browser;
+ let browser, page;
  try{
   for(let i=0;i<80;i++){try{if((await fetch(`${base}/api/health`)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
   browser=await launchPinnedChromium({headless:true});
-  const page=await browser.newPage({locale:'zh-CN',viewport:{width:1440,height:900}});
+  page=await browser.newPage({locale:'zh-CN',viewport:{width:1440,height:900}});
   const errors=[],turns=[],locks=[];page.on('pageerror',e=>errors.push(e.message));
   let busy=false,finished=false,failTurn=false,invalidPlan=false,deckPlan=false,turnGate=null,stateOutageUntil=0,transientFailures=0,stops=0;
   const state=()=>({agentStatus:busy?'busy':'idle',phase:{kind:finished&&failTurn?'failed':'page-ready',error:{detail:'测试模型暂时不可用'}},inspection:{pages:pagePaths.map((p,i)=>({pageId:path.basename(p,'.page'),...currentPageRevision(project,path.basename(p,'.page'))}))}});
@@ -150,5 +150,5 @@ test('model scope survives to the actual lock and turn; edit feedback stays in o
   assert.equal(await refreshedAction.getAttribute('data-snapshot-id'),recoveredVersion);
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'scope-dom-proof.json'),JSON.stringify({request,lockPages:locks[0].workspaceEdit.targetPages.map(p=>p.pageId),turnPages:turns[0].editorEdit.pages.map(p=>p.pageId),thirdPageUnchanged:true,metrics,checks:['exact model scope to real lock','current page 3 does not override explicit pages','one reply and inline recovery','acknowledgement owns draft','new draft preserved','version preview','invalid pages fail closed','error stays in chat','retry preserves new draft'],errors},null,2));
- }finally{await browser?.close();if(server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGTERM');await done;}fs.rmSync(scratch,{recursive:true,force:true});}
+ }finally{await page?.unrouteAll({behavior:'wait'});await browser?.close();if(server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGTERM');await done;}fs.rmSync(scratch,{recursive:true,force:true});}
 });

@@ -26,6 +26,23 @@ Driver id `generation-live` (`drivers/assistant.mjs`), session bound with
   intent read.
 - Held draft: text kept, toast shown, no extra turn.
 
+## Unfinished generation regression (0.2.2)
+
+`apps/native-web/src/generation-process-dom.test.mjs` also covers an idle run with
+five reported pages and no provider exception. The visible conversation timeline must
+show the incomplete screenshot/layout and deck review checks, plus a recovery action.
+The assertion checks visibility, not just hidden DOM text. This uses a simulated activity
+response over a real fixture deck; it does not prove five newly generated slides.
+
+`generation-activity-project.test.mjs` checks that the real activity endpoint forwards
+execution blockers from a real project. `freestyle-planning.test.ts` and the Host's
+`produce-agent-tools.test.ts` exercise freely adopted teaching designs through both
+planning gates, including an outline update after the initial commit.
+
+On 2026-10-05, the incremental UI pass covered `hub-create`, `hub-launch`,
+`assistant-model`, `generation-live`, and `export-pptx`: 81/81 checks, with no browser
+errors. Real model/image delivery evidence is recorded separately in the local bugfix report.
+
 ## Gotchas
 
 - Held versus steer depends on who started the run. `assistantTurnPending` clears only when the agent

@@ -104,4 +104,14 @@ describe("Hub capability strip", () => {
       assert.deepEqual(view.chips, []);
     }
   });
+
+  it("does not label an image-capable model as text-only when the renderer is missing", () => {
+    const view = capabilityViewModel({
+      ...FULL_CARD, render: false,
+      vision: { mode: "none", modelAcceptsImages: true, unavailableReason: "raster-unavailable" },
+    }, { piAuthReady: true });
+    assert.equal(chip(view, "vision").on, false);
+    assert.match(chip(view, "vision").hint, /渲染环境未就绪/);
+    assert.doesNotMatch(chip(view, "vision").hint, /模型不支持/);
+  });
 });

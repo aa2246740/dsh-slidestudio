@@ -111,6 +111,10 @@ generic gradients, fake progress, and dead buttons are forbidden.
 - selected is the selection/active reference color. It is not a general brand wash.
 - focus is reserved for visible keyboard focus.
 - error is paired with explanatory recovery text, not used alone.
+- A stopped generation with unfinished pages uses an attention marker, never a success check.
+  Show the concrete unfinished checks and recovery action directly below its status in the
+  conversation timeline, even when there is no provider exception. Use existing muted text,
+  12 px type and 1.6 line height; let long reasons wrap within the panel.
 - New persistent colors require a contract update before code changes.
 
 ## Typography

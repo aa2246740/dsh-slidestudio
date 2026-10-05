@@ -36,8 +36,16 @@ export function envLooksLikeGrokImagine(env) {
 function flag(configured, via) {
     return { configured, via };
 }
-function visionNote(mode) {
+function visionNote(mode, reason) {
     if (mode === "none") {
+        if (reason === "disabled")
+            return "Visual review is disabled by SLIDESTUDIO_LLM_IMAGE=0. Run deterministic render_page and review_pages checks; do not claim a visual-review pass.";
+        if (reason === "raster-unavailable")
+            return "Page rendering is unavailable: configure the pinned Playwright runtime and editor connection. The selected model may accept images, but no page PNG can be delivered. Do not blame the model or retry visual review until rendering is ready.";
+        if (reason === "provider-unavailable")
+            return "The selected model route is not ready. Connect this provider in DSH settings before visual review.";
+        if (reason === "model-input-unsupported")
+            return "DSH does not declare image input for this exact provider/model. Use deterministic render_page and review_pages checks, then compose and export. Do not call review_page or claim visual inspection.";
         return "No vision reviewer is configured, or page rasters cannot be produced. Do not claim a visual-review pass.";
     }
     if (mode === "main-model") {
@@ -72,16 +80,22 @@ export function inspectCapabilities(envOrInput = process.env) {
         else if (!grokHosted && env.SLIDESTUDIO_VISION_REVIEWER?.trim())
             visionMode = "reviewer";
     }
+    const unavailableReason = visionMode !== "none"
+        ? undefined
+        : visionOff ? "disabled"
+            : !rasterReady ? "raster-unavailable"
+                : !input.ready ? "provider-unavailable"
+                    : "model-input-unsupported";
     return {
         research,
         imageSearch,
         imageGenerate,
-        vision: { mode: visionMode, via, modelAcceptsImages },
+        vision: { mode: visionMode, via, modelAcceptsImages, ...(unavailableReason ? { unavailableReason } : {}) },
         runtime: { kind: "dsh" },
         web: research.configured,
         render: rasterReady,
         exportPptx: true,
-        note: visionNote(visionMode),
+        note: visionNote(visionMode, unavailableReason),
     };
 }
 function normalizeModelInputModalities(value) {

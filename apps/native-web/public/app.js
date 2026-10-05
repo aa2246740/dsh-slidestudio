@@ -8861,7 +8861,11 @@ function createGenerationProcessNode(row) {
     const card = document.createElement("p");
     card.className = "generation-turn-end";
     card.dataset.processTitle = "";
-    item.append(card);
+    const detail = document.createElement("p");
+    detail.className = "generation-turn-end-detail";
+    detail.dataset.processDetail = "";
+    detail.hidden = true;
+    item.append(card, detail);
   } else if (row.kind === "thought" || row.kind === "reasoning") {
     const controller = mountReasonCard({ host: item });
     controller.setDetail(row.detail || "", row.status === "running", row.stepLabel);
@@ -8986,6 +8990,9 @@ function updateGenerationProcessNode(item, row) {
   if (row.kind === "status") {
     item.querySelector(".generation-turn-end")?.classList.toggle("is-info", row.status !== "success");
     setNodeText(item.querySelector("[data-process-title]"), row.displayTitle || row.title);
+    const detail = item.querySelector("[data-process-detail]");
+    setNodeText(detail, row.detail || "");
+    if (detail) detail.hidden = !row.detail;
     return;
   }
   if (row.kind === "tool") {
@@ -9489,6 +9496,7 @@ function paintEditorGeneration(activity) {
       kind: "status",
       title: endTitle,
       displayTitle: endTitle,
+      detail: terminalPresentation ? [terminalPresentation.reason, terminalPresentation.action].filter(Boolean).join("\n") : "",
       status: phase === "complete" ? "success" : "info",
     }];
   }

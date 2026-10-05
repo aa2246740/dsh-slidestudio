@@ -32,6 +32,7 @@ import {
   type SlidesAgentPlaneDeps,
 } from "./agent-plane.js";
 import { writeSliceRuntime } from "./runtime.js";
+import { assertGenerationRenderingReady } from "./hub-capability.js";
 import { deckTitleFromBrief, SliceSessionStore } from "./slice-session.js";
 import { handleProductRequest, handleSlidesRequest, turnTextWithAttachments, type SlidesHostRuntime } from "./routes.js";
 import { redirectRootToProductHome } from "./product-proxy.js";
@@ -243,7 +244,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         const info = await ctx.llm.resolveModelInfo(provider.id, model.id).catch(() => undefined);
         byId.set(model.id, {
           name: model.name || model.id,
-          inputModalities: [...(model.inputModalities ?? [])],
+          inputModalities: [...(info?.inputModalities ?? model.inputModalities ?? [])],
           efforts: info?.reasoning?.efforts.map((effort) => String(effort.id)) ?? [],
         });
       }
@@ -749,6 +750,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       }
     },
     async createAgent(input) {
+      assertGenerationRenderingReady({ render: rasterRuntimeReady() }, input.conversationMode);
       assertHubProduceGatesReady(workspaceRoot);
       bindGrokProduce();
       if (input.provider === "mimo-desktop") await assertMimoDesktopGateway(dshHome);

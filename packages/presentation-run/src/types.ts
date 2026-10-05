@@ -175,6 +175,7 @@ export type CapabilitySnapshot = {
     readonly mode: VisionMode;
     readonly via: CapabilityVia;
     readonly modelAcceptsImages?: boolean;
+    readonly unavailableReason?: "disabled" | "provider-unavailable" | "model-input-unsupported" | "raster-unavailable";
   };
   readonly runtime: { readonly kind: "dsh" };
   /** Alias of research.configured for older produce gates. */

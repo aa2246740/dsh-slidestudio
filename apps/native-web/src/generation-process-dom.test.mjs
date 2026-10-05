@@ -318,6 +318,32 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     assert.equal(terminal.canceledSummary, "这次调用尚未执行，所在任务已中止。");
     assert.equal(terminal.failed, "失败");
     assert.match(terminal.failedSummary, /8 个参考资料分段未读取/);
+    const visibleReason = page.locator('[data-process-key="turn-end"] .generation-turn-end-detail');
+    assert.equal(await visibleReason.isVisible(), true, "the user must see the reason without opening hidden diagnostics");
+    assert.match(await visibleReason.innerText(), /连续 32 个工具结果/);
+    assert.match(await visibleReason.innerText(), /继续完成生成/);
+  });
+
+  it("shows a five-page unfinished run's actual blockers with no error object", async () => {
+    current = {
+      ...snapshot([{ id: "reply", kind: "message", status: "complete", detail: "已写入页面。" }], "paused"),
+      project: { path: project, title: "收尾原因验收", pageCount: 5 },
+      inspection: { composed: false, pages: Array.from({ length: 5 }, (_, i) => ({ pageId: `p${i + 1}` })) },
+      execution: {
+        status: { kind: "reviewing" }, recovery: { kind: "continue" },
+        blockers: [{ code: "page_render_needed", pageIds: ["p1", "p2"] }, { code: "structural_review_needed", pageIds: ["p1", "p2"] }],
+      },
+    };
+    await page.reload({ waitUntil: "networkidle" });
+    const reason = page.locator('[data-process-key="turn-end"] .generation-turn-end-detail');
+    await reason.waitFor({ state: "visible" });
+    assert.match(await reason.innerText(), /有 2 页尚未完成截图与排版检查/);
+    assert.match(await reason.innerText(), /整稿结构检查尚未通过/);
+    if (process.env.SLIDESTUDIO_TEST_EVIDENCE) {
+      fs.mkdirSync(process.env.SLIDESTUDIO_TEST_EVIDENCE, { recursive: true });
+      await reason.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(process.env.SLIDESTUDIO_TEST_EVIDENCE, "unfinished-five-pages.png") });
+    }
   });
 
   it("continues an idle partial generation once without creating an editor edit scope", async () => {

@@ -17,6 +17,18 @@ export async function launchPinnedChromium() { throw new Error("stub runtime"); 
 }
 const missingRuntime = path.join(os.tmpdir(), "no-such-playwright-runtime-oss.mjs");
 describe("inspectCapabilities SSOT", () => {
+    it("distinguishes missing rasters, disabled vision, and a text-only route", () => {
+        const base = { env: {}, providerId: "deepseek-account", modelId: "deepseek-flash", ready: true, modelInputModalities: ["text", "image"] };
+        const noRaster = inspectCapabilities({ ...base, rasterReady: false });
+        assert.equal(noRaster.vision.modelAcceptsImages, true);
+        assert.equal(noRaster.vision.unavailableReason, "raster-unavailable");
+        assert.match(noRaster.note, /configure the pinned Playwright runtime/);
+        const ready = inspectCapabilities({ ...base, rasterReady: true });
+        assert.equal(ready.vision.mode, "main-model");
+        assert.equal(ready.vision.unavailableReason, undefined);
+        assert.equal(inspectCapabilities({ ...base, rasterReady: true, modelInputModalities: ["text"] }).vision.unavailableReason, "model-input-unsupported");
+        assert.equal(inspectCapabilities({ ...base, rasterReady: true, env: { SLIDESTUDIO_LLM_IMAGE: "0" } }).vision.unavailableReason, "disabled");
+    });
     it("opens hosted Grok research, image search, image generate, and main-model vision when raster is ready", () => {
         const env = {
             SLIDESTUDIO_EDITOR_URL: "http://127.0.0.1:55200",

@@ -9,7 +9,7 @@ import {
   inspectCapabilities,
 } from "@open-slidestudio/presentation-run";
 import { GROK_PROVIDER } from "./oauth-login.js";
-import { hubCapabilityCard } from "./hub-capability.js";
+import { hubCapabilityCard, assertGenerationRenderingReady } from "./hub-capability.js";
 
 function stubPlaywrightRuntime(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-pw-"));
@@ -24,6 +24,11 @@ export async function launchPinnedChromium() { throw new Error("stub"); }
 }
 
 describe("hub capability card", () => {
+  it("blocks generation before model work when rendering is unavailable while allowing discussion", () => {
+    assert.throws(() => assertGenerationRenderingReady({ render: false }), /渲染环境未就绪，暂未开始生成/);
+    assert.doesNotThrow(() => assertGenerationRenderingReady({ render: false }, "discuss"));
+    assert.doesNotThrow(() => assertGenerationRenderingReady({ render: true }));
+  });
   it("opens search, image-search, image-generate, and main-model vision for signed-in grok when raster is ready", () => {
     const env = {
       SLIDESTUDIO_EDITOR_URL: "http://127.0.0.1:55200",

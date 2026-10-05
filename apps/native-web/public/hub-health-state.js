@@ -52,13 +52,20 @@ export function capabilityViewModel(card, extras = {}) {
   const modelAcceptsImages = card.vision?.modelAcceptsImages;
   const providerReady = extras.piAuthReady ?? extras.piAvailable ?? card.runtime?.piAvailable;
   const visionOn = visionMode === "main-model" || visionMode === "reviewer";
+  const visionReason = card.vision?.unavailableReason;
   const visionHint = visionMode === "main-model"
     ? t("当前模型能看页面")
     : visionMode === "reviewer"
       ? t("由独立审阅模型看页面")
-      : modelAcceptsImages && !providerReady
-        ? t("这个模型能看页面，但还没登录")
-        : t("当前模型不支持看页面");
+      : visionReason === "disabled"
+        ? t("视觉检查已在运行配置中关闭")
+        : visionReason === "raster-unavailable" || card.render === false
+          ? t("页面渲染环境未就绪，暂时无法截图检查；请查看安装说明中的渲染运行时配置")
+          : visionReason === "provider-unavailable"
+            ? t("当前模型尚未连接，请在 DSH 设置中完成登录或配置")
+            : modelAcceptsImages && !providerReady
+              ? t("这个模型能看页面，但还没登录")
+              : t("Harness 未声明当前模型支持图片输入，请选择支持看图的模型");
   const researchOn = Boolean(card.research?.configured);
   const nativeSearch = card.research?.via === "native" || card.research?.via === "pi-xai-hosted";
   const searchOn = Boolean(card.imageSearch?.configured);

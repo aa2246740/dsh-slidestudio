@@ -8,6 +8,28 @@
  */
 
 const EN = {
+  "视觉检查已在运行配置中关闭": "Visual review is disabled in the runtime configuration",
+  "页面渲染环境未就绪，暂时无法截图检查；请查看安装说明中的渲染运行时配置": "Page rendering is not ready, so screenshot review is unavailable. See the rendering runtime section of the installation guide.",
+  "当前模型尚未连接，请在 DSH 设置中完成登录或配置": "This model is not connected. Sign in or configure it in DSH Settings.",
+  "Harness 未声明当前模型支持图片输入，请选择支持看图的模型": "Harness does not declare image input for this model. Choose an image-capable model.",
+  "页面规划尚未完成": "The page plan is incomplete",
+  "页面规划需要补全": "The page plan needs to be completed",
+  "还有 {n} 页尚未写入": "{n} planned pages have not been written",
+  "页面与当前规划不一致，需要核对": "The document pages do not match the current plan",
+  "有 {n} 页尚未完成截图与排版检查": "{n} pages still need screenshots and layout checks",
+  "有 {n} 页的截图尚未送达当前模型": "Screenshots for {n} pages have not reached the selected model",
+  "有 {n} 页尚未完成视觉检查": "{n} pages still need visual review",
+  "有 {n} 页未通过检查，需要修订": "{n} pages failed review and need revision",
+  "整稿结构检查尚未通过": "The deck has not passed structural review",
+  "页面检查已通过，尚未完成合稿": "Page checks passed; final assembly is still pending",
+  "文稿已合稿，尚未完成导出": "The deck is assembled; export is still pending",
+  "必需参考资料尚未读完": "Required references have not all been read",
+  "项目暂时无法读取，请检查文件是否可访问": "The project cannot be read. Check that its files are accessible.",
+  "项目中存在重复页面标识，需要修复后继续": "Duplicate page identifiers must be resolved before continuing",
+  "暂时无法确认生成会话状态，请等待连接恢复": "The generation session status is unavailable. Wait for the connection to recover.",
+  "页面截图或排版检查尚未通过": "Page screenshots or layout checks are still incomplete",
+  "页面截图尚未送达模型，或视觉检查尚未完成": "Page screenshots have not reached the model, or visual review is incomplete",
+  "模型已结束本轮回复，但尚未完成整稿检查与合稿": "The model ended its reply before completing deck checks and final assembly",
   "模型接入与登录由 DSH 设置统一管理。": "Model access and sign-in are managed in DSH Settings.",
 
   "按附带的 {p0} 条批注修改文稿，可在下方补充要求": "Apply the attached {p0} comments to the deck — add requirements below",

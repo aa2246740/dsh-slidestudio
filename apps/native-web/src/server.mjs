@@ -2066,6 +2066,7 @@ async function readGenerationActivity(native, root) {
       readProjectRecord(path.join(agentDir, "assistant-conversation.v1.json"))),
     reviewSubmissions: readCommentSubmissions(root),
     inspection,
+    execution: snapshot.execution,
     error,
   };
 }
