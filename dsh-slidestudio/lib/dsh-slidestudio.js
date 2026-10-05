@@ -152,7 +152,7 @@ function startEditorSidecar(repoRoot, dataRoot) {
 	});
 	return child;
 }
-const HOP_HEADERS = /* @__PURE__ */ new Set([
+const HOP_HEADERS = new Set([
 	"connection",
 	"keep-alive",
 	"proxy-authenticate",

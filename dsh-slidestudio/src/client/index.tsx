@@ -266,7 +266,7 @@ const PANEL = 'slides'
  * prompt box that can bypass the editor's project/intent checks. */
 function registerSessionEntry(ctx: ClientContext): void {
   ctx.inject(['sessions'], inner => {
-    const sessions = inner.get('sessions') as SessionsService
+    const sessions = inner.get('sessions') as unknown as SessionsService
     const ReadOnlyComposer = ({ matched }: { matched: string }) => {
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState('')
