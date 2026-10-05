@@ -1097,6 +1097,15 @@ function relativeProjectTime(updatedAt) {
   return new Date(Number(updatedAt)).toLocaleDateString(lang() === "en" ? "en-US" : "zh-CN");
 }
 
+function formatProjectSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
 function projectRow(p, viewed) {
   const row = document.createElement("div");
   row.className = "proj-row";
@@ -1113,7 +1122,8 @@ function projectRow(p, viewed) {
   if (unread) title.classList.add("unread");
   const sub = document.createElement("small");
   const when = relativeProjectTime(p.updatedAt);
-  sub.textContent = isGen ? `${p.pageCount ? t("{n} 页", { n: p.pageCount }) : t("讨论中")}${when ? ` · ${when}` : ""}` : t("示例项目");
+  const size = isGen ? formatProjectSize(p.sizeBytes) : "";
+  sub.textContent = isGen ? `${p.pageCount ? t("{n} 页", { n: p.pageCount }) : t("讨论中")}${when ? ` · ${when}` : ""}${size ? ` · ${size}` : ""}` : t("示例项目");
   meta.append(title, sub);
   row.append(dot, meta);
   row.addEventListener("click", () => {
