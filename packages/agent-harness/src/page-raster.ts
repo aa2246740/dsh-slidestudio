@@ -3,11 +3,11 @@
  * Not official iframe. Not exporter-native background-only PNG.
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { mediaId } from "./media-store.js";
 import { footerZoneTopForSlide } from "@open-slidestudio/pptd-v2";
+import { resolvePlaywrightRuntime } from "@open-slidestudio/presentation-run";
 
 export type PageRasterKind = "native-slide" | "unavailable";
 
@@ -109,11 +109,15 @@ export type PageRasterPortOpts = {
   }) => Promise<PageRasterShot>;
 };
 
+/**
+ * Same resolution contract as packages/presentation-run domain/playwright-runtime
+ * (env → repo .runtime → managed dir under the DSH data root → self-consistent
+ * ~/.codex seed → machine discovery → managed pending path). Keep aligned.
+ */
 export function pinnedPlaywrightRuntimePath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const configured = env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim();
-  return configured || path.join(os.homedir(), ".codex", "playwright-runtime", "runtime.mjs");
+  return resolvePlaywrightRuntime(env).path;
 }
 
 export function editorUrlFromEnv(

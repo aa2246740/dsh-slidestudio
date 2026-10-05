@@ -20,7 +20,7 @@ Requires DeepSeek Harness 0.2.0-rc.2 through 0.2.x and Node.js ^22.19.0 or >=24.
 
 ## Before generating
 
-Configure a model in **DSH Settings → Models**. Rendering also needs the separately managed **Playwright 1.61.1 / Chromium Headless Shell 1228** runtime. The plugin does not bundle or download a browser. It reads `~/.codex/playwright-runtime/runtime.mjs` by default; set `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` for another location. See the [runtime and migration guide](https://github.com/aa2246740/dsh-slidestudio/blob/main/INSTALL-DSH.md).
+Configure a model in **DSH Settings → Models**. Page rendering uses a pinned **Playwright / Chromium Headless Shell** runtime. The plugin finds one automatically — a `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` override, a repo or managed copy under the DSH data dir, a healthy `~/.codex` seed, or a Playwright already installed on the machine — and downloads the pinned runtime in the background when the machine has none. See the [runtime and migration guide](https://github.com/aa2246740/dsh-slidestudio/blob/main/INSTALL-DSH.md).
 
 Generation checks for this rendering runtime before starting. Model visual review additionally
 requires image input in the Harness-resolved model capabilities. Text-only models can complete

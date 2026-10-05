@@ -1,3 +1,4 @@
+import { repoPlaywrightRuntimeFile, type PlaywrightRuntimeRoots } from "./playwright-runtime.js";
 export type PageRasterKind = "native-slide" | "unavailable";
 export type PageRasterResult = {
     bytes?: Buffer;
@@ -77,18 +78,17 @@ export type PageRasterPortOpts = {
         pageIndex: number;
     }) => Promise<PageRasterShot>;
 };
-export type PlaywrightRuntimeRoots = {
-    readonly repoRoot?: string;
-    readonly homeDir?: string;
-};
+export type { PlaywrightRuntimeRoots } from "./playwright-runtime.js";
+export { repoPlaywrightRuntimeFile };
 /** Remove editor fit-to-viewport scaling inside the isolated raster page. */
 export declare function normalizeRasterPageToNativeSlideSize(page: RasterPage): Promise<void>;
-export declare function repoPlaywrightRuntimeFile(repoRoot: string): string;
 /**
  * Lookup order: SLIDESTUDIO_PLAYWRIGHT_RUNTIME (exclusive if set),
- * <repo>/.runtime/playwright/runtime.mjs, then ~/.codex/playwright-runtime/runtime.mjs.
- * Missing runtimes fail on the repo path so Hub tells you to run setup:browser,
- * not a Codex box homedir that may not exist.
+ * <repo>/.runtime/playwright/runtime.mjs, the managed
+ * <stateDir>/playwright-runtime/runtime.mjs, a self-consistent
+ * ~/.codex/playwright-runtime/runtime.mjs, then a machine-discovered
+ * playwright materialized into the managed dir. Missing runtimes resolve to
+ * the managed path so Hub can provision it (see provisionManagedRuntime).
  */
 export declare function pinnedPlaywrightRuntimePath(env?: NodeJS.ProcessEnv, roots?: PlaywrightRuntimeRoots): string;
 /** True only when the pinned runtime file exists and exports the launch API. Does not launch Chromium. */

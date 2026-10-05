@@ -18,21 +18,31 @@ dsh plugin --profile web add dsh-slidestudio
 
 ## 渲染运行时
 
-PPT 页面渲染要求 **Playwright 1.61.1、Chromium Headless Shell 1228**。插件包不含浏览器；npm 安装只完成插件安装，不会自动准备浏览器。
+PPT 页面渲染使用 pinned 的 **Playwright 1.61.1、Chromium Headless Shell 1228**。插件包不含浏览器，但会自己把运行时找出来或装好，通常不需要手动配置。
 
-默认使用 `~/.codex/playwright-runtime/runtime.mjs`，该模块需提供 `launchPinnedChromium` 和 `verifyPinnedRuntime`。其他部署位置设置：
+启用时按以下顺序查找，第一个可用的即生效：
+
+1. `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` 指向的 runtime.mjs（设置后只认它）
+2. 源码仓库 `.runtime/playwright/runtime.mjs`（开发环境 `npm run setup:browser` 生成）
+3. 托管运行时 `$DSH_HOME/data/dsh-slidestudio/playwright-runtime/runtime.mjs`，模块与浏览器齐全才使用
+4. `~/.codex/playwright-runtime/runtime.mjs`，同样要求模块与浏览器齐全、版本与声明一致；缺件或版本不符直接跳过，不会再锁死在一个不可用的文件上
+5. 机器上已有的 Playwright（全局 `npm i -g playwright` 等安装方式 + `PLAYWRIGHT_BROWSERS_PATH` 或系统默认浏览器目录里能启动的 Chromium）；找到后自动登记到托管目录再使用
+
+都找不到时插件在后台自动安装 pinned 运行时：从 npm registry 拉取 `playwright` / `playwright-core` 包（`registry.npmmirror.com` 作为备用源），用 Playwright 自带的安装命令下载 Chromium Headless Shell，写入托管目录；安装过程不依赖机器上装有 npm。机器上只有一半时（比如只有 Playwright 包或只有浏览器）会复用已有的一半、只补另一半。装好后生成照常进行，无需重启。
+
+仍需要手动指定时（例如统一维护的运行时）：
 
 ```sh
 export SLIDESTUDIO_PLAYWRIGHT_RUNTIME=/absolute/path/to/runtime.mjs
 ```
 
-在启动 DSH 的同一环境中检查已有运行时：
+在启动 DSH 的同一环境中检查托管运行时：
 
 ```sh
-node --input-type=module -e 'import { homedir } from "node:os"; import { pathToFileURL } from "node:url"; const p = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME || homedir() + "/.codex/playwright-runtime/runtime.mjs"; const r = await import(pathToFileURL(p)); console.log(await r.verifyPinnedRuntime());'
+node --input-type=module -e 'import { homedir } from "node:os"; import { pathToFileURL } from "node:url"; const p = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME || (process.env.DSH_HOME || homedir() + "/.dsh") + "/data/dsh-slidestudio/playwright-runtime/runtime.mjs"; const r = await import(pathToFileURL(p)); console.log(await r.verifyPinnedRuntime());'
 ```
 
-文件缺失或检查失败时，先由运行环境维护者提供匹配的运行时。不要用系统 Chrome 替代。当前发布包没有面向无运行时机器的自动浏览器安装流程。
+自动安装失败（断网、registry 不可达）时，生成入口会说明失败原因，再由运行环境维护者提供运行时；不要用系统 Chrome 替代。
 
 ## 配置模型
 
@@ -98,6 +108,6 @@ npm run release:package
 | 环境变量 | 作用 |
 | --- | --- |
 | `SLIDESTUDIO_DATA_DIR` | 固定项目目录，需绝对路径 |
-| `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` | 已准备好的指定浏览器运行时模块 |
+| `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` | 指定浏览器运行时模块，设置后只认它 |
 | `SLIDES_EDITOR_PORT` | 编辑器本地端口，默认 `56200` |
 | `SLIDESTUDIO_SKILL_ROOT` | 可选，覆盖设计资源目录 |

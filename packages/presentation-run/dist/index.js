@@ -8,6 +8,7 @@ export { loadReferenceCatalog, filterCatalog, resolveRepoRoot, buildCatalogDto, 
 export { assertChartEvidence } from "./chart-gate.js";
 export { inspectCapabilities, inspectProjectCapabilities, persistPresentationRunProvider, visualReviewIsClaimable, hostedProduceToolNames, GROK_PROVIDER_ID, } from "./capabilities.js";
 export { rasterRuntimeReady, pinnedPlaywrightRuntimePath, repoPlaywrightRuntimeFile, readPageRaster, savePageRaster, pageRasterRel, } from "./domain/page-raster.js";
+export { resolvePlaywrightRuntime, runtimeFileReady, runtimeLayoutUsable, discoverMachinePlaywright, machineRuntimeReuse, materializeManagedRuntime, provisionManagedRuntime, playwrightRuntimeSource, defaultPlaywrightBrowsersDirs, defaultSlidesStateDir, managedPlaywrightRuntimeDir, managedPlaywrightRuntimeFile, codexPlaywrightRuntimeFile, PINNED_PLAYWRIGHT_VERSION, PINNED_CHROMIUM_REVISION, } from "./domain/playwright-runtime.js";
 export { grokWebSearch, createGrokImageSearchPort, XAI_API_BASE as GROK_XAI_API_BASE, } from "./domain/grok-hosted.js";
 export { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv, GROK_IMAGINE_MODEL, } from "./domain/image-port.js";
 export { CAPABILITY_LEDGER, ledgerFate } from "./capability-ledger.js";

@@ -77,6 +77,32 @@ export {
   pageRasterRel,
 } from "./domain/page-raster.js";
 export {
+  resolvePlaywrightRuntime,
+  runtimeFileReady,
+  runtimeLayoutUsable,
+  discoverMachinePlaywright,
+  machineRuntimeReuse,
+  materializeManagedRuntime,
+  provisionManagedRuntime,
+  playwrightRuntimeSource,
+  defaultPlaywrightBrowsersDirs,
+  defaultSlidesStateDir,
+  managedPlaywrightRuntimeDir,
+  managedPlaywrightRuntimeFile,
+  codexPlaywrightRuntimeFile,
+  PINNED_PLAYWRIGHT_VERSION,
+  PINNED_CHROMIUM_REVISION,
+} from "./domain/playwright-runtime.js";
+export type {
+  PlaywrightRuntimeRoots,
+  PlaywrightRuntimeResolution,
+  PlaywrightRuntimeSource,
+  DiscoveredPlaywright,
+  ProvisionOptions,
+  ProvisionResult,
+  RuntimeSourceOptions,
+} from "./domain/playwright-runtime.js";
+export {
   grokWebSearch,
   createGrokImageSearchPort,
   XAI_API_BASE as GROK_XAI_API_BASE,

@@ -3,12 +3,17 @@
  * Not official iframe. Not exporter-native background-only PNG.
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeFileAtomic } from "./atomic-file.js";
 import { mediaId } from "./media-store.js";
 import { footerZoneTopForSlide } from "@open-slidestudio/pptd-v2";
+import {
+  repoPlaywrightRuntimeFile,
+  resolvePlaywrightRuntime,
+  runtimeFileReady,
+  type PlaywrightRuntimeRoots,
+} from "./playwright-runtime.js";
 
 export type PageRasterKind = "native-slide" | "unavailable";
 
@@ -119,10 +124,8 @@ export type PageRasterPortOpts = {
   }) => Promise<PageRasterShot>;
 };
 
-export type PlaywrightRuntimeRoots = {
-  readonly repoRoot?: string;
-  readonly homeDir?: string;
-};
+export type { PlaywrightRuntimeRoots } from "./playwright-runtime.js";
+export { repoPlaywrightRuntimeFile };
 
 /** Remove editor fit-to-viewport scaling inside the isolated raster page. */
 export async function normalizeRasterPageToNativeSlideSize(page: RasterPage): Promise<void> {
@@ -139,40 +142,19 @@ export async function normalizeRasterPageToNativeSlideSize(page: RasterPage): Pr
   });
 }
 
-function runtimeFileReady(runtimeFile: string): boolean {
-  try {
-    if (!fs.existsSync(runtimeFile)) return false;
-    const st = fs.statSync(runtimeFile);
-    if (!st.isFile() || st.size < 32) return false;
-    const head = fs.readFileSync(runtimeFile, "utf8").slice(0, 8000);
-    return head.includes("launchPinnedChromium") && head.includes("verifyPinnedRuntime");
-  } catch {
-    return false;
-  }
-}
-
-export function repoPlaywrightRuntimeFile(repoRoot: string): string {
-  return path.join(repoRoot, ".runtime", "playwright", "runtime.mjs");
-}
-
 /**
  * Lookup order: SLIDESTUDIO_PLAYWRIGHT_RUNTIME (exclusive if set),
- * <repo>/.runtime/playwright/runtime.mjs, then ~/.codex/playwright-runtime/runtime.mjs.
- * Missing runtimes fail on the repo path so Hub tells you to run setup:browser,
- * not a Codex box homedir that may not exist.
+ * <repo>/.runtime/playwright/runtime.mjs, the managed
+ * <stateDir>/playwright-runtime/runtime.mjs, a self-consistent
+ * ~/.codex/playwright-runtime/runtime.mjs, then a machine-discovered
+ * playwright materialized into the managed dir. Missing runtimes resolve to
+ * the managed path so Hub can provision it (see provisionManagedRuntime).
  */
 export function pinnedPlaywrightRuntimePath(
   env: NodeJS.ProcessEnv = process.env,
   roots: PlaywrightRuntimeRoots = {},
 ): string {
-  const configured = env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim();
-  if (configured) return configured;
-  const repo = env.OPEN_SLIDESTUDIO_ROOT?.trim() || roots.repoRoot || process.cwd();
-  const local = repoPlaywrightRuntimeFile(repo);
-  if (runtimeFileReady(local)) return local;
-  const home = path.join(roots.homeDir ?? os.homedir(), ".codex", "playwright-runtime", "runtime.mjs");
-  if (runtimeFileReady(home)) return home;
-  return local;
+  return resolvePlaywrightRuntime(env, roots).path;
 }
 
 /** True only when the pinned runtime file exists and exports the launch API. Does not launch Chromium. */
