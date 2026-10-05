@@ -20,6 +20,8 @@ export type SlidesHostRuntime = {
     cancelRateLimitWait: (sessionId: string) => void;
     operatorStop: (sessionId: string) => Promise<void>;
     getAgent(sessionId: string): Agent | undefined;
+    /** Awaits any in-flight re-archive, then unarchives a legacy session. */
+    ensureSessionRunnable?(sessionId: string): Promise<void>;
     resolveAssistantIntent?: (input: AssistantIntentInput) => Promise<AssistantIntent>;
     /**
      * Last observed call outcome per provider, fed by the intent/turn path.

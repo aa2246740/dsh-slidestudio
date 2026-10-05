@@ -1,5 +1,5 @@
 import { AssistantQuestions } from "./assistant-questions.js";
-import { ensureSessionUnarchived, hideSlidesSessions, slidesSessionMeta, } from "./session-workspace.js";
+import { hideSlidesSessions, LegacySessionHider, slidesSessionMeta, } from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -128,6 +128,7 @@ export function apply(ctx, config = {}) {
     ctx.effect(() => () => questions.dispose());
     const live = new Map();
     const busy = new Set();
+    const legacyHider = new LegacySessionHider(workspaceRegistry, (id) => busy.has(id));
     const models = new Map();
     const selections = new Map();
     const efforts = new Map();
@@ -479,6 +480,7 @@ export function apply(ctx, config = {}) {
         const binding = store.bindingFor(agent.id);
         if (!binding)
             return;
+        legacyHider.onSettled(agent.id);
         const snap = store.inspect(agent.id);
         faults.settle(agent.id, store.resolveRoot(binding), snap.phase.kind);
         if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) {
@@ -496,6 +498,7 @@ export function apply(ctx, config = {}) {
     }, { global: true });
     ctx.on("agent/disposed", ({ agent }) => {
         streamBridge.disposeSession(agent.session.id);
+        legacyHider.onSettled(agent.session.id);
     }, { global: true });
     ctx.effect(() => () => { streamBridge.dispose(); closeSessionLive(); });
     ctx.on("session/event", (session, event) => {
@@ -599,6 +602,9 @@ export function apply(ctx, config = {}) {
         getAgent(sessionId) {
             const id = sessionId;
             return live.get(id) ?? ctx.agents.get(id);
+        },
+        ensureSessionRunnable(sessionId) {
+            return legacyHider.ensureRunnable(sessionId);
         },
         async resolveAssistantIntent(input) {
             const bound = input.sessionId ? store.bindingFor(input.sessionId)?.provider : undefined;
@@ -728,7 +734,7 @@ export function apply(ctx, config = {}) {
                 presentation.hydrate(root);
             }
             const prepared = produceSetup(provider, reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog));
-            await ensureSessionUnarchived(workspaceRegistry(), sessionId);
+            await legacyHider.ensureRunnable(sessionId);
             const handle = await ctx.agents.resume({
                 resumeSessionId: sessionId,
                 agentOptions: { ...agentOptionsForRoute(route), model },

@@ -49,6 +49,55 @@ export async function ensureSessionUnarchived(
   }
 }
 
+/** Legacy sessions predate `origin: "subagent"`, so unarchiving one for a
+ * resume makes it visible in the Work sidebar. This tracker re-archives it
+ * once the turn settles, so a hidden session stays hidden between runs.
+ * `ensureRunnable` also awaits any archive still in flight and runs before
+ * every resume and every live-agent followup: an archive landing between the
+ * idle event and the next user message must not gate that followup. */
+export class LegacySessionHider {
+  private readonly pending = new Set<string>();
+  private readonly inflight = new Map<string, Promise<void>>();
+
+  constructor(
+    private readonly registry: () => SlidesWorkspaceRegistry | undefined,
+    private readonly isBusy: (sessionId: string) => boolean,
+    private readonly warn: (message: string) => void = console.warn,
+  ) {}
+
+  async ensureRunnable(sessionId: string): Promise<void> {
+    await this.inflight.get(sessionId);
+    const registry = this.registry();
+    const wasArchived = registry?.archivedSessionIds.includes(sessionId) === true;
+    await ensureSessionUnarchived(registry, sessionId);
+    if (wasArchived) this.pending.add(sessionId);
+  }
+
+  /** Call when a session goes idle or is disposed. Re-archives only sessions
+   * `ensureRunnable` unarchived; sessions still busy keep their mark until a
+   * later settle. */
+  onSettled(sessionId: string): void {
+    if (!this.pending.has(sessionId)) return;
+    const registry = this.registry();
+    // An in-flight archive already hides the session, so the mark is stale.
+    if (!registry || this.inflight.has(sessionId)) {
+      this.pending.delete(sessionId);
+      return;
+    }
+    if (this.isBusy(sessionId)) return;
+    this.pending.delete(sessionId);
+    const op = Promise.resolve()
+      .then(() => registry.archiveSession(sessionId))
+      .catch((error: unknown) => {
+        this.warn(
+          `[slides-host] re-archive ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => this.inflight.delete(sessionId));
+    this.inflight.set(sessionId, op);
+  }
+}
+
 /** A cwd belongs to our generation pool only under `<...>/output/dsh-slices`. */
 const SLICES_CWD = /(^|[\\/])output[\\/]dsh-slices[\\/]?$/;
 

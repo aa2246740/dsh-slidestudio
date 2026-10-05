@@ -17,7 +17,7 @@ DSH 0.2.0-rc.2 has no plugin-level "hidden session" flag. Two public mechanisms 
 
 1. New sessions are created with `slidesSessionMeta(cwd)` = `{ cwd, agentPreset: "slides", origin: "subagent" }` and never attached to a workspace. No parent on purpose.
 2. At startup `hideSlidesSessions` archives every legacy slides session (preset `slides` and either bound in the store or with cwd `…/output/dsh-slices`), then deletes workspaces titled `演示文稿 · SlideStudio` whose members are all slides sessions. Deleting a registration keeps the directory and session logs. A slides-preset session at any other cwd is the user's own Work conversation and is left alone.
-3. `resumeAgent` calls `ensureSessionUnarchived` before `ctx.agents.resume`. A resumed legacy session shows up in the sidebar again. That is accepted; only decks created before this change are affected.
+3. `resumeAgent` calls `LegacySessionHider.ensureRunnable` before `ctx.agents.resume`, and the message/steer routes call it before `agent.followup`/`live.steer`. Unarchiving a legacy session makes it visible while its turn runs; the hider re-archives it at the next `agent/status` idle or `agent/disposed`, so the sidebar returns to clean once the run settles. `ensureRunnable` awaits any archive still in flight so a re-archive can never gate a followup that raced it.
 
 ## Consequences
 

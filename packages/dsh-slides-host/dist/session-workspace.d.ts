@@ -35,6 +35,25 @@ export declare function slidesSessionMeta(cwd: string): {
 /** An archived session cannot run: the Harness gate rejects every pre-step.
  * Resume must unarchive first. */
 export declare function ensureSessionUnarchived(registry: SlidesWorkspaceRegistry | undefined, sessionId: string): Promise<void>;
+/** Legacy sessions predate `origin: "subagent"`, so unarchiving one for a
+ * resume makes it visible in the Work sidebar. This tracker re-archives it
+ * once the turn settles, so a hidden session stays hidden between runs.
+ * `ensureRunnable` also awaits any archive still in flight and runs before
+ * every resume and every live-agent followup: an archive landing between the
+ * idle event and the next user message must not gate that followup. */
+export declare class LegacySessionHider {
+    private readonly registry;
+    private readonly isBusy;
+    private readonly warn;
+    private readonly pending;
+    private readonly inflight;
+    constructor(registry: () => SlidesWorkspaceRegistry | undefined, isBusy: (sessionId: string) => boolean, warn?: (message: string) => void);
+    ensureRunnable(sessionId: string): Promise<void>;
+    /** Call when a session goes idle or is disposed. Re-archives only sessions
+     * `ensureRunnable` unarchived; sessions still busy keep their mark until a
+     * later settle. */
+    onSettled(sessionId: string): void;
+}
 /** Archive every pre-subagent slides session the host still lists, then remove
  * SlideStudio-titled workspaces that hold only slides sessions. Per-session
  * and per-workspace failures are recorded and never stop the sweep. */

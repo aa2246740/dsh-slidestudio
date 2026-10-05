@@ -993,6 +993,7 @@ export function handleSlidesRequest(runtime, req, res) {
                             }
                             recordConversationMessage(root, String(body.userText || text), readConversation(root).mode);
                         }
+                        await runtime.ensureSessionRunnable?.(sessionId);
                         live.steer(createUserMessage({
                             content: [{ type: "text", text: turnText }],
                             source: { kind: "user" },
@@ -1019,6 +1020,7 @@ export function handleSlidesRequest(runtime, req, res) {
                         userMessage = recordConversationMessage(root, String(body.userText || text), discuss ? "discuss" : editorEditAuthorized ? "edit" : "generate", reviewSubmissionId, typeof body.clientRequestId === "string" ? body.clientRequestId : undefined);
                     }
                     runtime.markBusy(sessionId);
+                    await runtime.ensureSessionRunnable?.(sessionId);
                     agent.followup(createUserMessage({
                         content: [{ type: "text", text: turnText }],
                         source: { kind: "user" },

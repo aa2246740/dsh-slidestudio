@@ -72,6 +72,8 @@ export type SlidesHostRuntime = {
   cancelRateLimitWait: (sessionId: string) => void;
   operatorStop: (sessionId: string) => Promise<void>;
   getAgent(sessionId: string): Agent | undefined;
+  /** Awaits any in-flight re-archive, then unarchives a legacy session. */
+  ensureSessionRunnable?(sessionId: string): Promise<void>;
   resolveAssistantIntent?: (input: AssistantIntentInput) => Promise<AssistantIntent>;
   /**
    * Last observed call outcome per provider, fed by the intent/turn path.
@@ -1072,6 +1074,7 @@ export function handleSlidesRequest(
               }
               recordConversationMessage(root, String(body.userText || text), readConversation(root).mode);
             }
+            await runtime.ensureSessionRunnable?.(sessionId);
             live.steer(
               createUserMessage({
                 content: [{ type: "text", text: turnText }],
@@ -1098,6 +1101,7 @@ export function handleSlidesRequest(
             userMessage = recordConversationMessage(root, String(body.userText || text), discuss ? "discuss" : editorEditAuthorized ? "edit" : "generate", reviewSubmissionId, typeof body.clientRequestId === "string" ? body.clientRequestId : undefined);
           }
           runtime.markBusy(sessionId);
+          await runtime.ensureSessionRunnable?.(sessionId);
           agent.followup(
             createUserMessage({
               content: [{ type: "text", text: turnText }],

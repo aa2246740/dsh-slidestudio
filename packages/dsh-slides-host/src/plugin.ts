@@ -1,7 +1,7 @@
 import { AssistantQuestions } from "./assistant-questions.js";
 import {
-  ensureSessionUnarchived,
   hideSlidesSessions,
+  LegacySessionHider,
   slidesSessionMeta,
   type SlidesWorkspaceRegistry,
   type SlidesSessionHeader,
@@ -231,6 +231,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   ctx.effect(() => () => questions.dispose());
   const live = new Map<Agent["id"], Agent>();
   const busy = new Set<string>();
+  const legacyHider = new LegacySessionHider(workspaceRegistry, (id) => busy.has(id));
   const models = new Map<string, string>();
   const selections = new Map<string, ModelSelectionRef>();
   const efforts = new Map<string, string>();
@@ -639,6 +640,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     if (status !== "idle") return;
     const binding = store.bindingFor(agent.id);
     if (!binding) return;
+    legacyHider.onSettled(agent.id);
     const snap = store.inspect(agent.id);
     faults.settle(agent.id, store.resolveRoot(binding), snap.phase.kind);
     if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) {
@@ -655,6 +657,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   }, { global: true });
   ctx.on("agent/disposed", ({ agent }) => {
     streamBridge.disposeSession(agent.session.id);
+    legacyHider.onSettled(agent.session.id);
   }, { global: true });
   ctx.effect(() => () => { streamBridge.dispose(); closeSessionLive(); });
   ctx.on("session/event", (session, event) => {
@@ -762,6 +765,9 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     getAgent(sessionId) {
       const id = sessionId as Agent["id"];
       return live.get(id) ?? ctx.agents.get(id);
+    },
+    ensureSessionRunnable(sessionId) {
+      return legacyHider.ensureRunnable(sessionId);
     },
     async resolveAssistantIntent(input) {
       const bound = input.sessionId ? store.bindingFor(input.sessionId)?.provider : undefined;
@@ -899,7 +905,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         provider,
         reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog),
       );
-      await ensureSessionUnarchived(workspaceRegistry(), sessionId);
+      await legacyHider.ensureRunnable(sessionId);
       const handle = await ctx.agents.resume({
         resumeSessionId: sessionId as Agent["id"],
         agentOptions: { ...agentOptionsForRoute(route), model },

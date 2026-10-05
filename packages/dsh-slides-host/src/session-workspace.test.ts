@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ensureSessionUnarchived,
   hideSlidesSessions,
+  LegacySessionHider,
   slidesSessionMeta,
   SLIDES_WORKSPACE_TITLE,
   type SlidesWorkspaceRegistry,
@@ -120,4 +121,82 @@ test("workspace delete failures are recorded", async () => {
   const result = await hideSlidesSessions(registry, [], new Set());
   assert.equal(result.removedWorkspaces, 0);
   assert.deepEqual(result.failures, ["w1: locked"]);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("LegacySessionHider re-archives a resumed legacy session once idle", async () => {
+  const calls: string[] = [];
+  const { registry } = fakeRegistry({
+    archivedSessionIds: ["legacy"],
+    unarchiveSession: async (id) => {
+      calls.push(`unarchive:${id}`);
+    },
+    archiveSession: async (id) => {
+      calls.push(`archive:${id}`);
+    },
+  });
+  const busy = new Set<string>();
+  const hider = new LegacySessionHider(() => registry, (id) => busy.has(id));
+  await hider.ensureRunnable("legacy");
+  assert.deepEqual(calls, ["unarchive:legacy"]);
+  // A settle while the turn is still busy must not hide it mid-run; the mark
+  // survives and the next settle archives.
+  busy.add("legacy");
+  hider.onSettled("legacy");
+  await settle();
+  assert.deepEqual(calls, ["unarchive:legacy"]);
+  busy.delete("legacy");
+  hider.onSettled("legacy");
+  await settle();
+  assert.deepEqual(calls, ["unarchive:legacy", "archive:legacy"]);
+});
+
+test("LegacySessionHider ignores sessions it never unarchived", async () => {
+  const calls: string[] = [];
+  const { registry } = fakeRegistry({
+    unarchiveSession: async (id) => {
+      calls.push(`unarchive:${id}`);
+    },
+    archiveSession: async (id) => {
+      calls.push(`archive:${id}`);
+    },
+  });
+  const hider = new LegacySessionHider(() => registry, () => false);
+  await hider.ensureRunnable("fresh");
+  hider.onSettled("fresh");
+  await settle();
+  assert.deepEqual(calls, []);
+});
+
+test("ensureRunnable waits out an in-flight archive before unarchiving", async () => {
+  const order: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { registry } = fakeRegistry({
+    archivedSessionIds: ["legacy"],
+    archiveSession: async (id) => {
+      order.push(`archive:${id}`);
+      await gate;
+    },
+    unarchiveSession: async (id) => {
+      order.push(`unarchive:${id}`);
+    },
+  });
+  const hider = new LegacySessionHider(() => registry, () => false);
+  await hider.ensureRunnable("legacy");
+  hider.onSettled("legacy");
+  await settle();
+  const racing = hider.ensureRunnable("legacy");
+  let resolved = false;
+  void racing.then(() => {
+    resolved = true;
+  });
+  await settle();
+  assert.equal(resolved, false);
+  release();
+  await racing;
+  assert.deepEqual(order, ["unarchive:legacy", "archive:legacy", "unarchive:legacy"]);
 });
