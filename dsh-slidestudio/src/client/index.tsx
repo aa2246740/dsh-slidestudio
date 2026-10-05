@@ -1,5 +1,6 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import React from 'react'
+import type { SliceSessionSnapshot } from '@open-slidestudio/dsh-slides-host/protocol'
 
 export const name = 'dsh-slidestudio-client'
 // Only the slots service is required up front: without dsh-personal the feature
@@ -8,6 +9,7 @@ export const name = 'dsh-slidestudio-client'
 export const inject = ['slots']
 
 type PersonalRegistry = {
+  open?: (feature: string) => boolean
   suspend?: () => (restore?: boolean) => void
   register: (feature: {
     id: string
@@ -41,6 +43,13 @@ type LayoutService = {
   selectPanel(panelId: string | null): void
   panelInfo?: { getSnapshot(): { activePanelId: string | null } }
   beginNavigation?(): AbortSignal
+}
+
+type SessionsService = {
+  list: {
+    getSnapshot(): { byId: Record<string, { projectionValues?: { agentPreset?: unknown } }> }
+    subscribe(listener: () => void): () => void
+  }
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -224,11 +233,17 @@ function driveSettingsOpen(ctx: ClientContext, finish: (() => void) | null, noti
   ctx.effect(() => done)
 }
 
+let pageDestination: string | undefined
+const pageListeners = new Set<() => void>()
 function SlidesPage() {
+  const destination = React.useSyncExternalStore(
+    listener => { pageListeners.add(listener); return () => { pageListeners.delete(listener) } },
+    () => pageDestination,
+  )
   return (
     <iframe
       title="DSH SlideStudio"
-      src={`/app/hub.html?lang=${currentLang}`}
+      src={destination ?? `/app/hub.html?lang=${currentLang}`}
       style={{ display: 'block', width: '100%', height: '100%', minHeight: '80vh', border: 0 }}
     />
   )
@@ -247,6 +262,62 @@ function SlidesEntryIcon({ size = 16 }: { size?: number }) {
 
 const PANEL = 'slides'
 
+/** Public composer takeover: accidental Work entry remains readable, with no
+ * prompt box that can bypass the editor's project/intent checks. */
+function registerSessionEntry(ctx: ClientContext): void {
+  ctx.inject(['sessions'], inner => {
+    const sessions = inner.get('sessions') as SessionsService
+    const ReadOnlyComposer = ({ matched }: { matched: string }) => {
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState('')
+      const english = currentLang === 'en'
+      const open = async () => {
+        setBusy(true); setError('')
+        try {
+          const response = await fetch(`/slides/state/${encodeURIComponent(matched)}`)
+          const state = await response.json() as Partial<SliceSessionSnapshot> & { error?: string }
+          if (!response.ok || !state.binding?.projectRoot) throw new Error(state.error || (english ? 'Deck unavailable' : '找不到对应的演示文稿'))
+          const query = new URLSearchParams({ project: state.binding.projectRoot, session: matched, workspace: '1', live: '1', lang: currentLang })
+          pageDestination = `/app/index.html?${query}`
+          pageListeners.forEach(listener => listener())
+          const personal = ctx.get('personal') as PersonalRegistry | undefined
+          if (!personal?.open?.(PANEL)) (ctx.get('layout') as LayoutService | undefined)?.selectPanel(PANEL)
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+        finally { setBusy(false) }
+      }
+      return <section aria-label={english ? 'SlideStudio generation history' : '演示文稿生成记录'}
+        style={{ padding: '16px 20px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 12, background: 'var(--dsw-alias-button-elevated-fill, #fff)', color: 'var(--dsw-alias-label-primary, #222)' }}>
+        <strong>{english ? 'Continue editing in SlideStudio' : '请在演示文稿中继续编辑'}</strong>
+        <p style={{ margin: '8px 0 12px', fontSize: 13 }}>{english ? 'This conversation is the generation history. Open the deck to edit, continue generation or stop it.' : '这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。'}</p>
+        <button type="button" disabled={busy} onClick={() => { void open() }}
+          style={{ font: 'inherit', padding: '8px 14px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer' }}>
+          {busy ? (english ? 'Opening…' : '正在打开…') : (english ? 'Open in SlideStudio' : '在演示文稿中继续')}
+        </button>
+        {error && <p role="alert">{error}</p>}
+      </section>
+    }
+    inner.slots.inject('conversation.composer', () => {
+      let remove: (() => void) | undefined
+      let signature = ''
+      const update = () => {
+        const owned = Object.entries(sessions.list.getSnapshot().byId)
+          .filter(([, row]) => row.projectionValues?.agentPreset === 'slides').map(([id]) => id).sort()
+        const next = JSON.stringify(owned)
+        if (next === signature) return
+        signature = next
+        remove?.()
+        const ids = new Set(owned)
+        remove = inner.slots.register({ name: 'conversation.composer', priority: -100,
+          select: (owner: { sessionId?: string }) => owner.sessionId && ids.has(owner.sessionId) ? owner.sessionId : null,
+        }, ReadOnlyComposer as React.ComponentType)
+      }
+      update()
+      const off = sessions.list.subscribe(update)
+      return () => { off(); remove?.() }
+    })
+  })
+}
+
 /** Main panels must reserve the official desktop window-chrome strip. */
 function StandaloneSlidesPage() {
   return (
@@ -259,7 +330,6 @@ function StandaloneSlidesPage() {
 /** Standalone mode: 演示文稿 sits in the official sidebar panel list itself. */
 function registerStandalone(ctx: ClientContext): () => void {
   const stops = [
-    ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL }, StandaloneSlidesPage)),
     ctx.slots.inject('sidebar.panellist', () =>
       ctx.slots.register(
         { name: 'sidebar.panellist', id: PANEL, order: -9, label: () => slideTitle() },
@@ -273,6 +343,9 @@ function registerStandalone(ctx: ClientContext): () => void {
 
 export function apply(ctx: ClientContext) {
   currentLang = activeLang(ctx)
+  // Keep a fallback main destination for older Personal versions without open().
+  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL }, StandaloneSlidesPage))
+  registerSessionEntry(ctx)
   // Plugin-scope listener: the hub asks to open DSH settings, which may unmount
   // the Personal page (and this page's own effect) mid-flow.
   ctx.effect(() => {

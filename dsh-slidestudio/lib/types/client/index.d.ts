@@ -3,6 +3,7 @@ import React from 'react';
 export declare const name = "dsh-slidestudio-client";
 export declare const inject: string[];
 type PersonalRegistry = {
+    open?: (feature: string) => boolean;
     suspend?: () => (restore?: boolean) => void;
     register: (feature: {
         id: string;
