@@ -426,8 +426,9 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       waitUntil: "networkidle",
     });
     await page.waitForFunction(() => {
+      const row = document.getElementById("generation-resume-row");
       const button = document.getElementById("editor-generation-resume");
-      return button && !button.hidden && !button.disabled;
+      return row && !row.hidden && button && !button.disabled;
     });
     const clicked = await page.evaluate(() => {
       const button = document.getElementById("editor-generation-resume");
@@ -438,7 +439,7 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     assert.equal(clicked.disabled, true);
     assert.equal(clicked.label, "正在继续…");
     await page.waitForFunction(() => document.getElementById("editor-generation-status")?.textContent === "已完成");
-    await page.waitForFunction(() => document.getElementById("editor-generation-resume")?.hidden === true);
+    await page.waitForFunction(() => document.getElementById("generation-resume-row")?.hidden === true);
 
     assert.equal(turnBodies.length, 1, "a double click must dispatch only one continuation turn");
     assert.deepEqual(Object.keys(turnBodies[0]), ["text", "resumeGeneration"]);
@@ -484,7 +485,7 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     const text = await page.locator('#editor-generation-event-list').innerText();
     assert.match(text,/先讨论一下结构/); assert.match(text,/讨论回复 1/); assert.match(text,/讨论回复 2/);
     assert.equal(await page.locator('#work-empty').isVisible(),false);
-    assert.equal(await page.locator('#editor-generation-composer').isVisible(),false);
+    assert.equal(await page.locator('#generation-resume-row').isVisible(),false);
     assert.equal(await page.locator('#assistant-model').inputValue(),"test/model-b");
   });
 

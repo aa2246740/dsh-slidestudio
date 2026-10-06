@@ -432,11 +432,9 @@ const ORACLE_CONTROLS = [
   "chrome.workspace.refine",
   "chrome.workspace.stop",
   "chrome.workspace.toggle",
-  // Live-generation chrome. These four have oracle rows and markup, so the
+  // Live-generation chrome. These have oracle rows and markup, so the
   // session allowlist must carry them too; verify-native-editor enforces it.
   "chrome.generation.resume",
-  "chrome.generation.steer",
-  "chrome.generation.model",
   "chrome.generation.stop",
   // Assistant composer and question cards carry data-control so the oracle can
   // find them; they must stay enabled, so the allowlist carries them as well.

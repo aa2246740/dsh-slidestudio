@@ -37,7 +37,6 @@
           <div><small data-i18n="AI 助手">AI 助手</small><strong id="editor-generation-title" data-i18n="AI 正在生成">AI 正在生成</strong></div>
           <span id="editor-generation-status" data-i18n="准备中">准备中</span>
           <button type="button" id="editor-generation-stop" data-control="chrome.workspace.stop" hidden data-i18n="停止修改">停止修改</button>
-          <button type="button" id="editor-generation-resume" data-control="chrome.generation.resume" hidden data-i18n="继续完成生成">继续完成生成</button>
           <button type="button" id="editor-generation-toggle" aria-expanded="false" data-i18n="查看过程">查看过程</button>
         </header>
         <div class="editor-generation-stages" id="editor-generation-stages">
@@ -56,15 +55,6 @@
           <i class="generation-indicator-dot" aria-hidden="true"></i>
           <span class="generation-indicator-text" id="editor-generation-detail" data-i18n="准备中…">准备中…</span>
         </div>
-        <form id="editor-generation-composer" class="editor-generation-composer" hidden>
-          <label><span data-i18n="纠偏说明">纠偏说明</span>
-            <textarea id="editor-generation-steer" data-control="chrome.generation.steer" rows="2" data-i18n-placeholder="可选。留空则按当前计划继续，不进入页面编辑。" placeholder="可选。留空则按当前计划继续，不进入页面编辑。"></textarea>
-          </label>
-          <label><span data-i18n="继续使用的模型">继续使用的模型</span>
-            <select id="editor-generation-model" data-control="chrome.generation.model" data-i18n-aria-label="继续使用的模型" aria-label="继续使用的模型"></select>
-          </label>
-          <p id="editor-generation-composer-hint" data-i18n="停止并确认空闲后，才会发送继续请求。">停止并确认空闲后，才会发送继续请求。</p>
-        </form>
         <details id="editor-generation-events" class="editor-generation-events">
           <summary><span id="editor-generation-event-label" data-i18n="生成过程">生成过程</span> <span id="editor-generation-event-count"></span></summary>
           <div class="editor-generation-event-flow">
@@ -72,6 +62,10 @@
             <button type="button" id="editor-generation-latest" hidden data-i18n="↓ 回到最新">↓ 回到最新</button>
           </div>
         </details>
+        <div class="generation-resume" id="generation-resume-row" hidden>
+          <span class="generation-resume-hint" data-i18n="留空按当前计划继续；要纠偏或换模型，先在下方修改。">留空按当前计划继续；要纠偏或换模型，先在下方修改。</span>
+          <button type="button" id="editor-generation-resume" data-control="chrome.generation.resume" data-i18n="继续完成生成">继续完成生成</button>
+        </div>
       </section>
       <div class="work-thread" id="work-thread">
         <section class="work-empty" id="work-empty" data-i18n-aria-label="Agent 修改示例" aria-label="Agent 修改示例" hidden>

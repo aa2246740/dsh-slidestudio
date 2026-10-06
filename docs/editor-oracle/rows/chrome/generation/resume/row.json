@@ -4,10 +4,10 @@
   "status": "verified",
   "surface": "chrome.global",
   "title": "继续全局生成",
-  "description": "Resume or steer live generation task in the active session after stopping or idle.",
+  "description": "Resume or steer live generation task in the active session after stopping or idle. Steering text and model choice ride the shared composer (#work-brief / #assistant-model); there is no separate resume form.",
   "kimiUi": {
     "controlLabel": "继续完成生成",
-    "location": "editor generation composer",
+    "location": "end of the generation timeline, next to the pause notice",
     "appearsWhen": "generation paused or idle candidate"
   },
   "preconditions": {
@@ -53,5 +53,5 @@
     "capturedAt": "2026-09-14T00:00:00.000Z",
     "agent": "native-1-1"
   },
-  "updatedAt": "2026-09-14T00:00:00.000Z"
+  "updatedAt": "2026-10-06T00:00:00.000Z"
 }

@@ -13,8 +13,9 @@ Driver id `generation-live` (`drivers/assistant.mjs`), session bound with
 - Text typed during a run **started from this composer** is held. The draft stays and the toast
   `#app-toast` says 助手正在回复，完成后可以继续发送. Nothing is posted.
 - An empty composer plus the stop square stops the run. One JSON stop request, confirmed within seconds;
-  `#generation-think-status` (正在思考) disappears. A paused run may offer `#editor-generation-resume`
-  (继续完成生成).
+  `#generation-think-status` (正在思考) disappears. A paused run may offer `#generation-resume-row`
+  (继续完成生成) at the end of the timeline; steering text and the model choice ride the shared
+  composer (`#work-brief` / `#assistant-model`) — there is no separate resume form.
 - A new instruction after a stop goes through the intent read and becomes a `generate` turn on the same
   session.
 

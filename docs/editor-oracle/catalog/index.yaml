@@ -440,16 +440,7 @@ rows:
     status: verified
     testId: EO-CHROME-GENERATION-RESUME
     surface: chrome.global
-  - id: chrome.generation.model
-    path: rows/chrome/generation/model
-    status: verified
-    testId: EO-CHROME-GENERATION-MODEL
-    surface: chrome.global
-  - id: chrome.generation.steer
-    path: rows/chrome/generation/steer
-    status: verified
-    testId: EO-CHROME-GENERATION-STEER
-    surface: chrome.global
+
   - id: chrome.generation.stop
     path: rows/chrome/generation/stop
     status: verified

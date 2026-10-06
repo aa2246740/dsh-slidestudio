@@ -260,7 +260,7 @@ export const features = [
       const resume = page.locator("#editor-generation-resume");
       if (await resume.isVisible().catch(() => false)) {
         rec.check("a paused run offers 继续完成生成", /继续/.test(await resume.innerText()), await resume.innerText());
-      } else rec.note("the resume button was not visible after stop (panel hides it while collapsed)");
+      } else rec.note("the resume row was not visible after stop (run not in a resumable state)");
 
       // A new instruction after the stop goes through the intent read and becomes a generate turn.
       await input(page).fill("方向不对，改成电商零售的月报");

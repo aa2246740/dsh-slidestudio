@@ -69,10 +69,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper)
   overflow: hidden;
 }
 .editor-generation[hidden] { display: none; }
-/* The header stays visible: it owns the only stop affordance
-   (#editor-generation-stop) plus 继续完成生成 / 查看过程, all of which app.js and the
-   oracle rows still drive. The stages/now/pages blocks are superseded by the
-   event flow below, so those stay hidden. */
+/* The stages/now/pages blocks are superseded by the event flow below, so those
+   stay hidden. 继续完成生成 lives in .generation-resume at the timeline end. */
 .editor-generation > header {
   display: flex;
   justify-content: space-between;
@@ -617,9 +615,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper)
   min-width: 0; color: var(--n-800); font-size: 10px; font-weight: 600; line-height: 1.4;
   overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-/* Still hidden by the WIP panel rewrite: the in-panel steer composer, the
-   indicator and the 回到最新 hint. The stop / resume buttons stay visible below —
-   for a review (refine) turn they are the only way to stop the Agent. */
 /* 停止生成 lives on the composer square now (it stops both generation and review
    turns), and the panel-collapse toggle did nothing visible after the process
    flow became the panel body, so neither keeps a header button. 继续完成生成
@@ -627,8 +622,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper)
 #editor-generation-stop,
 #editor-generation-toggle { display: none !important; }
 
-.generation-indicator,
-.editor-generation-composer {
+.generation-indicator {
   display: none !important;
 }
 /* 回到最新 stays reachable: it is the only way back to live streaming after the
@@ -649,14 +643,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper)
 .generation-process-facts[hidden] { display: none; }
 .generation-technical-details { display: none !important; }
 .generation-process-truncated { display: none; }
-.editor-generation-composer label { display: grid; gap: 4px; color: var(--n-800); font-size: 10px; }
-.editor-generation-composer textarea,
-.editor-generation-composer select {
-  width: 100%; border: 1px solid var(--n-250); border-radius: 8px; padding: 7px 8px;
-  background: var(--n-0); color: var(--n-850); font: inherit; font-size: 12px;
+/* 继续完成生成 sits at the end of the timeline, next to the pause notice it
+   resolves — same primary-pill language as the question card's continue. */
+.generation-resume {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  flex: 0 0 auto; padding: 10px 0 0;
 }
-.editor-generation-composer textarea { resize: vertical; min-height: 44px; }
-#editor-generation-composer-hint { margin: 0; color: var(--n-600); font-size: 10px; line-height: 1.4; }
+.generation-resume[hidden] { display: none; }
+.generation-resume-hint { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#editor-generation-resume {
+  flex: none; border: 0; border-radius: var(--radius-full); padding: 7px 16px;
+  background: var(--primary-bg); color: var(--primary-text); font: inherit; font-size: 12px; cursor: pointer;
+}
+#editor-generation-resume:hover:not(:disabled) { background: var(--primary-bg-hover); }
+#editor-generation-resume:disabled { opacity: .4; cursor: default; }
+#editor-generation-resume:focus-visible { outline: 2px solid var(--a-400); outline-offset: 2px; }
 @keyframes generation-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) {
   .generation-process-entry.is-running .generation-process-head > i { animation: none; }
@@ -3413,7 +3414,7 @@ body.is-presenting #ctx-menu { display: none !important; }
 }
 
 #assistant-model { flex: 1; min-width: 0; width: 0; max-width: none; padding: 5px 0; text-overflow: ellipsis; }
-.editor-generation-composer:not([hidden]) { display: grid !important; flex: 0 0 auto; max-height: 190px; overflow: auto; padding: 9px; margin: 7px 0; background: var(--n-50); border-radius: 8px; }
+
 
 /* Native hidden state must win over the visual card layout. */
 #editor-generation [hidden], #work-empty[hidden] { display: none !important; }
@@ -3525,9 +3526,7 @@ body.is-presenting #ctx-menu { display: none !important; }
 .generation-user-receipt button:disabled { opacity:.45; cursor:default; }
 
 /* One conversation, with recovery next to the reply it belongs to. */
-.editor-generation > header { display: none; }
-.editor-generation > header:has(#editor-generation-resume:not([hidden])) { display: flex; }
-.editor-generation > header > div, #editor-generation-status { display: none; }
+.editor-generation > header, .editor-generation > header > div, #editor-generation-status { display: none; }
 .assistant-reply-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-top: 10px; color: var(--muted); font-size: 12px; }
 .assistant-reply-actions > span { flex-basis: 100%; overflow-wrap: anywhere; }
 .assistant-reply-actions button { font: inherit; color: var(--muted); background: transparent; border: 0; padding: 5px 0; cursor: pointer; }
@@ -3709,7 +3708,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 #property-panel .property-action-grid .ctx-btn.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 #property-panel .ctx-btn.danger { border-color: var(--d-200); background: var(--surface); color: var(--d-600); }
 #property-panel .ctx-btn.danger:hover { background: var(--d-50); border-color: var(--d-500); }
-#property-panel .property-direct-field > select, #property-panel .property-input-row select, #property-panel select, .editor-generation-composer select {
+#property-panel .property-direct-field > select, #property-panel .property-input-row select, #property-panel select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 26px;
