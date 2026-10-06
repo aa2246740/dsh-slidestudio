@@ -1,6 +1,6 @@
 # OOP-26 — Offline agent harness & brain split (locked)
 
-**Issue:** [Shape offline agent harness and brain split](https://linear.app/oops-org/issue/OOP-26)  
+**Issue:** Shape offline agent harness and brain split  
 **Inputs:** OOP-19 product path, OOP-20 offline LLM, OOP-21 PPTD SSOT, open-kimi SKILL as playbook source, PRD tool list
 
 ---

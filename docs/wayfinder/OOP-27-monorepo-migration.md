@@ -1,6 +1,6 @@
 # OOP-27 — Monorepo migration stance (locked)
 
-**Issue:** [Monorepo migration stance vs greenfield native core](https://linear.app/oops-org/issue/OOP-27)  
+**Issue:** Monorepo migration stance vs greenfield native core  
 **Inputs:** OOP-21 (YAML PPTD SSOT, dual IR forbidden), OOP-24/25/26 native stack
 
 ---

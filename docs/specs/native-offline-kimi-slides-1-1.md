@@ -1,6 +1,6 @@
 # 规格：纯原生离线 1:1 Kimi Slides
 
-**来源：** Wayfinder 地图 [OOP-18](https://linear.app/oops-org/issue/OOP-18) 及子决议 OOP-19…31  
+**来源：** Wayfinder 地图 OOP-18 及子决议 OOP-19…31  
 **术语：** 见仓库根目录 `CONTEXT.md`  
 **阶段法：** 见 `docs/wayfinder/OOP-28-parity-phases.md`  
 **状态：** 决策完备，可 `/to-tickets` 后按 Phase A 开工  

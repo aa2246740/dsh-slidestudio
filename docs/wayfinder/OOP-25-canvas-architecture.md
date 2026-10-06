@@ -1,6 +1,6 @@
 # OOP-25 — Offline canvas & render architecture (locked)
 
-**Issue:** [Choose offline canvas and render architecture](https://linear.app/oops-org/issue/OOP-25)  
+**Issue:** Choose offline canvas and render architecture  
 **Inputs:** OOP-19 (Kimi-aligned UI 1:1), OOP-21 (PPTD YAML SSOT), OOP-29 (self-built editor via oracle, no production iframe), OOP-30/31 (interaction rows)
 
 ---

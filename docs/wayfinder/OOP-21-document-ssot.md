@@ -1,6 +1,6 @@
 # OOP-21 — Canonical document format (locked)
 
-**Issue:** [Choose canonical document format for the native stack](https://linear.app/oops-org/issue/OOP-21)  
+**Issue:** Choose canonical document format for the native stack  
 **Alignment:** open-kimi PPTD v2 + editor oracle fixtures + offline native export
 
 ---

@@ -1,8 +1,10 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's Linear workspace (team **Oops**).
+The skills speak in terms of five canonical triage roles. In this repo's
+tracker they live as predefined options on the `标签` multi-select field of
+the `tickets` Feishu Base table.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
+| Label in mattpocock/skills | Option in `标签` field | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
 | `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
@@ -10,6 +12,6 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table via `orca linear label add` / `label set`.
-
-If a label does not exist on the team yet, create it once in Linear (or via team labels API), then reuse these exact names. Edit the right-hand column only if Linear already uses different names.
+Apply them via `node scripts/feishu-ticket.mjs create|update … --labels a,b`.
+Add a new option on the Base field first if a new label is ever needed, then
+update this table.

@@ -2,7 +2,7 @@
 
 > Superseded for normal product generation by ADR-0004 and ADR-0006, and again by ADR-0009 (kernel is now DSH). Direct LLM and offline playbook routes below remain developer/test archaeology; `/api/generate` returns 410 and Hub generate is DSH `POST /slides/sessions`.
 
-**Issue:** [接上真正的 Agent runtime](https://linear.app/oops-org/issue/OOP-96)
+**Issue:** 接上真正的 Agent runtime
 
 open-kimi skill assumed a host tool loop. SlideStudio runs that loop in-process. That is not official iframe / `export_pptx.py`.
 
