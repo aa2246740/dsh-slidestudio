@@ -43,9 +43,10 @@ describe("slides client plugin", () => {
         // The generation flow lives in the editor app; an explicit resumePath is
         // the only way a run continues instead of starting fresh.
         assert.match(app, /opts\.resumePath/);
-        // In-conversation steering: pause/fail offer a correction field whose text
-        // rides the same durable session turn instead of restarting from zero.
-        assert.match(app, /editor-generation-steer/);
+        // In-conversation steering: pause/fail continue rides the same durable
+        // session turn — steering text comes from the shared composer (#work-brief).
+        assert.match(app, /generation-resume-row/);
+        assert.match(app, /\$\("work-brief"\)\?\.value/);
         assert.match(generationProcess, /generationResumeInstruction/);
         // The paused "马上重试" still continues the same durable run in place.
         assert.match(app, /\/slides\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/turn/);

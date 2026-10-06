@@ -52,6 +52,14 @@ describe("native project discovery", () => {
     }
   });
 
+  it("reports each project's on-disk size", () => {
+    const rows = discoverProjects(workspaceRoot);
+    for (const row of rows) {
+      assert.equal(typeof row.sizeBytes, "number");
+      assert.ok(row.sizeBytes > 0);
+    }
+  });
+
   it("does not follow linked project directories or linked manifests", () => {
     const ids = discoverProjects(workspaceRoot).map((project) => project.id);
     assert.equal(ids.includes("linked-project"), false);

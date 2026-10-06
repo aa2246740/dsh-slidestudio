@@ -226,22 +226,22 @@ Done: seams confirmed; published to Linear; `/to-tickets` created children. Next
 
 **Confirmed** (S1 agent mock primary; S2 PPTD commands; S3 design-brain; S4 export; S5 light browser smoke).
 
-## Linear map (project slides)
+## Ticket map (Linear-era IDs, now local)
 
-| Ticket | Linear | Gate | Blocked by |
+| Ticket | ID | Gate | Blocked by |
 |--------|--------|------|------------|
-| Spec parent | [OOP-5](https://linear.app/oops-org/issue/OOP-5) | — | — |
-| T1 Chinese brief → non-ugly deck | [OOP-6](https://linear.app/oops-org/issue/OOP-6) | G1 | — |
-| T2 Hand-edit text + chart + undo | [OOP-7](https://linear.app/oops-org/issue/OOP-7) | G1 | — |
-| T3 Export editable PPTX | [OOP-10](https://linear.app/oops-org/issue/OOP-10) | G1 | OOP-6 |
-| T4 Workspace + honest tools + brand | [OOP-8](https://linear.app/oops-org/issue/OOP-8) | G1 | — |
-| T5 NL refine + versions | [OOP-9](https://linear.app/oops-org/issue/OOP-9) | G1 | — |
-| T6 Gate 1 demo acceptance | [OOP-11](https://linear.app/oops-org/issue/OOP-11) | G1 | OOP-6…10 |
-| T7 Pin → agent process-all | [OOP-12](https://linear.app/oops-org/issue/OOP-12) | G2 | OOP-9 |
-| T8 Template wall + auto default | [OOP-13](https://linear.app/oops-org/issue/OOP-13) | G2 | OOP-6 |
-| T9 Image rebuild portrait + QA | [OOP-14](https://linear.app/oops-org/issue/OOP-14) | G2 | — |
-| T10 SmartArt/process editable | [OOP-15](https://linear.app/oops-org/issue/OOP-15) | G2 | OOP-7 |
-| T11 Play / Share / attach chrome | [OOP-16](https://linear.app/oops-org/issue/OOP-16) | G2 | OOP-8 |
-| T12 Gate 2 checklist zero | [OOP-17](https://linear.app/oops-org/issue/OOP-17) | G2 | OOP-12…16 |
+| Spec parent | OOP-5 | — | — |
+| T1 Chinese brief → non-ugly deck | OOP-6 | G1 | — |
+| T2 Hand-edit text + chart + undo | OOP-7 | G1 | — |
+| T3 Export editable PPTX | OOP-10 | G1 | OOP-6 |
+| T4 Workspace + honest tools + brand | OOP-8 | G1 | — |
+| T5 NL refine + versions | OOP-9 | G1 | — |
+| T6 Gate 1 demo acceptance | OOP-11 | G1 | OOP-6…10 |
+| T7 Pin → agent process-all | OOP-12 | G2 | OOP-9 |
+| T8 Template wall + auto default | OOP-13 | G2 | OOP-6 |
+| T9 Image rebuild portrait + QA | OOP-14 | G2 | — |
+| T10 SmartArt/process editable | OOP-15 | G2 | OOP-7 |
+| T11 Play / Share / attach chrome | OOP-16 | G2 | OOP-8 |
+| T12 Gate 2 checklist zero | OOP-17 | G2 | OOP-12…16 |
 
-Note: triage label `ready-for-agent` is not yet on team Oops (only Feature/Bug/Improvement). Tickets use **Feature**; create `ready-for-agent` in Linear when convenient and re-label.
+Note: triage labels now live as options on the `标签` field of the `tickets` Feishu Base table; see docs/agents/triage-labels.md.

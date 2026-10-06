@@ -432,11 +432,9 @@ const ORACLE_CONTROLS = [
   "chrome.workspace.refine",
   "chrome.workspace.stop",
   "chrome.workspace.toggle",
-  // Live-generation chrome. These four have oracle rows and markup, so the
+  // Live-generation chrome. These have oracle rows and markup, so the
   // session allowlist must carry them too; verify-native-editor enforces it.
   "chrome.generation.resume",
-  "chrome.generation.steer",
-  "chrome.generation.model",
   "chrome.generation.stop",
   // Assistant composer and question cards carry data-control so the oracle can
   // find them; they must stay enabled, so the allowlist carries them as well.
@@ -2026,6 +2024,7 @@ async function readGenerationActivity(native, root) {
     "provider-rate-limit",
     "provider-unavailable",
     "operator-stop",
+    "host-interrupted",
     "tool-invalid-args-loop",
     "repeated-business-rejection",
     "planning-no-progress-budget",
@@ -2193,6 +2192,31 @@ function resolveProjectPath(raw, workspaceRoot = DATA_ROOT, defaultProject = DEF
   return resolved;
 }
 
+// Recursive total for the project row label. Symlinks are never followed so a
+// linked cache cannot double-count or escape the project directory.
+function dirSizeBytes(root) {
+  let total = 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const abs = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      total += dirSizeBytes(abs);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    try {
+      total += fs.statSync(abs).size;
+    } catch { /* a file being written or removed mid-scan must not break the list */ }
+  }
+  return total;
+}
+
 function discoverProjects(workspaceRoot = DATA_ROOT) {
   const fixturesDir = path.join(workspaceRoot === DATA_ROOT ? ROOT : workspaceRoot, "fixtures");
   const outputDir = path.join(workspaceRoot, "output");
@@ -2247,7 +2271,7 @@ function discoverProjects(workspaceRoot = DATA_ROOT) {
         const conversation = path.join(projectRoot, "_agent", "assistant-conversation.v1.json");
         if (fs.existsSync(conversation)) updatedAt = Math.max(updatedAt, fs.statSync(conversation).mtimeMs);
       } catch { /* A malformed manifest remains visible so it can be recovered. */ }
-      projects.push({ id: entry.name, title, pageCount, path: projectRoot, group, updatedAt });
+      projects.push({ id: entry.name, title, pageCount, path: projectRoot, group, updatedAt, sizeBytes: dirSizeBytes(projectRoot) });
     }
   }
   return projects;

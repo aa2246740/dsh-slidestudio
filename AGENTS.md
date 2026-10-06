@@ -54,7 +54,7 @@ Use Ultimate Design **Pro mode** for product chrome and slide theme systems: fre
 
 ### Issue tracker
 
-Tickets live in **Linear** (workspace oops · team Oops/`OOP` · project **slides**), via `orca linear …`. GitHub is for code/PRs only. See `docs/agents/issue-tracker.md`.
+Tickets live in a **Feishu Base** (`dsh-openslides tickets`, table `tickets`), driven by `scripts/feishu-ticket.mjs` or the `feishu` MCP server. Credentials live in gitignored `.devin/*.local.json`. Small fix-and-commit work needs no ticket. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -265,7 +265,7 @@ export const features = [
 
   {
     id: "hub-projects",
-    title: "Recent work list: rows, unread dot, open, delete with confirm, fixtures hidden, unsafe delete refused",
+    title: "Recent work list: rows, unread dot, size, open, delete with confirm, fixtures hidden, unsafe delete refused",
     async run(ctx, rec) {
       const title = `VERIFY 项目列表 ${ctx.runId.slice(-6)}`;
       const dir = ctx.outputProject("hub-projects", title);
@@ -274,7 +274,7 @@ export const features = [
       const row = page.locator(".proj-row", { hasText: title });
       await row.waitFor({ timeout: 8000 });
       rec.check("a generated project under output/ is listed by its deck title", (await row.count()) === 1);
-      rec.check("the row says how many pages and when", /8 页 · (刚刚|\d+ 分钟前)/.test(await row.locator("small").innerText()), await row.locator("small").innerText());
+      rec.check("the row says pages, when, and disk size", /8 页 · (刚刚|\d+ 分钟前) · [\d.]+ (B|KB|MB|GB)/.test(await row.locator("small").innerText()), await row.locator("small").innerText());
       rec.check("a never-opened generated project has the unread dot", (await row.locator(".proj-dot.unread").count()) === 1);
       const hrefs = await page.$$eval(".proj-row a", (n) => n.map((a) => a.getAttribute("href")));
       rec.check("fixtures are not listed", !hrefs.some((h) => /fixtures/.test(decodeURIComponent(h))), `${hrefs.length} rows`);

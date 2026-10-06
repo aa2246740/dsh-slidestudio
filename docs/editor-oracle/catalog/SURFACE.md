@@ -1,6 +1,6 @@
 # Full editor surface enumeration order (locked)
 
-**Ticket:** [Full editor surface enumeration order (no MVP shortcut)](https://linear.app/oops-org/issue/OOP-31)  
+**Ticket:** Full editor surface enumeration order (no MVP shortcut)  
 **Method:** OOP-29 — comprehensive, no minimum path  
 **Row format:** OOP-30 — `docs/editor-oracle/schema/SPEC.md`
 

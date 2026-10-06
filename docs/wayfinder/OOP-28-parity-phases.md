@@ -1,6 +1,6 @@
 # OOP-28 — Pure-native parity phases (locked)
 
-**Issue:** [Order the pure-native parity phases](https://linear.app/oops-org/issue/OOP-28)  
+**Issue:** Order the pure-native parity phases  
 **Roll-up of:** OOP-19…27, 29…31  
 
 This is the **implementation order** once wayfinding ends. Exit criteria are gates; do not claim 1:1 until **Phase G**.

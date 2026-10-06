@@ -38,6 +38,7 @@ import {
   type RuntimeModelCatalog,
 } from "./local-models.js";
 import { isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
+import { markInterruptedTurn } from "./interruption.js";
 import {
   assertExpectedAttempt, beginAttempt, parseExpectedAttemptId, parseModelSelection, readAttempt,
   SessionTransitionConflict, withSessionTransition,
@@ -72,6 +73,8 @@ export type SlidesHostRuntime = {
   cancelRateLimitWait: (sessionId: string) => void;
   operatorStop: (sessionId: string) => Promise<void>;
   getAgent(sessionId: string): Agent | undefined;
+  /** Awaits any in-flight re-archive, then unarchives a legacy session. */
+  ensureSessionRunnable?(sessionId: string): Promise<void>;
   resolveAssistantIntent?: (input: AssistantIntentInput) => Promise<AssistantIntent>;
   /**
    * Last observed call outcome per provider, fed by the intent/turn path.
@@ -731,14 +734,25 @@ export function handleSlidesRequest(
     const stateParams = match(pathname, "/slides/state/:sessionId");
     if (req.method === "GET" && stateParams) {
       const sessionId = stateParams.sessionId!;
-      const snap = runtime.store.inspect(sessionId);
       const binding = runtime.store.bindingFor(sessionId);
+      // A dead turn outlives its agent only on disk: when nothing is busy, a
+      // trace turn still open means the process that owned it is gone. Mark it
+      // interrupted before projecting so the reader sees paused, not thinking.
+      const boundRoot = binding ? runtime.store.resolveRoot(binding) : undefined;
+      if (boundRoot && !runtime.agentBusy(sessionId)) {
+        try {
+          markInterruptedTurn(boundRoot);
+        } catch {
+          /* best-effort: observation must never fail on a trace write */
+        }
+      }
+      const snap = runtime.store.inspect(sessionId);
       let inspection = undefined;
       if (binding) {
-        runtime.presentation.hydrate(runtime.store.resolveRoot(binding));
+        runtime.presentation.hydrate(boundRoot!);
         inspection = await runtime.presentation.inspect(sessionId);
       }
-      const root = binding ? runtime.store.resolveRoot(binding) : undefined;
+      const root = boundRoot;
       const wait = root ? readRateLimitWait(root) : undefined;
       const fault = root ? readAgentError(root) : undefined;
       const attempt = root ? readAttempt(root) : undefined;
@@ -1072,6 +1086,7 @@ export function handleSlidesRequest(
               }
               recordConversationMessage(root, String(body.userText || text), readConversation(root).mode);
             }
+            await runtime.ensureSessionRunnable?.(sessionId);
             live.steer(
               createUserMessage({
                 content: [{ type: "text", text: turnText }],
@@ -1098,6 +1113,7 @@ export function handleSlidesRequest(
             userMessage = recordConversationMessage(root, String(body.userText || text), discuss ? "discuss" : editorEditAuthorized ? "edit" : "generate", reviewSubmissionId, typeof body.clientRequestId === "string" ? body.clientRequestId : undefined);
           }
           runtime.markBusy(sessionId);
+          await runtime.ensureSessionRunnable?.(sessionId);
           agent.followup(
             createUserMessage({
               content: [{ type: "text", text: turnText }],

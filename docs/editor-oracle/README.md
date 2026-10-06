@@ -1,7 +1,7 @@
 # Editor oracle (canonical)
 
-**Decision:** [Editor oracle artifact schema](https://linear.app/oops-org/issue/OOP-30) (OOP-30)  
-**Method:** [Native editor rebuild method via iframe-as-oracle](https://linear.app/oops-org/issue/OOP-29) (OOP-29)
+**Decision:** Editor oracle artifact schema (OOP-30)  
+**Method:** Native editor rebuild method via iframe-as-oracle (OOP-29)
 
 This tree is the **only** place reverse-engineered official-editor controls are recorded.  
 Production runtime **must not** load Kimi iframe/CDN. Dev may use open-kimi host + official editor until claimed 100% parity.

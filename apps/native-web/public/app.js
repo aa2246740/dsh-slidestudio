@@ -9306,22 +9306,12 @@ function paintEditorGeneration(activity) {
     }
   }
   const resume = $("editor-generation-resume");
+  const resumeRow = $("generation-resume-row");
+  const resumeActionable = generationResumeActionable(current);
+  if (resumeRow) resumeRow.hidden = !resumeActionable;
   if (resume) {
-    const candidate = generationResumeCandidate(current) || generationResumeCandidate({
-      ...current,
-      execution: lastGenerationState?.execution,
-      sessionId: current.sessionId || lastGenerationState?.binding?.dshSessionId,
-      phase: lastGenerationState?.phase?.kind || current.phase,
-    });
-    const modeContinue = generationComposerMode({
-      agentStatus: lastGenerationState?.agentStatus,
-      execution: lastGenerationState?.execution || current.execution,
-    }) === "continue";
     const samePending = generationResumePending && current.sessionId;
     const sameUncertain = generationResumeUncertainSessionId === current.sessionId;
-    const ready = generationResumeVerifiedSessionId === current.sessionId
-      || (modeContinue && lastGenerationState?.agentStatus === "idle");
-    resume.hidden = discussion || editing || phase === "discussion" || active || assistantTurnPending || !(candidate || modeContinue) || (!samePending && !sameUncertain && !ready);
     resume.disabled = Boolean(samePending || sameUncertain);
     resume.textContent = samePending
       ? t("正在继续…")
@@ -9589,7 +9579,8 @@ function paintEditorGeneration(activity) {
     briefInput.disabled = false;
     briefInput.readOnly = false;
     briefInput.placeholder = pendingQuestion
-      ? t("也可以在这里直接回答…") : locked
+      ? t("也可以在这里直接回答…") : resumeActionable
+      ? t("纠偏说明（可选），随「继续完成生成」一起发送") : locked
       ? (discussion ? t("助手正在回复，你可以先写下一个问题") : t("输入补充要求…"))
       : selectedCommentEntries().length ? t("补充要求（选填），或直接发送批注") : t("聊想法，或描述想修改的内容…");
   }
@@ -9601,7 +9592,6 @@ function paintEditorGeneration(activity) {
       : "";
   }
   if ($("notes-text")) $("notes-text").disabled = false;
-  paintGenerationComposer(current, lastGenerationState);
   paintWorkAgentTarget();
   if ($("chat-close")) $("chat-close").disabled = false;
   void paintAssistantModel(current);
@@ -9669,60 +9659,31 @@ async function loadGenerationRoster() {
   return generationRoster;
 }
 
-function paintGenerationComposer(activity, state) {
-  const form = $("editor-generation-composer");
-  const select = $("editor-generation-model");
-  const hint = $("editor-generation-composer-hint");
-  if (!form || !select) return;
-  const mode = generationComposerMode({
-    agentStatus: state?.agentStatus || (generationIsActive(activity) ? "busy" : "idle"),
-    execution: state?.execution || activity?.execution,
+// A paused/failed run offers one recovery path: the 继续完成生成 row at the end of
+// the timeline. Steering text and model choice ride the shared composer
+// (#work-brief / #assistant-model), so resume needs no form of its own.
+function generationResumeActionable(current) {
+  if (!current) return false;
+  const discussion = current.conversation?.mode === "discuss";
+  const editing = current.conversation?.mode === "edit";
+  const phase = current.phase || "idle";
+  if (discussion || editing || phase === "discussion" || generationIsActive(current) || assistantTurnPending) return false;
+  const candidate = generationResumeCandidate(current) || generationResumeCandidate({
+    ...current,
+    execution: lastGenerationState?.execution,
+    sessionId: current.sessionId || lastGenerationState?.binding?.dshSessionId,
+    phase: lastGenerationState?.phase?.kind || current.phase,
   });
-  const open = mode === "continue" && !generationIsActive(activity) && activity?.phase !== "discussion" && !["discuss", "edit"].includes(activity?.conversation?.mode) && !assistantTurnPending && !generationResumePending && !generationStopPending;
-  form.hidden = !open;
-  if (!open) return;
-  const roster = generationRoster;
-  if (!roster) {
-    select.replaceChildren();
-    select.disabled = true;
-    if (hint) hint.textContent = t("正在读取可用模型。");
-    void loadGenerationRoster().then(() => paintEditorGeneration(generationActivity)).catch((error) => {
-      if (hint) hint.textContent = error instanceof Error ? error.message : String(error);
-    });
-    return;
-  }
-  const current = currentModelFromState(state) || currentModelFromState({
-    execution: activity?.execution,
-    binding: { provider: activity?.provider },
-  });
-  const previous = select.value;
-  select.replaceChildren();
-  for (const provider of roster.providers) {
-    const group = document.createElement("optgroup");
-    group.label = !provider.ready
-      ? t(`{p0}`, { p0: provider.name })
-      : provider.degraded
-        ? t(`{p0}`, { p0: provider.name })
-        : provider.name;
-    for (const model of provider.models) {
-      const option = document.createElement("option");
-      option.value = modelOptionValue(provider.id, model);
-      option.textContent = `${provider.name} / ${model}`;
-      group.append(option);
-    }
-    select.append(group);
-  }
-  const preferred = previous
-    || (current ? modelOptionValue(current.provider, current.model) : "")
-    || (roster.connection?.providerId && roster.connection?.model
-      ? modelOptionValue(roster.connection.providerId, roster.connection.model) : "");
-  if (preferred && [...select.options].some((option) => option.value === preferred)) select.value = preferred;
-  select.disabled = false;
-  if (hint) {
-    hint.textContent = mode === "continue"
-      ? t("确认空闲后才会发送。可选换模型；纠偏说明不会变成页面编辑。")
-      : t("停止并确认空闲后，才会发送继续请求。");
-  }
+  const modeContinue = generationComposerMode({
+    agentStatus: lastGenerationState?.agentStatus,
+    execution: lastGenerationState?.execution || current.execution,
+  }) === "continue";
+  if (!(candidate || modeContinue)) return false;
+  const samePending = generationResumePending && current.sessionId;
+  const sameUncertain = generationResumeUncertainSessionId === current.sessionId;
+  const ready = generationResumeVerifiedSessionId === current.sessionId
+    || (modeContinue && lastGenerationState?.agentStatus === "idle");
+  return Boolean(samePending || sameUncertain || ready);
 }
 
 function generationStatePhase(state = {}) {
@@ -9828,11 +9789,8 @@ async function resumeGeneration() {
     if (!generationStateCanResume(state, sessionId)) {
       throw new Error(t("当前会话不再处于可继续的空闲状态，请刷新后检查最新进度。"));
     }
-    const steer = String($("editor-generation-steer")?.value || "").trim();
-    const selectValue = String($("editor-generation-model")?.value || "");
-    const modelSelection = selectValue && generationRoster
-      ? selectedModelFromRoster(generationRoster, selectValue)
-      : undefined;
+    const steer = String($("work-brief")?.value || "").trim();
+    const modelSelection = assistantModelSelection();
     const response = await fetch(`/slides/sessions/${encodeURIComponent(sessionId)}/turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -9854,6 +9812,7 @@ async function resumeGeneration() {
     if (!response.ok || result?.ok !== true) {
       throw new Error(result?.error || t("生成会话没有接受继续请求"));
     }
+    if (steer) acknowledgeAssistantDraft(steer);
     const terminal = await waitForGenerationResume(sessionId, baselineSignature);
     finishGenerationResume(terminal);
   } catch (error) {
@@ -10645,11 +10604,6 @@ $("editor-generation-stop")?.addEventListener("click", () => {
   void stopLiveGeneration();
 });
 
-$("editor-generation-composer")?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void resumeGeneration();
-});
-
 $("editor-generation-resume")?.addEventListener("click", () => {
   void resumeGeneration();
 });
@@ -11244,6 +11198,12 @@ $("work-form")?.addEventListener("submit", async (ev) => {
   }
   if (agentAttachmentUploadActive) {
     showToast(t("附件仍在上传，请稍候再发送。"), 5000);
+    return;
+  }
+  // A resumable generation turns the shared composer into the steer input:
+  // whatever the user typed rides the same verified continue turn.
+  if (generationResumeActionable(generationActivity)) {
+    void resumeGeneration();
     return;
   }
   const text = $("work-brief")?.value.trim();

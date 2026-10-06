@@ -7,7 +7,7 @@
 ## What the driver proves
 
 - A scratch project `output/verify-<run>-hub-projects` with a unique title is listed by that title with
-  `8 页 · 刚刚`, and an unread dot until opened.
+  `8 页 · 刚刚 · <磁盘占用>` (`sizeBytes` from `/api/projects`), and an unread dot until opened.
 - Fixtures are never listed.
 - Clicking a row opens `index.html?project=<dir>&workspace=1`, the editor shows that deck, the path is
   added to `localStorage["oss.viewed.projects"]`, and back on the Hub the dot is gone.

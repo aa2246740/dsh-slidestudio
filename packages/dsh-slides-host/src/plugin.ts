@@ -1,5 +1,11 @@
 import { AssistantQuestions } from "./assistant-questions.js";
-import { organizeSlidesSessions, type SlidesWorkspaceRegistry, type SlidesSessionHeader } from "./session-workspace.js";
+import {
+  hideSlidesSessions,
+  LegacySessionHider,
+  slidesSessionMeta,
+  type SlidesWorkspaceRegistry,
+  type SlidesSessionHeader,
+} from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -47,6 +53,7 @@ import {
 import { appendAgentTrace, traceRowsFromSessionEvent } from "./agent-trace.js";
 import { publishSessionLive, closeSessionLive } from "./session-live.js";
 import { AgentStreamBridge } from "./stream-bridge.js";
+import { markInterruptedTurn } from "./interruption.js";
 import {
   AgentFaults,
   friendlyProviderCause,
@@ -187,13 +194,13 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     // runtime up as soon as provisioning finishes writing it.
     process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
     runtimeProvision = provisionManagedRuntime(slidesStateDir, {
-      log: (message) => console.log(message),
+      log: (message: string) => console.log(message),
       // A playwright module/browsers already on the machine saves the
       // matching download (e.g. the reporter's global playwright).
       reuse: machineRuntimeReuse(process.env, runtimeRoots),
     }).then(
       () => undefined,
-      (error) => {
+      (error: unknown) => {
         runtimeProvisionError = error instanceof Error ? error.message : String(error);
         console.warn("[slides] playwright runtime auto-setup failed:", runtimeProvisionError);
         // Release the exclusive env pin so a later resolve can adopt a runtime
@@ -208,9 +215,10 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   // Cold metadata reads do not resume old agents or send model requests.
   ctx.inject(["workspaceRegistry", "sessionQuery"] as never, async () => {
     const query = ctx.get("sessionQuery") as { listSessions(): Promise<{ header: SlidesSessionHeader }[]> };
-    const result = await organizeSlidesSessions(workspaceRegistry()!,
-      (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
-    for (const failure of result.failures) console.warn("[slides-host] workspace organization:", failure);
+    const result = await hideSlidesSessions(workspaceRegistry()!,
+      (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()),
+      new Set([workspaceRoot, dataRoot]));
+    for (const failure of result.failures) console.warn("[slides-host] hiding slides sessions:", failure);
   });
   const presentation = createPresentationRun({
     repoRoot: workspaceRoot,
@@ -225,6 +233,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   ctx.effect(() => () => questions.dispose());
   const live = new Map<Agent["id"], Agent>();
   const busy = new Set<string>();
+  const legacyHider = new LegacySessionHider(workspaceRegistry, (id) => busy.has(id));
   const models = new Map<string, string>();
   const selections = new Map<string, ModelSelectionRef>();
   const efforts = new Map<string, string>();
@@ -633,6 +642,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     if (status !== "idle") return;
     const binding = store.bindingFor(agent.id);
     if (!binding) return;
+    legacyHider.onSettled(agent.id);
     const snap = store.inspect(agent.id);
     faults.settle(agent.id, store.resolveRoot(binding), snap.phase.kind);
     if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) {
@@ -649,6 +659,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   }, { global: true });
   ctx.on("agent/disposed", ({ agent }) => {
     streamBridge.disposeSession(agent.session.id);
+    legacyHider.onSettled(agent.session.id);
   }, { global: true });
   ctx.effect(() => () => { streamBridge.dispose(); closeSessionLive(); });
   ctx.on("session/event", (session, event) => {
@@ -757,6 +768,9 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       const id = sessionId as Agent["id"];
       return live.get(id) ?? ctx.agents.get(id);
     },
+    ensureSessionRunnable(sessionId) {
+      return legacyHider.ensureRunnable(sessionId);
+    },
     async resolveAssistantIntent(input) {
       const bound = input.sessionId ? store.bindingFor(input.sessionId)?.provider : undefined;
       const selected = input.modelSelection;
@@ -853,12 +867,10 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       await presentation.open({ projectRoot, sessionId, brief: input.brief, editorBaseUrl, design, provider });
       const prepared = produceSetup(provider, reasoningEffort);
       const handle = await ctx.agents.create({
-        // A stable data directory keeps generation sessions grouped across upgrades.
-        sessionId, meta: { cwd: store.slicesRoot(), agentPreset: "slides" },
+        // Subagent origin keeps generation sessions out of every Work sidebar view.
+        sessionId, meta: slidesSessionMeta(store.slicesRoot()),
         agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
       });
-      const registry = workspaceRegistry();
-      if (registry) await (await registry.create(store.slicesRoot(), "演示文稿 · SlideStudio")).attachSession(sessionId);
       if (reasoningEffort) efforts.set(sessionId, reasoningEffort);
       selections.set(sessionId, prepared.selection);
       live.set(sessionId, handle.agent);
@@ -895,6 +907,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         provider,
         reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog),
       );
+      await legacyHider.ensureRunnable(sessionId);
       const handle = await ctx.agents.resume({
         resumeSessionId: sessionId as Agent["id"],
         agentOptions: { ...agentOptionsForRoute(route), model },
@@ -984,6 +997,18 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     const fault = classifyAgentError({ code: error.code, message: error.detail });
     if (!isWaitAndResumeFault(fault)) continue;
     rateLimits.restore(sessionId, fault, readRateLimitWait(root));
+  }
+  // A Host restart kills every live agent before turn/end can land; without a
+  // durable marker the projections keep reading an active turn forever. Mark
+  // unclosed turns interrupted once, at activation, while nothing can be busy.
+  for (const [sessionId, binding] of store.rebuild()) {
+    try {
+      if (markInterruptedTurn(store.resolveRoot(binding))) {
+        console.warn(`[slides] marked interrupted generation turn for session ${sessionId}`);
+      }
+    } catch {
+      /* best-effort: a corrupt trace must not block plugin activation */
+    }
   }
 
   ctx.effect(() => {

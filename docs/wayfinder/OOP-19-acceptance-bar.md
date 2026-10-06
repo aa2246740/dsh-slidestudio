@@ -1,6 +1,6 @@
 # OOP-19 — 1:1 acceptance bar (locked)
 
-**Issue:** [Define 1:1 acceptance bar for native offline Kimi Slides](https://linear.app/oops-org/issue/OOP-19)  
+**Issue:** Define 1:1 acceptance bar for native offline Kimi Slides  
 **Depends on:** OOP-29 method, OOP-30 oracle schema, OOP-31 surface order  
 **Production constraint:** zero Kimi iframe/CDN at runtime after parity
 

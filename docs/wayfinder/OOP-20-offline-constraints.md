@@ -1,6 +1,6 @@
 # OOP-20 — Offline / intranet runtime constraints (locked)
 
-**Issue:** [Lock offline and airgap runtime constraints](https://linear.app/oops-org/issue/OOP-20)  
+**Issue:** Lock offline and airgap runtime constraints  
 **Product claim:** usable in **intranet / offline-from-public-internet** environments after parity  
 **Dev exception:** current development environment may use public net + Kimi iframe until 100% editor recreation (OOP-29)
 

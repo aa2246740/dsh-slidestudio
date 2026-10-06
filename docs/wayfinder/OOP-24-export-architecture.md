@@ -1,6 +1,6 @@
 # OOP-24 — Native PPTX export architecture (locked)
 
-**Issue:** [Choose native export architecture (no Kimi writer)](https://linear.app/oops-org/issue/OOP-24)  
+**Issue:** Choose native export architecture (no Kimi writer)  
 **Inputs:** OOP-19 (Edit Data required), OOP-20 (offline), OOP-21 (YAML PPTD SSOT), OOP-23 research recommendation
 
 ---

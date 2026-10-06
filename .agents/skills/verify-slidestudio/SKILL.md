@@ -29,15 +29,41 @@ Prerequisite for Codex verification: the existing shared runtime at
 Set `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` to that path if another local runtime exists.
 Do not install a project-local browser or fall back to system Chrome.
 
-## Work history and Personal entry
+## Work sidebar and Personal entry
 
 `features/work-session-entry.md` covers the Host-facing surface separately from the 28 editor
-features. Run `npm run test:client --prefix dsh-slidestudio` for the built client and
-`npm run test -w @open-slidestudio/dsh-slides-host` for workspace ownership and input guards.
-The client fixture uses a real `SliceSessionStore.inspect()` payload, a mocked Host slot registry,
-and the shared pinned browser. It proves both Personal and standalone routing, not native Host
-activation. Use native Codex CUA for the installed Desktop path; record its actual package and
-runtime separately. A successful install alone does not prove updated server code is loaded.
+features. Generation sessions are hidden from the Work sidebar (`origin: "subagent"` for new ones,
+archive + re-hide for legacy ones); project history lives in the Hub's `/api/projects` list, not in
+Work. Run `npm run test:client --prefix dsh-slidestudio` for the built client and
+`npm run test -w @open-slidestudio/dsh-slides-host` for the hide sweep, `LegacySessionHider` and
+input guards. The client fixture uses a real `SliceSessionStore.inspect()` payload, a mocked Host
+slot registry, and the shared pinned browser. It proves the composer takeover on the archived path
+and standalone routing, not native Host activation. Use native Codex CUA for the installed Desktop
+path; record its actual package and runtime separately. A successful install alone does not prove
+updated server code is loaded.
+
+`dsh-slidestudio` is not in the root workspaces: install its deps standalone before `test:client`
+with `pnpm --dir dsh-slidestudio install --ignore-workspace --frozen-lockfile
+--config.auto-install-peers=false` (its lockfile pins `autoInstallPeers: false`; `npm install`
+fails on the `link:` dep and the optional `dsh-personal` peer is not on npm).
+
+## Session-hiding probe
+
+`scripts/session-hiding/` verifies the Work-sidebar hiding path end to end inside a real Host —
+the layer unit tests mock: service existence, durable session headers, the registry round-trip:
+
+```bash
+DSH_RC2_HOST=<dir with @deepseek-ai/dsh@rc.2 installed> \
+  node .agents/skills/verify-slidestudio/scripts/session-hiding/run.mjs [--timeout 120]
+```
+
+It needs `dsh-slidestudio/lib` and `packages/dsh-slides-host/dist` built. `run.mjs` boots
+`npx dsh web --patch … --no-open --port 0` under a fresh temp `DSH_HOME` (a real stack is never
+disturbed), then `probe.js` runs in-process: a `slidesSessionMeta` session (the real session store
+must persist `origin: "subagent"` in its header), a legacy slides session plus a SlideStudio-titled
+workspace, `hideSlidesSessions` on the real `workspaceRegistry`, and `LegacySessionHider`
+unarchive → settle → re-archive. No model calls. 9 assertions; log: `output/session-hiding/run-*.log`.
+Exit 1 on any FAIL.
 
 ## RC2 isolation probe
 

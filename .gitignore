@@ -40,3 +40,6 @@ vendor/dsh-llm-pi-ai/node_modules/
 fixtures/**/.versions/
 fixtures/**/_agent/
 .local/
+
+# local credentials / per-machine MCP config
+.devin/*.local.json

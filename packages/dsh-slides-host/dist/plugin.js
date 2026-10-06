@@ -1,5 +1,5 @@
 import { AssistantQuestions } from "./assistant-questions.js";
-import { organizeSlidesSessions } from "./session-workspace.js";
+import { hideSlidesSessions, LegacySessionHider, slidesSessionMeta, } from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
 import { inferAssistantIntent } from "./assistant-intent.js";
 import crypto from "node:crypto";
@@ -24,6 +24,7 @@ import { generationFormat, assertAttachmentBudget, attachmentDeliveryBlock, inpu
 import { appendAgentTrace, traceRowsFromSessionEvent } from "./agent-trace.js";
 import { publishSessionLive, closeSessionLive } from "./session-live.js";
 import { AgentStreamBridge } from "./stream-bridge.js";
+import { markInterruptedTurn } from "./interruption.js";
 import { AgentFaults, friendlyProviderCause, classifyAgentError, clearAgentError, clearRateLimitWait, isMinimaxCnFailoverFault, isOpenRouterFailoverFault, isWaitAndResumeFault, parseRetryAfterMs, readAgentError, readRateLimitWait, recordAgentError, writeRateLimitWait, } from "./agent-fault.js";
 import { RateLimitResumeController } from "./rate-limit-resume.js";
 import { agentOptionsForRoute, assertSlidesGenerateReady, bindMinimaxCnKey, markGrokFailed, markMinimaxCnAuthFailed, markOpenRouterHardFailed, minimaxCnKeyPresent, modelForRoute, OPENROUTER_MINIMAX_FREE_MODEL, openrouterKeyPresent, resolveSlidesLlmRoute, SLIDES_LLM_DEFAULT_MODEL, SLIDES_LLM_PROVIDER, } from "./args.js";
@@ -111,9 +112,9 @@ export function apply(ctx, config = {}) {
     // Cold metadata reads do not resume old agents or send model requests.
     ctx.inject(["workspaceRegistry", "sessionQuery"], async () => {
         const query = ctx.get("sessionQuery");
-        const result = await organizeSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()));
+        const result = await hideSlidesSessions(workspaceRegistry(), (await query.listSessions()).map(row => row.header), new Set(store.rebuild().keys()), new Set([workspaceRoot, dataRoot]));
         for (const failure of result.failures)
-            console.warn("[slides-host] workspace organization:", failure);
+            console.warn("[slides-host] hiding slides sessions:", failure);
     });
     const presentation = createPresentationRun({
         repoRoot: workspaceRoot,
@@ -128,6 +129,7 @@ export function apply(ctx, config = {}) {
     ctx.effect(() => () => questions.dispose());
     const live = new Map();
     const busy = new Set();
+    const legacyHider = new LegacySessionHider(workspaceRegistry, (id) => busy.has(id));
     const models = new Map();
     const selections = new Map();
     const efforts = new Map();
@@ -479,6 +481,7 @@ export function apply(ctx, config = {}) {
         const binding = store.bindingFor(agent.id);
         if (!binding)
             return;
+        legacyHider.onSettled(agent.id);
         const snap = store.inspect(agent.id);
         faults.settle(agent.id, store.resolveRoot(binding), snap.phase.kind);
         if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) {
@@ -496,6 +499,7 @@ export function apply(ctx, config = {}) {
     }, { global: true });
     ctx.on("agent/disposed", ({ agent }) => {
         streamBridge.disposeSession(agent.session.id);
+        legacyHider.onSettled(agent.session.id);
     }, { global: true });
     ctx.effect(() => () => { streamBridge.dispose(); closeSessionLive(); });
     ctx.on("session/event", (session, event) => {
@@ -600,6 +604,9 @@ export function apply(ctx, config = {}) {
             const id = sessionId;
             return live.get(id) ?? ctx.agents.get(id);
         },
+        ensureSessionRunnable(sessionId) {
+            return legacyHider.ensureRunnable(sessionId);
+        },
         async resolveAssistantIntent(input) {
             const bound = input.sessionId ? store.bindingFor(input.sessionId)?.provider : undefined;
             const selected = input.modelSelection;
@@ -689,13 +696,10 @@ export function apply(ctx, config = {}) {
             await presentation.open({ projectRoot, sessionId, brief: input.brief, editorBaseUrl, design, provider });
             const prepared = produceSetup(provider, reasoningEffort);
             const handle = await ctx.agents.create({
-                // A stable data directory keeps generation sessions grouped across upgrades.
-                sessionId, meta: { cwd: store.slicesRoot(), agentPreset: "slides" },
+                // Subagent origin keeps generation sessions out of every Work sidebar view.
+                sessionId, meta: slidesSessionMeta(store.slicesRoot()),
                 agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
             });
-            const registry = workspaceRegistry();
-            if (registry)
-                await (await registry.create(store.slicesRoot(), "演示文稿 · SlideStudio")).attachSession(sessionId);
             if (reasoningEffort)
                 efforts.set(sessionId, reasoningEffort);
             selections.set(sessionId, prepared.selection);
@@ -731,6 +735,7 @@ export function apply(ctx, config = {}) {
                 presentation.hydrate(root);
             }
             const prepared = produceSetup(provider, reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog));
+            await legacyHider.ensureRunnable(sessionId);
             const handle = await ctx.agents.resume({
                 resumeSessionId: sessionId,
                 agentOptions: { ...agentOptionsForRoute(route), model },
@@ -827,6 +832,19 @@ export function apply(ctx, config = {}) {
         if (!isWaitAndResumeFault(fault))
             continue;
         rateLimits.restore(sessionId, fault, readRateLimitWait(root));
+    }
+    // A Host restart kills every live agent before turn/end can land; without a
+    // durable marker the projections keep reading an active turn forever. Mark
+    // unclosed turns interrupted once, at activation, while nothing can be busy.
+    for (const [sessionId, binding] of store.rebuild()) {
+        try {
+            if (markInterruptedTurn(store.resolveRoot(binding))) {
+                console.warn(`[slides] marked interrupted generation turn for session ${sessionId}`);
+            }
+        }
+        catch {
+            /* best-effort: a corrupt trace must not block plugin activation */
+        }
     }
     ctx.effect(() => {
         const handlers = [];

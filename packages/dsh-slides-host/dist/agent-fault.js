@@ -91,6 +91,7 @@ const PAUSE_CODES = new Set([
     "provider-rate-limit",
     "provider-unavailable",
     "operator-stop",
+    "host-interrupted",
     "tool-invalid-args-loop",
     "repeated-invalid-args",
     "repeated-business-rejection",

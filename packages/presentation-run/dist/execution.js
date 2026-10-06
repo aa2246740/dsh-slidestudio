@@ -81,6 +81,7 @@ export function projectExecution(input) {
         "provider-rate-limit",
         "provider-unavailable",
         "operator-stop",
+        "host-interrupted",
         "tool-invalid-args-loop",
         "repeated-invalid-args",
         "repeated-business-rejection",
@@ -90,11 +91,16 @@ export function projectExecution(input) {
         "quota_exhausted",
         "operator_stop",
     ]);
-    if (fault)
+    // A verified delivery survives a late turn fault (e.g. the model's closing
+    // message fails after export_deck): the artifact is current, so the run is
+    // delivered and the fault stays visible on the turn row instead of reopening
+    // a resumable failure that would just fault again.
+    const delivered = !blockers.length && Boolean(input.verifiedDelivery) && input.agentBusy === false;
+    if (fault && !delivered)
         kind = fault.phase === "paused" || PAUSED_FAULT_CODES.has(fault.code ?? "") ? "paused" : "failed";
     else if (identityBlocked || !activityKnown)
         kind = "blocked";
-    else if (!blockers.length && input.verifiedDelivery && input.agentBusy === false)
+    else if (delivered)
         kind = "delivered";
     else if (input.exporting)
         kind = "exporting";
