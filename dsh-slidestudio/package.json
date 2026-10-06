@@ -1,6 +1,6 @@
 {
   "name": "dsh-slidestudio",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "DSH SlideStudio — AI presentations with editable PPTX export for DeepSeek Harness",
   "type": "module",
   "main": "lib/dsh-slidestudio.js",
