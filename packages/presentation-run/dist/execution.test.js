@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createEmptyProject, listComposedPage, saveProject } from "@open-slidestudio/pptd-v2";
 import { inspectProjectExecution as projectExecution } from "./execution-observation.js";
+import { projectExecution as projectExecutionPure } from "./execution.js";
 import { ensureRunLedger } from "./domain/run-ledger.js";
 const defaultCapability = {
     research: { configured: true, via: "native" },
@@ -217,6 +218,63 @@ describe("projectExecution candidate regressions", () => {
             terminalFault: { code: "agent-error", message: "boom" },
         });
         assert.equal(unknown.status.kind, "failed");
+    });
+    it("keeps delivered when the turn faults after a verified export", () => {
+        // Regression: export_deck succeeded and verified, then the model's closing
+        // message hit CONTEXT_WINDOW_EXCEEDED. The fault must not mask delivery.
+        const result = projectExecutionPure({
+            ledger: JSON.parse(JSON.stringify({
+                schemaVersion: 1, runId: "r", createdAt: "t", updatedAt: "t",
+                sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
+                facts: [{
+                        type: "todo.committed", factId: "fact-todo", at: "t", contextEpochId: "e",
+                        todoSha256: "todo-sha", itemCount: 1, pageIds: ["1_cover"],
+                        pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
+                    }],
+            })),
+            identity: { kind: "resolved", pages: new Map([["1_cover", "pages/1_cover.pptd"]]), aliases: new Map() },
+            inspection: {
+                initialized: true, referencesComplete: true, missingReferenceChunks: [], todoCount: 1,
+                pages: [{ pageId: "1_cover", revision: 1, pageSha256: "p", raster: true, imageEmitted: false, visualReview: "missing", layout: "pass" }],
+                structuralReview: "pass", composeReady: true, composeBlockers: [], composed: true,
+            },
+            agentBusy: false,
+            capability: defaultCapability,
+            verifiedDelivery: {
+                artifactPath: "export/deck.pptx", artifactSha256: "a", artifactBytes: 1000,
+                reportPath: "export/export-report.json", reportSha256: "b",
+                slideCount: 1, inputFingerprint: "fp",
+            },
+            terminalFault: { code: "provider-error", message: "context overflow", recoverable: true },
+        });
+        assert.equal(result.status.kind, "delivered");
+        assert.equal(result.recovery.kind, "none");
+        assert.ok(result.delivery);
+    });
+    it("still projects the fault when delivery is not verified", () => {
+        const result = projectExecutionPure({
+            ledger: JSON.parse(JSON.stringify({
+                schemaVersion: 1, runId: "r", createdAt: "t", updatedAt: "t",
+                sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
+                facts: [{
+                        type: "todo.committed", factId: "fact-todo", at: "t", contextEpochId: "e",
+                        todoSha256: "todo-sha", itemCount: 1, pageIds: ["1_cover"],
+                        pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
+                    }],
+            })),
+            identity: { kind: "resolved", pages: new Map([["1_cover", "pages/1_cover.pptd"]]), aliases: new Map() },
+            inspection: {
+                initialized: true, referencesComplete: true, missingReferenceChunks: [], todoCount: 1,
+                pages: [{ pageId: "1_cover", revision: 1, pageSha256: "p", raster: true, imageEmitted: false, visualReview: "missing", layout: "pass" }],
+                structuralReview: "pass", composeReady: true, composeBlockers: [], composed: true,
+            },
+            agentBusy: false,
+            capability: defaultCapability,
+            verifiedDelivery: null,
+            terminalFault: { code: "provider-error", message: "context overflow", recoverable: true },
+        });
+        assert.equal(result.status.kind, "failed");
+        assert.equal(result.recovery.kind, "continue");
     });
 });
 //# sourceMappingURL=execution.test.js.map
