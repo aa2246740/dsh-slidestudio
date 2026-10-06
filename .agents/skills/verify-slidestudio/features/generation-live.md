@@ -39,6 +39,20 @@ execution blockers from a real project. `freestyle-planning.test.ts` and the Hos
 `produce-agent-tools.test.ts` exercise freely adopted teaching designs through both
 planning gates, including an outline update after the initial commit.
 
+## Host-restart interruption (0.2.5)
+
+A Host/App kill mid-turn (`SIGKILL`, crash, OS AutomaticTermination) leaves the
+agent-trace turn open forever and the UI reads it as 正在思考. The Host now marks
+the dead turn durably: `markInterruptedTurn` (`interruption.ts`) closes open
+step/turn trace rows as cancelled and writes a `host-interrupted` fault. It runs
+once per bound project at plugin activation (nothing can be busy at boot) and
+lazily on `/slides/state` when the session is idle. The projections then read
+`paused` with `recovery.kind === "continue"`, so the editor shows 已暂停 plus the
+existing 继续完成生成 action instead of a stuck spinner. A pending rate-limit
+retry or an existing fault still owns the verdict and is never overwritten.
+`interruption.test.ts` covers the real signature where the turn-start row has
+scrolled out of the 128 KB trace tail and only a running step remains.
+
 On 2026-10-05, the incremental UI pass covered `hub-create`, `hub-launch`,
 `assistant-model`, `generation-live`, and `export-pptx`: 81/81 checks, with no browser
 errors. Real model/image delivery evidence is recorded separately in the local bugfix report.

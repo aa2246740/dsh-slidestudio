@@ -201,7 +201,7 @@ describe("projectExecution candidate regressions", () => {
     });
     it("projects paused on host provider-* fault codes even without a paused phase", () => {
         const root = tempProjectRoot();
-        for (const code of ["provider-auth", "provider-rate-limit", "operator-stop"]) {
+        for (const code of ["provider-auth", "provider-rate-limit", "operator-stop", "host-interrupted"]) {
             const result = projectExecution({
                 root,
                 agentBusy: false,

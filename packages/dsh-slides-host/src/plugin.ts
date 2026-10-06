@@ -53,6 +53,7 @@ import {
 import { appendAgentTrace, traceRowsFromSessionEvent } from "./agent-trace.js";
 import { publishSessionLive, closeSessionLive } from "./session-live.js";
 import { AgentStreamBridge } from "./stream-bridge.js";
+import { markInterruptedTurn } from "./interruption.js";
 import {
   AgentFaults,
   friendlyProviderCause,
@@ -996,6 +997,18 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     const fault = classifyAgentError({ code: error.code, message: error.detail });
     if (!isWaitAndResumeFault(fault)) continue;
     rateLimits.restore(sessionId, fault, readRateLimitWait(root));
+  }
+  // A Host restart kills every live agent before turn/end can land; without a
+  // durable marker the projections keep reading an active turn forever. Mark
+  // unclosed turns interrupted once, at activation, while nothing can be busy.
+  for (const [sessionId, binding] of store.rebuild()) {
+    try {
+      if (markInterruptedTurn(store.resolveRoot(binding))) {
+        console.warn(`[slides] marked interrupted generation turn for session ${sessionId}`);
+      }
+    } catch {
+      /* best-effort: a corrupt trace must not block plugin activation */
+    }
   }
 
   ctx.effect(() => {

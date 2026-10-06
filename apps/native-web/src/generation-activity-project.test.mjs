@@ -59,6 +59,27 @@ describe("project-bound generation activity", () => {
     assert.ok(activity.execution?.blockers.some((blocker) => blocker.code === "missing_plan"), JSON.stringify(activity.execution));
   });
 
+  it("projects a persisted host-interrupted fault as a paused, resumable phase", async () => {
+    const root = path.join(scratch, "interrupted");
+    pptd.createEmptyProject(root, { title: "Interrupted regression" });
+    writeSliceRuntime(root, { brief: "A deck killed by restart", design: { kind: "self-directed" }, editorBaseUrl: "http://127.0.0.1:1", strictExecution: true });
+    initializeRunLedger(root);
+    fs.writeFileSync(path.join(root, "_agent", "presentation-run.v1.json"), JSON.stringify({ sessionId: "interrupted" }));
+    fs.writeFileSync(path.join(root, "_agent", "dsh-agent-error.json"), JSON.stringify({
+      code: "host-interrupted",
+      detail: "应用或主机已重启，生成中断；已完成的内容保留，可在编辑器中继续。",
+    }));
+    const activity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } }, request(root, "interrupted"), root,
+    );
+    assert.equal(activity.phase, "paused");
+    assert.equal(activity.error?.code, "host-interrupted");
+    assert.ok(
+      activity.stages.some((stage) => stage.status === "needs-attention" && /已暂停/.test(stage.detail ?? "")),
+      JSON.stringify(activity.stages),
+    );
+  });
+
   it("keeps two interleaved project polls bound to their own sessions", async () => {
     const first = await generationActivityForRequest({}, request(firstRoot, "session-first"), secondRoot, readActivity);
     const second = await generationActivityForRequest({}, request(secondRoot, "session-second"), firstRoot, readActivity);

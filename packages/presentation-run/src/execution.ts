@@ -103,6 +103,7 @@ export function projectExecution(input: ProjectExecutionInput): ExecutionProject
     "provider-rate-limit",
     "provider-unavailable",
     "operator-stop",
+    "host-interrupted",
     "tool-invalid-args-loop",
     "repeated-invalid-args",
     "repeated-business-rejection",

@@ -2026,6 +2026,7 @@ async function readGenerationActivity(native, root) {
     "provider-rate-limit",
     "provider-unavailable",
     "operator-stop",
+    "host-interrupted",
     "tool-invalid-args-loop",
     "repeated-business-rejection",
     "planning-no-progress-budget",

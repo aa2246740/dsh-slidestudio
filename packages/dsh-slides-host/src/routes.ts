@@ -38,6 +38,7 @@ import {
   type RuntimeModelCatalog,
 } from "./local-models.js";
 import { isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
+import { markInterruptedTurn } from "./interruption.js";
 import {
   assertExpectedAttempt, beginAttempt, parseExpectedAttemptId, parseModelSelection, readAttempt,
   SessionTransitionConflict, withSessionTransition,
@@ -733,14 +734,25 @@ export function handleSlidesRequest(
     const stateParams = match(pathname, "/slides/state/:sessionId");
     if (req.method === "GET" && stateParams) {
       const sessionId = stateParams.sessionId!;
-      const snap = runtime.store.inspect(sessionId);
       const binding = runtime.store.bindingFor(sessionId);
+      // A dead turn outlives its agent only on disk: when nothing is busy, a
+      // trace turn still open means the process that owned it is gone. Mark it
+      // interrupted before projecting so the reader sees paused, not thinking.
+      const boundRoot = binding ? runtime.store.resolveRoot(binding) : undefined;
+      if (boundRoot && !runtime.agentBusy(sessionId)) {
+        try {
+          markInterruptedTurn(boundRoot);
+        } catch {
+          /* best-effort: observation must never fail on a trace write */
+        }
+      }
+      const snap = runtime.store.inspect(sessionId);
       let inspection = undefined;
       if (binding) {
-        runtime.presentation.hydrate(runtime.store.resolveRoot(binding));
+        runtime.presentation.hydrate(boundRoot!);
         inspection = await runtime.presentation.inspect(sessionId);
       }
-      const root = binding ? runtime.store.resolveRoot(binding) : undefined;
+      const root = boundRoot;
       const wait = root ? readRateLimitWait(root) : undefined;
       const fault = root ? readAgentError(root) : undefined;
       const attempt = root ? readAttempt(root) : undefined;

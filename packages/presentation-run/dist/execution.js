@@ -81,6 +81,7 @@ export function projectExecution(input) {
         "provider-rate-limit",
         "provider-unavailable",
         "operator-stop",
+        "host-interrupted",
         "tool-invalid-args-loop",
         "repeated-invalid-args",
         "repeated-business-rejection",
