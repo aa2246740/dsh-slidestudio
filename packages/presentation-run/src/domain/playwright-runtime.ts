@@ -130,6 +130,9 @@ function readRuntimeStamp(runtimeFile: string): RuntimeStamp {
 
 export const RUNTIME_EXECUTABLE_NAMES = [
   "chrome-headless-shell",
+  // Windows: the headless-shell binary is chrome-headless-shell.exe — without
+  // it a perfectly installed runtime reads as unusable on Windows.
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",
@@ -464,6 +467,7 @@ const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");
 const EXECUTABLE_NAMES = new Set([
   "chrome-headless-shell",
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",

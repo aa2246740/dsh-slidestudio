@@ -5,6 +5,8 @@ export declare const inject: string[];
 declare module "@deepseek-ai/cordis" {
     interface Context {
         webServer: {
+            /** The listening port (set once the service has activated). */
+            readonly port?: number;
             register(route: {
                 kind: "exact" | "prefix";
                 path: string;

@@ -420,7 +420,10 @@ function mutateLedger(root: string, apply: (current: RunLedgerV1) => RunLedgerV1
     const current = readRunLedger(root);
     if (!current) throw new Error("run ledger is not initialized");
     const next = apply(current);
-    writeLedger(root, next);
+    // Reducers return the same object when nothing changed; a read-only
+    // mutation (e.g. an unchanged execution-policy ensure on a state poll)
+    // must not rewrite the whole ledger on disk.
+    if (next !== current) writeLedger(root, next);
     return next;
   } finally {
     release();
@@ -453,6 +456,15 @@ export function ensureRunLedgerExecutionPolicy(
 ): RunLedgerV1 | undefined {
   const existing = readRunLedger(root);
   if (!existing) return undefined;
+  // Cheap early-out before taking the lock: hydrate() calls this on every
+  // /slides/state poll, so an already-matching policy must not churn the
+  // lock file or rewrite the ledger. The locked mutation re-validates below.
+  if (
+    existing.sourcePack.executionPolicy !== undefined &&
+    stableSha256(existing.sourcePack.executionPolicy) === stableSha256(executionPolicy)
+  ) {
+    return existing;
+  }
   return mutateLedger(root, (current) => {
     const currentPolicy = current.sourcePack.executionPolicy;
     if (currentPolicy && stableSha256(currentPolicy) !== stableSha256(executionPolicy)) {
