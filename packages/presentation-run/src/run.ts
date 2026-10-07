@@ -22,7 +22,7 @@ import type {
   RunInspection,
 } from "./types.js";
 import { runDomainHand } from "./domain/domain-hands.js";
-import { writeJsonAtomic } from "./domain/atomic-file.js";
+import { writeFileAtomic } from "./domain/atomic-file.js";
 import { parseCanonicalPagePlan, type CanonicalPlanPage } from "./domain/page-plan.js";
 import {
   currentVisualReviewsMissing,
@@ -47,7 +47,17 @@ function bindingPath(projectRoot: string): string {
 }
 
 function writeBinding(input: BindingFile): void {
-  writeJsonAtomic(bindingPath(input.projectRoot), input);
+  const file = bindingPath(input.projectRoot);
+  // Skip the rewrite when the persisted content already matches: hydrate()
+  // re-persists the unchanged binding on every /slides/state poll, which turns
+  // the editor's heartbeat into a constant disk write for every open project.
+  const content = `${JSON.stringify(input, null, 2)}\n`;
+  try {
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content) return;
+  } catch {
+    // Unreadable binding file — fall through and overwrite it.
+  }
+  writeFileAtomic(file, content);
 }
 
 function readBinding(projectRoot: string): BindingFile | undefined {

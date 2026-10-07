@@ -85,15 +85,26 @@ function registerSlidesPreset(ctx) {
     }));
 }
 /** Lazily spawns the editor sidecar on its own loopback port. */
-function startEditorSidecar(repoRoot, dataRoot) {
+function startEditorSidecar(repoRoot, dataRoot, kernelPort) {
     const server = join(repoRoot, "apps/native-web/src/server.mjs");
     if (!existsSync(server)) {
         console.warn(`[dsh-slidestudio] editor sidecar not found at ${server}`);
         return undefined;
     }
+    const env = {
+        ...process.env,
+        PORT: String(EDITOR_PORT),
+        OPEN_SLIDESTUDIO_ROOT: repoRoot,
+        SLIDESTUDIO_DATA_DIR: dataRoot,
+    };
+    // The sidecar proxies /slides/* to the host kernel. Without the real port it
+    // defaults to 13080, which is dead in every real install — the standalone
+    // editor's health/state/stop calls then all return 502.
+    if (kernelPort !== undefined && kernelPort > 0)
+        env.SLIDES_DSH_PORT = String(kernelPort);
     const child = spawn(process.execPath, [server], {
         cwd: repoRoot,
-        env: { ...process.env, PORT: String(EDITOR_PORT), OPEN_SLIDESTUDIO_ROOT: repoRoot, SLIDESTUDIO_DATA_DIR: dataRoot },
+        env,
         stdio: ["ignore", "ignore", "inherit"],
     });
     child.on("error", (error) => {
@@ -169,7 +180,7 @@ export function apply(ctx) {
         editorBaseUrl: editorOrigin,
         personal: true,
     });
-    const sidecar = startEditorSidecar(repoRoot, dataRoot);
+    const sidecar = startEditorSidecar(repoRoot, dataRoot, ctx.webServer?.port);
     const editorReady = sidecar ? waitForEditor(editorOrigin) : Promise.resolve(false);
     ctx.effect(() => () => {
         if (sidecar && !sidecar.killed)

@@ -2401,13 +2401,17 @@ function ensureSession(native, projectRoot, pageHint, tabId = "default") {
   return entry.session;
 }
 
-/** Sidecar proxy: forward only what the kernel needs — cookies, ambient auth
- * and browser hop-by-hop headers never cross to the upstream listener. */
+/** Sidecar proxy: forward only what the kernel needs — ambient auth and
+ * browser hop-by-hop headers never cross to the upstream listener. The
+ * browser session cookie must pass: its host-scoped name/port ignores the
+ * sidecar port, and without it every kernel route answers 401 — which is
+ * exactly the dead-editor shape users reported. */
 const PROXY_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
   "content-type",
   "content-length",
+  "cookie",
   "x-requested-with",
 ]);
 function proxyHeaders(req, kernelPort) {

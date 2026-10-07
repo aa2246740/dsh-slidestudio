@@ -43,6 +43,7 @@ const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");
 const EXECUTABLE_NAMES = new Set([
   "chrome-headless-shell",
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",

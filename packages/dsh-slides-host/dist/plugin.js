@@ -41,6 +41,12 @@ import { ToolInvalidArgsLoopGuard } from "./tool-loop-guard.js";
 import { ProductProgressSessionGuard, } from "./product-progress-guard.js";
 export const name = "slides-host";
 export const inject = ["tools", "webServer", "agents", "attachments", "llm"];
+/**
+ * Max time /slides/sessions/:id/stop waits for the agent to honour the cancel
+ * before reporting the stop anyway — a hung turn must never keep the operator
+ * control (and the busy flag that drives the editor's "正在中止" state) pending.
+ */
+const OPERATOR_STOP_IDLE_TIMEOUT_MS = 15_000;
 export const Config = z.object({
     workspaceRoot: z.string().default(""),
     dataRoot: z.string().default(""),
@@ -584,7 +590,17 @@ export function apply(ctx, config = {}) {
             try {
                 if (agent) {
                     agent.cancel({ kind: "user" });
-                    await agent.whenIdle();
+                    // Bound the idle wait: an abort signal a hung tool call never honors
+                    // (or a wake that re-arms the driver) would otherwise keep whenIdle
+                    // pending forever — /slides/sessions/:id/stop never answers, `busy`
+                    // never clears, and the editor is stuck on "正在中止" while the
+                    // state polls keep rewriting the run files. Stop reporting must not
+                    // depend on the kernel's abort actually landing.
+                    const timeout = new Promise((resolve) => {
+                        const timer = setTimeout(resolve, OPERATOR_STOP_IDLE_TIMEOUT_MS);
+                        timer.unref?.();
+                    });
+                    await Promise.race([agent.whenIdle(), timeout]);
                 }
             }
             finally {

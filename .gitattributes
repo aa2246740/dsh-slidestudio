@@ -1,2 +1,6 @@
 # Preserve raw oracle text exactly as captured, including source whitespace.
 docs/editor-oracle/baselines/kimi-v1-2026-08-20/editor-live/body-text.txt -whitespace
+# The OpenKimi source pack is byte-verified against its manifest; CRLF
+# conversion on Windows checkouts breaks the byte-length check for every
+# generation run. Pin LF checkout for the whole verified tree.
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/** text eol=lf
