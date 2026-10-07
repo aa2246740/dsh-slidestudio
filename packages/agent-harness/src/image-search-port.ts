@@ -1,7 +1,15 @@
 /**
  * Pluggable image search. No vendor hardcode.
  * POST { query } → { images: [{ url | b64_json, width, height, attribution }] }.
+ * Non-generic presets delegate to the shared vendor-preset port.
  */
+import {
+  createImageSearchPort as createCoreImageSearchPort,
+  IMAGE_SEARCH_PRESETS,
+  type EndpointTemplate,
+  type ImageSearchPortConfig as CoreImageSearchPortConfig,
+} from "@open-slidestudio/presentation-run";
+
 export type ImageSearchHit = {
   bytes: Buffer;
   mime: "image/png" | "image/jpeg" | "image/webp";
@@ -20,6 +28,9 @@ export type ImageSearchPortConfig = {
   url?: string;
   apiKey?: string;
   timeoutMs?: number;
+  /** Wire format preset; "generic"/empty uses the local POST path below. */
+  preset?: string;
+  template?: EndpointTemplate;
 };
 
 export type ImageSearchPort = {
@@ -36,14 +47,33 @@ export function imageSearchConfigFromEnv(
   return {
     url: env.SLIDESTUDIO_IMAGE_SEARCH_URL?.trim() || undefined,
     apiKey: env.SLIDESTUDIO_IMAGE_SEARCH_KEY?.trim() || undefined,
+    preset: env.SLIDESTUDIO_IMAGE_SEARCH_PRESET?.trim() || undefined,
+    template: templateFromEnv(env.SLIDESTUDIO_IMAGE_SEARCH_TEMPLATE),
     timeoutMs: Number(env.SLIDESTUDIO_IMAGE_SEARCH_TIMEOUT_MS) || 20_000,
   };
+}
+
+function templateFromEnv(raw: string | undefined): EndpointTemplate | undefined {
+  const text = raw?.trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as EndpointTemplate)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function imageSearchConfigured(
   cfg: ImageSearchPortConfig = imageSearchConfigFromEnv(),
 ): boolean {
-  return Boolean(cfg.url);
+  if (!cfg.url) return false;
+  const needsKey = ["pixabay", "pexels", "unsplash", "bing"].includes(
+    cfg.preset ?? "",
+  );
+  return !needsKey || Boolean(cfg.apiKey?.trim());
 }
 
 function mimeFromBytes(bytes: Buffer): ImageSearchHit["mime"] {
@@ -111,6 +141,18 @@ export function createImageSearchPort(
           kind: "none",
           note: "no image search URL — design without a bitmap, or use generate if that port is on",
         };
+      }
+      const preset = cfg.preset?.trim();
+      if (
+        preset &&
+        preset !== "generic" &&
+        (IMAGE_SEARCH_PRESETS as readonly string[]).includes(preset)
+      ) {
+        const core = createCoreImageSearchPort(
+          cfg as unknown as CoreImageSearchPortConfig,
+          deps,
+        );
+        return core.search(q);
       }
       const fetchFn = deps.fetch ?? fetch;
       const ctrl = new AbortController();

@@ -14,7 +14,9 @@ export { rasterRuntimeReady, pinnedPlaywrightRuntimePath, repoPlaywrightRuntimeF
 export { resolvePlaywrightRuntime, runtimeFileReady, runtimeLayoutUsable, discoverMachinePlaywright, machineRuntimeReuse, materializeManagedRuntime, provisionManagedRuntime, playwrightRuntimeSource, defaultPlaywrightBrowsersDirs, defaultSlidesStateDir, managedPlaywrightRuntimeDir, managedPlaywrightRuntimeFile, codexPlaywrightRuntimeFile, PINNED_PLAYWRIGHT_VERSION, PINNED_CHROMIUM_REVISION, } from "./domain/playwright-runtime.js";
 export type { PlaywrightRuntimeRoots, PlaywrightRuntimeResolution, PlaywrightRuntimeSource, DiscoveredPlaywright, ProvisionOptions, ProvisionResult, RuntimeSourceOptions, } from "./domain/playwright-runtime.js";
 export { grokWebSearch, createGrokImageSearchPort, XAI_API_BASE as GROK_XAI_API_BASE, } from "./domain/grok-hosted.js";
-export { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv, GROK_IMAGINE_MODEL, } from "./domain/image-port.js";
+export { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv, imageConfigured, GROK_IMAGINE_MODEL, IMAGE_GENERATE_PRESETS, type ImagePortConfig, type ImageGeneratePreset, type GeneratedImage, } from "./domain/image-port.js";
+export { createImageSearchPort, imageSearchConfigFromEnv, imageSearchConfigured, IMAGE_SEARCH_PRESETS, type ImageSearchPortConfig, type ImageSearchPreset, type ImageSearchPort, type ImageSearchHit, type ImageSearchNone, } from "./domain/image-search-port.js";
+export type { EndpointTemplate } from "./domain/endpoint-template.js";
 export { CAPABILITY_LEDGER, ledgerFate } from "./capability-ledger.js";
 export { listSourceReceipts, recordSourceReceipt, consultedAdoptedExecuted, requireConsultAdoptBeforeWrite, } from "./receipts.js";
 export { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";

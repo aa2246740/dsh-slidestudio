@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { IMAGE_GENERATE_PRESETS, IMAGE_SEARCH_PRESETS, } from "@open-slidestudio/presentation-run";
 const SETTINGS_FILE = "slides-tool-settings.json";
 const OFF = { kind: "off" };
 export function emptyToolSettings() {
@@ -24,6 +25,30 @@ function assertHttpUrl(url, label) {
     }
     return url;
 }
+function parseTemplate(value, label) {
+    if (value == null)
+        return undefined;
+    if (!isRecord(value))
+        throw new Error(`${label}.template must be an object`);
+    const headers = {};
+    if (value.headers != null) {
+        if (!isRecord(value.headers))
+            throw new Error(`${label}.template.headers must be an object`);
+        for (const [k, v] of Object.entries(value.headers)) {
+            if (typeof v === "string" && k.trim())
+                headers[k.trim()] = v;
+        }
+    }
+    const out = {
+        url: readString(value.url) || undefined,
+        method: readString(value.method) || undefined,
+        headers: Object.keys(headers).length ? headers : undefined,
+        body: typeof value.body === "string" ? value.body : undefined,
+        imagePath: readString(value.imagePath) || undefined,
+        attribution: readString(value.attribution) || undefined,
+    };
+    return Object.values(out).some((v) => v != null) ? out : undefined;
+}
 function parseEndpoint(value, label, previous) {
     if (value == null)
         return previous;
@@ -40,11 +65,20 @@ function parseEndpoint(value, label, previous) {
     const keepKey = value.keepKey === true || readString(value.apiKey) === "";
     const nextKey = readString(value.apiKey);
     const apiKey = nextKey || (keepKey && previous.kind === "custom" ? previous.apiKey : "");
+    const allowed = label === "imageGenerate"
+        ? IMAGE_GENERATE_PRESETS
+        : IMAGE_SEARCH_PRESETS;
+    const preset = readString(value.preset);
+    if (preset && !allowed.includes(preset)) {
+        throw new Error(`${label}.preset must be one of ${allowed.join(", ")}`);
+    }
     return {
         kind: "custom",
         url: assertHttpUrl(url, label),
         apiKey,
         model: readString(value.model),
+        preset: preset || undefined,
+        template: parseTemplate(value.template, label),
     };
 }
 export function parseToolSettingsPatch(value, previous) {
@@ -56,16 +90,25 @@ export function parseToolSettingsPatch(value, previous) {
         imageGenerate: parseEndpoint(value.imageGenerate, "imageGenerate", previous.imageGenerate),
     };
 }
-function endpointFromEnv(url, apiKey, model = "") {
+function endpointFromEnv(url, apiKey, model = "", preset = "", templateJson = "") {
     if (!url)
         return OFF;
-    return { kind: "custom", url, apiKey, model };
+    let template;
+    if (templateJson.trim()) {
+        try {
+            template = parseTemplate(JSON.parse(templateJson), "env");
+        }
+        catch {
+            template = undefined;
+        }
+    }
+    return { kind: "custom", url, apiKey, model, preset: preset || undefined, template };
 }
 export function toolSettingsFromEnv(env) {
     return {
         research: OFF,
-        imageSearch: endpointFromEnv(env.SLIDESTUDIO_IMAGE_SEARCH_URL?.trim() || "", env.SLIDESTUDIO_IMAGE_SEARCH_KEY?.trim() || ""),
-        imageGenerate: endpointFromEnv(env.SLIDESTUDIO_IMAGE_BASE_URL?.trim() || "", env.SLIDESTUDIO_IMAGE_API_KEY?.trim() || "", env.SLIDESTUDIO_IMAGE_MODEL?.trim() || ""),
+        imageSearch: endpointFromEnv(env.SLIDESTUDIO_IMAGE_SEARCH_URL?.trim() || "", env.SLIDESTUDIO_IMAGE_SEARCH_KEY?.trim() || "", "", env.SLIDESTUDIO_IMAGE_SEARCH_PRESET?.trim() || "", env.SLIDESTUDIO_IMAGE_SEARCH_TEMPLATE ?? ""),
+        imageGenerate: endpointFromEnv(env.SLIDESTUDIO_IMAGE_BASE_URL?.trim() || "", env.SLIDESTUDIO_IMAGE_API_KEY?.trim() || "", env.SLIDESTUDIO_IMAGE_MODEL?.trim() || "", env.SLIDESTUDIO_IMAGE_PRESET?.trim() || "", env.SLIDESTUDIO_IMAGE_TEMPLATE ?? ""),
     };
 }
 export function toolSettingsFile(home) {
@@ -99,6 +142,8 @@ function viewEndpoint(endpoint) {
         url: endpoint.url,
         apiKeySet: Boolean(endpoint.apiKey),
         model: endpoint.model,
+        preset: endpoint.preset,
+        template: endpoint.template,
     };
 }
 export function toToolSettingsView(settings) {
@@ -116,6 +161,10 @@ const OVERLAY_KEYS = [
     "SLIDESTUDIO_IMAGE_BASE_URL",
     "SLIDESTUDIO_IMAGE_API_KEY",
     "SLIDESTUDIO_IMAGE_MODEL",
+    "SLIDESTUDIO_IMAGE_PRESET",
+    "SLIDESTUDIO_IMAGE_TEMPLATE",
+    "SLIDESTUDIO_IMAGE_SEARCH_PRESET",
+    "SLIDESTUDIO_IMAGE_SEARCH_TEMPLATE",
     "SLIDESTUDIO_IMAGE",
 ];
 function setOrDelete(env, key, value) {
@@ -130,11 +179,15 @@ export function applyToolSettingsToEnv(env, settings) {
     if (settings.imageSearch.kind === "custom") {
         setOrDelete(env, "SLIDESTUDIO_IMAGE_SEARCH_URL", settings.imageSearch.url);
         setOrDelete(env, "SLIDESTUDIO_IMAGE_SEARCH_KEY", settings.imageSearch.apiKey);
+        setOrDelete(env, "SLIDESTUDIO_IMAGE_SEARCH_PRESET", settings.imageSearch.preset ?? "");
+        setOrDelete(env, "SLIDESTUDIO_IMAGE_SEARCH_TEMPLATE", settings.imageSearch.template ? JSON.stringify(settings.imageSearch.template) : "");
     }
     if (settings.imageGenerate.kind === "custom") {
         setOrDelete(env, "SLIDESTUDIO_IMAGE_BASE_URL", settings.imageGenerate.url);
         setOrDelete(env, "SLIDESTUDIO_IMAGE_API_KEY", settings.imageGenerate.apiKey);
         setOrDelete(env, "SLIDESTUDIO_IMAGE_MODEL", settings.imageGenerate.model);
+        setOrDelete(env, "SLIDESTUDIO_IMAGE_PRESET", settings.imageGenerate.preset ?? "");
+        setOrDelete(env, "SLIDESTUDIO_IMAGE_TEMPLATE", settings.imageGenerate.template ? JSON.stringify(settings.imageGenerate.template) : "");
         env.SLIDESTUDIO_IMAGE = "1";
     }
     return env;

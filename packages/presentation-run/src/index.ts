@@ -111,8 +111,25 @@ export {
   createImagePort,
   grokImageConfigFromEnv,
   imageConfigFromEnv,
+  imageConfigured,
   GROK_IMAGINE_MODEL,
+  IMAGE_GENERATE_PRESETS,
+  type ImagePortConfig,
+  type ImageGeneratePreset,
+  type GeneratedImage,
 } from "./domain/image-port.js";
+export {
+  createImageSearchPort,
+  imageSearchConfigFromEnv,
+  imageSearchConfigured,
+  IMAGE_SEARCH_PRESETS,
+  type ImageSearchPortConfig,
+  type ImageSearchPreset,
+  type ImageSearchPort,
+  type ImageSearchHit,
+  type ImageSearchNone,
+} from "./domain/image-search-port.js";
+export type { EndpointTemplate } from "./domain/endpoint-template.js";
 export { CAPABILITY_LEDGER, ledgerFate } from "./capability-ledger.js";
 export {
   listSourceReceipts,
