@@ -1118,7 +1118,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 }
 .capability-row li.is-on { background: var(--s-50); color: var(--s-800); }
 .capability-row li.is-off { color: var(--text-faint); }
-.settings-later { margin-top: 24px; color: var(--text-faint); font-size: 12px; }
 
 /* Recent work belongs to the same workspace, not a second screen. */
 .projects-panel {

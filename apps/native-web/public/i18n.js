@@ -129,7 +129,6 @@ const EN = {
   "模型（逗号分隔）": "Models (comma-separated)",
   "粘贴后保存，只留在这台电脑": "Paste to save — stays on this computer",
   "保存提供方": "Save provider",
-  "自定义工具（搜图/生图）以后开发。": "Custom tools (image search/generation) are coming later.",
   "Grok、Codex、Claude 等走账号授权。登录后模型自带的检索由供应商托管。": "Grok, Codex, Claude and others sign in via account authorization. Once signed in, provider-hosted search comes with the model.",
   "主题只改变产品界面，不影响文稿本身的配色与字体。选择保存在这台电脑的浏览器里。": "Themes only change the product UI — never your deck's colors or fonts. The choice is saved in this browser.",
   "界面主题": "UI theme",
