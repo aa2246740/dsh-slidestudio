@@ -49,7 +49,7 @@ export function imageConfigFromEnv(
     baseUrl: baseUrl || undefined,
     apiKey: env.SLIDESTUDIO_IMAGE_API_KEY || env.SLIDESTUDIO_LLM_API_KEY,
     model: env.SLIDESTUDIO_IMAGE_MODEL?.trim() || undefined,
-    timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 60_000,
+    timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 180_000,
     enabled: !disabled && Boolean(baseUrl),
   };
 }
@@ -63,7 +63,7 @@ export function grokImageConfigFromEnv(
     baseUrl: env.SLIDESTUDIO_IMAGE_BASE_URL?.trim() || XAI_API_BASE,
     apiKey: env.SLIDESTUDIO_IMAGE_API_KEY?.trim() || undefined,
     model: env.SLIDESTUDIO_IMAGE_MODEL?.trim() || GROK_IMAGINE_MODEL,
-    timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 60_000,
+    timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 180_000,
   };
 }
 
@@ -196,7 +196,7 @@ async function generateViaApi(
   const fetchFn = deps.fetch ?? fetch;
   const url = imagesUrl(cfg.baseUrl!);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs ?? 60_000);
+  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs ?? 180_000);
   try {
     const res = await fetchFn(url, {
       method: "POST",
