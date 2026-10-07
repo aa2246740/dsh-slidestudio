@@ -75,8 +75,8 @@ export function capabilityViewModel(card, extras = {}) {
     chips: [
       { id: "vision", label: t("看图"), on: visionOn, hint: visionHint },
       { id: "research", label: t("联网"), on: researchOn, hint: researchOn ? (nativeSearch ? t("联网检索 · 模型自带") : t("联网检索工具 · 已配置")) : t("联网检索 · 未配置") },
-      { id: "search", label: t("搜图"), on: searchOn, hint: searchOn ? t("搜图工具 · 已配置") : t("搜图工具 · 未配置") },
-      { id: "generate", label: t("生图"), on: generateOn, hint: generateOn ? t("生图工具 · 已配置") : t("生图工具 · 未配置") },
+      { id: "search", label: t("搜图"), on: searchOn, hint: searchOn ? t("搜图工具 · 已配置") : t("搜图工具 · 未配置（可在 设置 → 工具 接入）") },
+      { id: "generate", label: t("生图"), on: generateOn, hint: generateOn ? t("生图工具 · 已配置") : t("生图工具 · 未配置（可在 设置 → 工具 接入）") },
     ],
   };
 }
