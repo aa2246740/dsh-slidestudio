@@ -1,0 +1,85 @@
+name: Publish to npm
+
+# Publishes the self-contained dsh-slidestudio package built by
+# `npm run release:package` (dsh-slidestudio/scripts/release.mjs).
+# Push a tag like v1.2.3 (must match dsh-slidestudio/package.json version) to publish.
+# Auth is npm Trusted Publishing (OIDC) - no NPM_TOKEN needed.
+# Manual run with dry_run=true builds and packs only (nothing is published).
+# A version that is already on npm is skipped, so re-runs are safe.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (nothing is published)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      HARNESS_REF: dsh-v0.2.0-rc.2
+      npm_config_auto_install_peers: 'false'
+      PNPM_CONFIG_AUTO_INSTALL_PEERS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.9.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Check tag matches dsh-slidestudio/package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PKG=$(node -p "require('./dsh-slidestudio/package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$PKG" != "$TAG" ]; then echo "tag v$TAG != dsh-slidestudio/package.json $PKG"; exit 1; fi
+
+      # Build-time only: the dshx client bundler reads the public Harness source.
+      - name: Prepare DSH Harness source and dshx adapter
+        run: |
+          H="$RUNNER_TEMP/harness"
+          git clone --quiet --depth 1 --branch "$HARNESS_REF" https://github.com/deepseek-ai/deepseek-harness.git "$H"
+          git clone --quiet --depth 1 https://github.com/aa2246740/dsh-external-plugin-devkit.git "$H/tools/dshx"
+          npm ci --prefix "$H/tools/dshx" --ignore-scripts --no-audit --no-fund
+          echo "DSHX_HARNESS=$H" >> "$GITHUB_ENV"
+
+      - run: npm ci --no-audit --no-fund
+      - run: pnpm install --dir dsh-slidestudio --frozen-lockfile --config.auto-install-peers=false --config.strict-dep-builds=false
+      - name: Build release package (native build + plugin build + release.mjs verify)
+        run: npm run release:package
+
+      - name: Publish
+        run: |
+          npm install -g npm@latest
+          NAME=$(node -p "require('./dsh-slidestudio/package.json').name")
+          VER=$(node -p "require('./dsh-slidestudio/package.json').version")
+          TGZ="dsh-slidestudio/.local/release/$NAME-$VER.tgz"
+          test -f "$TGZ" || { echo "missing $TGZ"; ls -la dsh-slidestudio/.local/release; exit 1; }
+          if node -e "fetch('https://registry.npmjs.org/'+process.argv[1]).then(r=>r.json()).then(j=>process.exit(j.versions&&j.versions[process.argv[2]]?0:1),()=>process.exit(1))" "$NAME" "$VER"; then
+            echo "$NAME@$VER is already on npm - not publishing"
+          elif [ "$DRY_RUN" = "true" ]; then
+            npm publish "$TGZ" --access public --dry-run
+          else
+            npm publish "$TGZ" --access public
+          fi
