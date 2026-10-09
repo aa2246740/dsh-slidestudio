@@ -1002,7 +1002,7 @@ export function executeGenerateTool(name, args, state) {
                 payload: { error: "review_scope_violation", painted: false },
             };
         }
-        let deleted = [];
+        const deleted = [];
         let missing = [];
         withProjectWriteLock(state.projectRoot, () => {
             const project = loadProject(state.projectRoot);
@@ -1391,7 +1391,7 @@ export function executeGenerateTool(name, args, state) {
                     payload: { error: "project_unreadable" },
                 };
             }
-            let skill = diskPages.length
+            const skill = diskPages.length
                 ? {
                     title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),
                     pages: diskPages,

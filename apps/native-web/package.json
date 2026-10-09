@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
-    "test": "node --test src/*.test.mjs"
+    "test": "node --test --test-concurrency=4 src/*.test.mjs",
+    "test:quality": "vitest run --config ../../vitest.config.mjs --project native-web",
+    "test:list": "vitest list --config ../../vitest.config.mjs --project native-web"
   },
   "dependencies": {
     "@open-slidestudio/canvas-session": "0.1.0",

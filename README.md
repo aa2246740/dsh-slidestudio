@@ -54,6 +54,29 @@ dsh plugin --profile web add dsh-slidestudio
 
 源码开发、运行时要求与数据位置见 [INSTALL-DSH.md](INSTALL-DSH.md)。
 
+## 源码开发
+
+要求 Node.js `^22.19.0 || >=24.0.0` 和 npm。在克隆后的仓库根目录运行：
+
+```sh
+npm run setup:dev
+```
+
+这一命令依次安装锁定依赖、构建原生包、准备固定浏览器并启动产品；
+Ctrl+C 停止本次服务。已初始化的仓库用 `npm start`，不必重新安装。
+
+打开 `http://127.0.0.1:13080`，编辑器在 `http://127.0.0.1:55200`。
+安装需要联网；生成前在设置中配置模型。开发使用独立的 `.dsh/home`，
+不会向桌面端的 Home 启动第二个 Host。
+端口被占用时，通过 `SLIDES_DSH_PORT` 和 `SLIDES_EDITOR_PORT` 选择空闲端口，
+保留其他正在运行的服务。
+
+日常构建用 `npm run build:native`；完整构建（含旧版应用）用 `npm run build`。
+完整构建后类型检查用 `npm run typecheck`，原生包测试用 `npm run test:native`，
+编辑器测试用 `npm test -w @open-slidestudio/native-web`。
+`npm run dev` 仅启动已归档的旧版 web/API，不是正常产品入口。
+代理开发流程与测试边界见 [AGENTS.md](AGENTS.md)。
+
 ## 许可
 
 Apache-2.0，见 [LICENSE](LICENSE)。

@@ -30,7 +30,6 @@ function redact(text) {
 const notes = {
   startedAt: new Date().toISOString(),
   availability: piAvailable(),
-  auth: resolvePiAuth(),
   config: {
     bin: piConfigFromEnv().bin,
     provider: piConfigFromEnv().provider || null,

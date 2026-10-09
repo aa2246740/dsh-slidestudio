@@ -149,7 +149,7 @@ function acquireLock(root) {
                 continue;
             }
             if (attempt === 39)
-                throw new Error("run ledger is locked by another process");
+                throw new Error("run ledger is locked by another process", { cause: error });
             spinWait(5);
         }
     }

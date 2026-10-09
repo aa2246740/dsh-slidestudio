@@ -9,6 +9,7 @@ import { resolveDataDirectory } from "./data-directory.js";
 import { waitForEditor } from "./sidecar-ready.js";
 import { apply as applySlidesHost } from "@open-slidestudio/dsh-slides-host";
 import { request as httpRequest } from "node:http";
+import { logger } from "./logger.js";
 
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
 const applySlidesHostAny = applySlidesHost as unknown as (ctx: Context, config: {
@@ -93,7 +94,7 @@ const SLIDES_PERSONA_PREFIX = [
 function registerSlidesPreset(ctx: Context): void {
   const presets = ctx.get("agentPresets") as AgentPresetsLike | undefined;
   if (!presets?.register) {
-    console.warn("[dsh-slidestudio] agentPresets service missing; slides agents will run without the preset");
+    logger.log("warn", "agent_preset_unavailable");
     return;
   }
   ctx.effect(() =>
@@ -125,7 +126,7 @@ function registerSlidesPreset(ctx: Context): void {
 function startEditorSidecar(repoRoot: string, dataRoot: string): ChildProcess | undefined {
   const server = join(repoRoot, "apps/native-web/src/server.mjs");
   if (!existsSync(server)) {
-    console.warn(`[dsh-slidestudio] editor sidecar not found at ${server}`);
+    logger.log("warn", "editor_sidecar_missing");
     return undefined;
   }
   const child = spawn(process.execPath, [server], {
@@ -134,10 +135,10 @@ function startEditorSidecar(repoRoot: string, dataRoot: string): ChildProcess | 
     stdio: ["ignore", "ignore", "inherit"],
   });
   child.on("error", (error) => {
-    console.warn("[dsh-slidestudio] editor sidecar failed to start", error);
+    logger.error(error, { operation: "editor_sidecar_start" });
   });
   child.on("exit", (code, signal) => {
-    console.warn(`[dsh-slidestudio] editor sidecar exited code=${String(code)} signal=${String(signal)}`);
+    logger.log("warn", "editor_sidecar_exit", { code, signal });
   });
   return child;
 }
@@ -236,6 +237,7 @@ export function apply(ctx: Context) {
           kind: "prefix",
           path: prefix,
           handler: async (req: IncomingMessage, res: ServerResponse) => {
+            logger.observe(req, res);
             const rejection = connection?.requestRejection?.(req);
             if (rejection !== undefined) {
               res.writeHead(rejection);
@@ -263,6 +265,7 @@ export function apply(ctx: Context) {
         kind: "exact",
         path: "/personal/slides/editor",
         handler: (req: IncomingMessage, res: ServerResponse) => {
+          logger.observe(req, res);
           const rejection = connection?.requestRejection?.(req);
           if (rejection !== undefined) {
             res.writeHead(rejection);
@@ -284,5 +287,5 @@ export function apply(ctx: Context) {
     };
   });
 
-  console.log("[my-plugins/dsh-slidestudio] loaded");
+  logger.log("info", "plugin_loaded");
 }

@@ -1,0 +1,14 @@
+{
+  "name": "DSH SlideStudio",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-24-bookworm",
+  "remoteUser": "node",
+  "postCreateCommand": "npm ci && npm run build && npm run setup:browser && npm run quality:fast",
+  "containerEnv": {
+    "PLAYWRIGHT_BROWSERS_PATH": "${containerWorkspaceFolder}/.runtime/playwright"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  }
+}

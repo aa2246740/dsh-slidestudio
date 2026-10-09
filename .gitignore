@@ -1,10 +1,25 @@
 node_modules/
 dist/
+build/
+.cache/
+.eslintcache
+.prettiercache
+.nyc_output/
+
+# Local editor settings and OS metadata
+.idea/
+.vscode/
 .DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
 *.log
 .env
 .env.*
 !.env.example
+!.env.*.example
 apps/web/dist/
 coverage/
 .vite/

@@ -8,7 +8,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:client": "node --test scripts/test-settings.mjs scripts/test-data-directory.mjs scripts/test-sidecar-ready.mjs scripts/test-session-entry.mjs"
+    "test:client": "node --test scripts/test-settings.mjs scripts/test-data-directory.mjs scripts/test-sidecar-ready.mjs scripts/test-session-entry.mjs",
+    "test": "vitest run --config ../vitest.config.mjs --project plugin",
+    "test:list": "vitest list --config ../vitest.config.mjs --project plugin"
   },
   "exports": {
     ".": {

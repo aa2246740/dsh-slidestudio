@@ -1,0 +1,9 @@
+lint-staged --concurrent false
+npm run test:tooling
+npm run quality:fast
+npm run docs:check
+npm run verify:secrets
+npm run build
+npm run typecheck
+npm run test:coverage
+npm test

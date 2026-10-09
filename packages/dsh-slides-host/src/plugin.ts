@@ -755,13 +755,14 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       } finally {
         busy.delete(sessionId);
         const binding = store.bindingFor(sessionId);
-        if (!binding) return;
-        const root = store.resolveRoot(binding);
-        clearRateLimitWait(root);
-        recordAgentError(root, {
-          code: "operator-stop",
-          detail: "operator stopped the turn",
-        });
+        if (binding) {
+          const root = store.resolveRoot(binding);
+          clearRateLimitWait(root);
+          recordAgentError(root, {
+            code: "operator-stop",
+            detail: "operator stopped the turn",
+          });
+        }
       }
     },
     getAgent(sessionId) {
@@ -801,7 +802,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         // The raw cause goes to the server log — never raw JS internals like
         // "Cannot read properties of undefined" into the chat bubble.
         console.warn("[slides] assistant intent failed:", detail);
-        throw new Error(`助手暂时未能处理这条请求，请重试或更换模型；输入内容已保留。${friendlyProviderCause(detail)}`);
+        throw new Error(`助手暂时未能处理这条请求，请重试或更换模型；输入内容已保留。${friendlyProviderCause(detail)}`, { cause: error });
       }
     },
     async createAgent(input) {

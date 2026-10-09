@@ -1,0 +1,30 @@
+name: Bug report
+description: Capture a reproducible failure without credentials or private slides.
+title: "[Bug] "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [native editor, plugin, legacy web, legacy API, tooling]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result and actual result
+      description: Include version, OS and a public or synthetic fixture. Remove prompts, keys and personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and recovery attempts
+      description: Sanitized request ID, test name or screenshot. No credentials or private documents.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed credentials and personal content from this report.
+          required: true

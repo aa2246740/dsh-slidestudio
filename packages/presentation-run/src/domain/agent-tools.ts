@@ -1229,7 +1229,7 @@ export function executeGenerateTool(
         payload: { error: "review_scope_violation", painted: false },
       };
     }
-    let deleted: string[] = [];
+    const deleted: string[] = [];
     let missing: string[] = [];
     withProjectWriteLock(state.projectRoot!, () => {
       const project = loadProject(state.projectRoot!);
@@ -1615,7 +1615,7 @@ export function executeGenerateTool(
           payload: { error: "project_unreadable" },
         };
       }
-      let skill =
+      const skill =
         diskPages.length
           ? {
               title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),

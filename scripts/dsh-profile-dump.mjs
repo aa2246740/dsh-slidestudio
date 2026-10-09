@@ -36,7 +36,7 @@ if (!dump.includes("id: ui-layout") || !/id: ui-layout[\s\S]*?disabled:\s*true/.
   process.stderr.write("dump-config is missing a disabled ui-layout row\n");
   process.exit(1);
 }
-if (/id: ui-settings\n  name: '@deepseek-ai\/dsh-client-ui-settings'\n  disabled: true/.test(dump)) {
+if (/id: ui-settings\n {2}name: '@deepseek-ai\/dsh-client-ui-settings'\n {2}disabled: true/.test(dump)) {
   process.stderr.write("ui-settings must stay enabled so settingsScope exists\n");
   process.exit(1);
 }

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.mjs", "*.config.mjs"],
+      "project": ["scripts/**/*.mjs", "*.config.mjs"]
+    },
+    "apps/native-web": {
+      "entry": ["src/server.mjs", "src/**/*.test.mjs", "tests/**/*.spec.mjs", "public/**/*.js"],
+      "project": ["src/**/*.mjs", "tests/**/*.mjs", "public/**/*.js"]
+    },
+    "apps/server": {
+      "entry": ["src/index.mjs", "src/**/*.spec.mjs"],
+      "project": ["src/**/*.mjs"]
+    },
+    "apps/web": {
+      "entry": ["src/main.tsx", "src/**/*.spec.ts", "vite.config.ts"],
+      "project": ["src/**/*.{ts,tsx}", "vite.config.ts"]
+    },
+    "packages/*": {
+      "entry": ["src/index.{ts,tsx}", "src/node.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "dsh-slidestudio": {
+      "entry": [
+        "src/dsh-slidestudio.ts",
+        "src/client/index.tsx",
+        "src/**/*.spec.ts",
+        "scripts/*.mjs",
+        "tsdown.config.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "scripts/*.mjs", "tsdown.config.ts"]
+    }
+  }
+}

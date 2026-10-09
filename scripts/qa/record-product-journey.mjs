@@ -260,19 +260,15 @@ try {
   await shot(page, "03-generating");
   pass("ask");
 
-  try {
-    const deadline = Date.now() + GENERATE_MS;
-    while (Date.now() < deadline && !(await page.locator('#result-wrap[data-authentic="1"]').count())) {
-      if (await page.locator("#btn-retry-now").count()) {
-        throw new Error("generation paused or failed — no result may be injected or reused");
-      }
-      await page.waitForTimeout(2000);
+  const deadline = Date.now() + GENERATE_MS;
+  while (Date.now() < deadline && !(await page.locator('#result-wrap[data-authentic="1"]').count())) {
+    if (await page.locator("#btn-retry-now").count()) {
+      throw new Error("generation paused or failed — no result may be injected or reused");
     }
-    if (!(await page.locator("#result-wrap").count())) {
-      throw new Error("generate paused or did not finish — no Hub result card");
-    }
-  } catch (err) {
-    throw err;
+    await page.waitForTimeout(2000);
+  }
+  if (!(await page.locator("#result-wrap").count())) {
+    throw new Error("generate paused or did not finish — no Hub result card");
   }
 
   const meta = await page.evaluate(() => {

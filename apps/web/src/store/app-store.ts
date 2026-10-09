@@ -209,7 +209,7 @@ type AppState = {
 };
 
 let refSeq = 0;
-let msgSeq = 0;
+const msgSeq = 0;
 let commentSeq = 0;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 

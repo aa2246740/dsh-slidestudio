@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "drift": {
+    "yaml": {
+      "2.9.0": ["package.json", "packages/dsh-slides-host/package.json"],
+      "2.7.0": ["packages/pptd-v2/package.json"]
+    },
+    "@deepseek-ai/cordis": {
+      "4.0.4": ["package.json", "packages/dsh-slides-host/package.json", "packages/oss-oauth-login/package.json"],
+      "4.0.1": ["dsh-slidestudio/package.json"]
+    },
+    "typescript": {
+      "6.0.3": ["package.json", "dsh-slidestudio/package.json"],
+      "5.7.0": [
+        "apps/web/package.json",
+        "packages/agent-core/package.json",
+        "packages/agent-harness/package.json",
+        "packages/canvas-session/package.json",
+        "packages/design-brain/package.json",
+        "packages/dsh-slides-bundle/package.json",
+        "packages/dsh-slides-client/package.json",
+        "packages/dsh-slides-host/package.json",
+        "packages/exporter-native/package.json",
+        "packages/exporter-pptx/package.json",
+        "packages/oss-oauth-login/package.json",
+        "packages/pptd/package.json",
+        "packages/pptd-v2/package.json",
+        "packages/presentation-run/package.json",
+        "packages/project-store/package.json"
+      ]
+    },
+    "react": {
+      "19.3.0": ["apps/web/package.json"],
+      "18.2.0": ["dsh-slidestudio/package.json"]
+    },
+    "react-dom": {
+      "19.3.0": ["apps/web/package.json"],
+      "18.2.0": ["dsh-slidestudio/package.json"]
+    },
+    "@types/react": {
+      "19.1.0": ["apps/web/package.json"],
+      "18.3.1": ["dsh-slidestudio/package.json"]
+    }
+  }
+}

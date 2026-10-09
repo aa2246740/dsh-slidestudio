@@ -9,7 +9,9 @@
     "apps/*"
   ],
   "scripts": {
+    "prepare": "husky",
     "dev": "node scripts/dev.mjs",
+    "setup:dev": "npm ci && npm run build:native && npm run setup:browser && npm start",
     "build:native": "npm run build -w @open-slidestudio/pptd-v2 && npm run build -w @open-slidestudio/project-store && npm run build -w @open-slidestudio/exporter-native && npm run build -w @open-slidestudio/canvas-session && npm run build -w @open-slidestudio/presentation-run && npm run build -w @open-slidestudio/agent-harness && npm run build -w @open-slidestudio/dsh-slides-host && npm run build -w @open-slidestudio/dsh-slides-client && npm run build -w @open-slidestudio/dsh-slides-bundle",
     "build:legacy": "npm run build -w @open-slidestudio/pptd && npm run build -w @open-slidestudio/design-brain && npm run build -w @open-slidestudio/agent-core && npm run build -w @open-slidestudio/exporter-pptx && npm run build -w @open-slidestudio/web",
     "build": "npm run build:native && npm run build:legacy",
@@ -53,7 +55,27 @@
     "smoke": "node scripts/smoke-check.mjs",
     "gate1": "node scripts/gate1-acceptance.mjs",
     "gate:native": "npm run build:native && npm run test:native && npm run oracle:validate && node scripts/native-smoke.mjs && npm run native:export-current && npm run qa:editor-toolbars",
-    "lint": "npm run lint --workspaces --if-present",
+    "lint": "eslint --config eslint.config.mjs apps packages dsh-slidestudio scripts eslint.config.mjs",
+    "format": "prettier --write",
+    "format:check": "prettier --check",
+    "test:tooling": "node --test scripts/quality-tooling.test.mjs",
+    "quality:source": "node scripts/quality/check-source.mjs",
+    "quality:architecture": "node scripts/quality/check-boundaries.mjs",
+    "quality:dependencies": "node scripts/quality/check-dependencies.mjs",
+    "quality:duplicates": "node scripts/quality/check-duplication.mjs",
+    "quality:versions": "node scripts/quality/check-version-drift.mjs",
+    "quality:debt": "node scripts/quality/check-debt.mjs",
+    "quality:security": "node scripts/quality/check-security.mjs",
+    "quality:bundles": "node scripts/quality/check-bundles.mjs",
+    "quality:fast": "npm run lint && npm run quality:source && npm run quality:architecture && npm run quality:dependencies && npm run quality:duplicates && npm run quality:versions && npm run quality:debt",
+    "test:quality": "vitest run",
+    "test:list": "vitest list",
+    "test:coverage": "vitest run --coverage",
+    "build:tracked": "node scripts/quality/timed-build.mjs",
+    "release:notes": "node scripts/quality/generate-release-notes.mjs",
+    "docs:generate": "node scripts/quality/generate-api-docs.mjs",
+    "docs:check": "node scripts/quality/generate-api-docs.mjs --check",
+    "profile:api": "node scripts/quality/profile-api.mjs",
     "e2e": "node scripts/e2e-browser.mjs",
     "ci:local": "npm run build && npm run typecheck && npm test && npm run smoke && npm run gate1 && npm run gate:native",
     "release": "npm run ci:local",
@@ -64,7 +86,7 @@
     "release:package": "npm run build:native && npm run build --prefix dsh-slidestudio && node dsh-slidestudio/scripts/release.mjs"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "license": "Apache-2.0",
   "dependencies": {
@@ -113,6 +135,20 @@
     "@deepseek-ai/dsh-session": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@deepseek-ai/dsh-util-values": "0.2.0-rc.2",
-    "@deepseek-ai/schemastery": "3.18.4"
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@eslint/js": "10.0.1",
+    "@vitest/coverage-v8": "5.0.3",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "husky": "9.1.7",
+    "jscpd": "5.4.0",
+    "knip": "6.39.0",
+    "lint-staged": "16.4.0",
+    "prettier": "3.9.9",
+    "tsdown": "0.22.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vitest": "5.0.3"
   }
 }

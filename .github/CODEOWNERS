@@ -1,0 +1,7 @@
+# Repository maintainer. Native document/runtime changes stay under one owner.
+* @aa2246740
+/apps/native-web/ @aa2246740
+/packages/pptd-v2/ @aa2246740
+/packages/dsh-slides-host/ @aa2246740
+/dsh-slidestudio/ @aa2246740
+/.github/ @aa2246740

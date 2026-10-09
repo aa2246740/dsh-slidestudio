@@ -8,6 +8,7 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "strict": true,
+    "incremental": true,
     "skipLibCheck": true,
     "declaration": true,
     "declarationMap": true,

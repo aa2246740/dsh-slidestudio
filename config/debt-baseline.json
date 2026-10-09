@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "markers": [
+    {
+      "file": "scripts/quality/check-debt.mjs",
+      "line": 7,
+      "marker": "/\\b(?:TODO|FIXME|HACK|XXX)\\b/.test(text) && /(?:\\/\\/|\\/\\*|\\*)/.test(text)"
+    }
+  ]
+}
