@@ -21,6 +21,8 @@ import { pathToFileURL } from "node:url";
 import { readProjectSessionTrace } from "./session-trace-journal.mjs";
 import { buildPdfFromPngs } from "./png-pdf.mjs";
 import { AttachmentStore, parseAttachmentBuffer, attachmentPublic, decodeAttachmentUpload as decodeDataUrl } from "./attachments.mjs";
+import { diagnostics } from "./logger.mjs";
+import { loadRootEnv } from "../../../scripts/lib/root-env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../../..");
@@ -47,30 +49,6 @@ const runtimeImport = (specifier, rel = "dist/index.js") => {
 const PUBLIC = path.resolve(__dirname, "../public");
 const PORT = Number(process.env.PORT || 55200);
 
-/** Load gitignored repo-root `.env` into process.env. Never logs values. */
-function loadRootEnv(root) {
-  const file = path.join(root, ".env");
-  if (!fs.existsSync(file)) return;
-  const text = fs.readFileSync(file, "utf8");
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq < 1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-    let val = trimmed.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (process.env[key] == null || process.env[key] === "") {
-      process.env[key] = val;
-    }
-  }
-}
 const DEFAULT_PROJECT = process.env.OPEN_SLIDESTUDIO_PROJECT
   ? path.resolve(process.env.OPEN_SLIDESTUDIO_PROJECT)
   : path.join(ROOT, "fixtures/okp-yu7-ppt");
@@ -749,7 +727,6 @@ function persistLiveSession(native, s, projectRoot, base = null, tabId = "defaul
       live.session = s;
       live.diskRevision = projectDiskRevision(root);
     });
-    return;
   }
   native.canvas.persist(s);
 }
@@ -2118,7 +2095,6 @@ function contentType(file) {
       ".svg": "image/svg+xml",
       ".woff": "font/woff",
       ".woff2": "font/woff2",
-      ".css": "text/css; charset=utf-8",
       ".pptx":
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }[ext] || "application/octet-stream"
@@ -2602,7 +2578,7 @@ function requestContentTypeAllowed(req) {
   return type.includes("application/json");
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer(diagnostics.wrap(async (req, res) => {
   try {
     const native = await nativePromise;
     const url = new URL(req.url || "/", `http://127.0.0.1:${PORT}`);
@@ -4574,13 +4550,13 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, headers);
     fs.createReadStream(filePath).pipe(res);
   } catch (e) {
-    console.error(e);
+    diagnostics.error(e, { requestId: req.headers["x-request-id"] });
     const status = Number(e?.statusCode);
     json(res, status >= 400 && status < 600 ? status : 500, {
       error: e instanceof Error ? e.message : String(e),
     });
   }
-});
+}, requestHostAllowed));
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   server.listen(PORT, "127.0.0.1", () => {

@@ -1,0 +1,50 @@
+# Third-party snapshots and generated/runtime data are not authored source.
+vendor/
+_reference/
+node_modules/
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+dsh-slidestudio/lib/
+packages/dsh-slides-client/lib/
+output/
+fixtures/
+.dsh/
+.runtime/
+.local/
+.scratch/
+.ultimate-design/
+.idea/
+.vscode/
+.cache/
+.devin/*.local.json
+
+# Keep release workflows and package-manager output unchanged.
+.github/workflows/
+package-lock.json
+pnpm-lock.yaml
+dsh-slidestudio/pnpm-lock.yaml
+# Generated API contracts are checked by docs:check, not a second formatter.
+docs/api/
+
+# Legacy sources that were never Prettier-formatted. Reformatting them would rewrite
+# thousands of lines and conflict with open PRs; format them in a dedicated change.
+apps/native-web/public/app.js
+apps/native-web/public/hub.html
+apps/native-web/public/i18n.js
+apps/native-web/public/index.html
+apps/native-web/src/server.mjs
+apps/web/src/store/app-store.ts
+dsh-slidestudio/src/dsh-slidestudio.ts
+packages/agent-harness/src/agent-tools.ts
+packages/agent-harness/src/run-ledger.ts
+packages/dsh-slides-bundle/src/index.test.ts
+packages/dsh-slides-host/src/plugin.ts
+packages/exporter-native/src/font-embed.ts
+packages/pptd-v2/src/ooxml-geom.ts
+packages/pptd/src/commands.test.ts
+packages/presentation-run/src/domain/agent-tools.ts
+packages/presentation-run/src/domain/run-ledger.ts
+scripts/qa/probe-pi-rpc.mjs
+scripts/qa/record-product-journey.mjs

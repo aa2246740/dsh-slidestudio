@@ -149,7 +149,7 @@ describe("applyCommand + undoCommand", () => {
 
     const s1 = createEmptySlide(1);
     const s2 = createEmptySlide(2);
-    let result = applyCommands(deck, [
+    const result = applyCommands(deck, [
       cmdAddSlide(s1),
       cmdAddSlide(s2),
     ]);

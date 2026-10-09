@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.mjs",
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "test": "vitest run --config ../../vitest.config.mjs --project server",
+    "test:list": "vitest list --config ../../vitest.config.mjs --project server"
   },
   "dependencies": {
     "@open-slidestudio/agent-core": "0.1.0",

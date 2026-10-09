@@ -522,7 +522,7 @@ function acquireLock(root: string): () => void {
       } catch {
         continue;
       }
-      if (attempt === 39) throw new Error("run ledger is locked by another process");
+      if (attempt === 39) throw new Error("run ledger is locked by another process", { cause: error });
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
     }
   }

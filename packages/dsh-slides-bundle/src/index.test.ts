@@ -155,8 +155,8 @@ describe("slides bundle pin", () => {
     // 0.1.7 dropped $DSH_HOME/.agent-presets/*: the preset now lives as a
     // preset-slides declaration row inside the bundle cordis.patch.yml.
     const patch = fs.readFileSync(path.join(PACKAGE_ROOT, "cordis.patch.yml"), "utf8");
-    assert.match(patch, /id: preset-slides\n      name: '@deepseek-ai\/dsh-agent-preset'/);
-    assert.match(patch, /id: agent-preset-registry\n  config:\n    default: slides/);
+    assert.match(patch, /id: preset-slides\n {6}name: '@deepseek-ai\/dsh-agent-preset'/);
+    assert.match(patch, /id: agent-preset-registry\n {2}config:\n {4}default: slides/);
     assert.equal(
       manifest.dependencies["@open-slidestudio/presentation-run"]?.startsWith("file:"),
       true,
@@ -170,15 +170,15 @@ describe("slides bundle pin", () => {
 
   it("freezes a dump where ui-layout is disabled and slides-client owns the product row", () => {
     const dump = fs.readFileSync(path.join(PACKAGE_ROOT, "profile.baseline.yaml"), "utf8");
-    assert.match(dump, /id: ui-layout\n  name: '@deepseek-ai\/dsh-client-ui-layout'\n  disabled: true/);
-    assert.match(dump, /id: ui-settings\n  name: '@deepseek-ai\/dsh-client-ui-settings'/);
+    assert.match(dump, /id: ui-layout\n {2}name: '@deepseek-ai\/dsh-client-ui-layout'\n {2}disabled: true/);
+    assert.match(dump, /id: ui-settings\n {2}name: '@deepseek-ai\/dsh-client-ui-settings'/);
     assert.doesNotMatch(
       dump,
-      /id: ui-settings\n  name: '@deepseek-ai\/dsh-client-ui-settings'\n  disabled: true/,
+      /id: ui-settings\n {2}name: '@deepseek-ai\/dsh-client-ui-settings'\n {2}disabled: true/,
     );
-    assert.match(dump, /id: slides-client\n  name: '@open-slidestudio\/dsh-slides-client'/);
-    assert.match(dump, /id: slides-host\n  name: '@open-slidestudio\/dsh-slides-host'/);
-    assert.match(dump, /provider: minimax-cn\n    model: MiniMax-M3/);
+    assert.match(dump, /id: slides-client\n {2}name: '@open-slidestudio\/dsh-slides-client'/);
+    assert.match(dump, /id: slides-host\n {2}name: '@open-slidestudio\/dsh-slides-host'/);
+    assert.match(dump, /provider: minimax-cn\n {4}model: MiniMax-M3/);
     assert.match(dump, /apiKeyEnv: MINIMAX_CN_API_KEY/);
     assert.doesNotMatch(dump, /antigravity/);
     assert.match(dump, /default: slides/);

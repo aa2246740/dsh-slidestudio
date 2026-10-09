@@ -80,7 +80,7 @@ function loadXml(): void {
   if (loaded) return;
   loaded = true;
   const xml = fs.readFileSync(XML_PATH, "utf8");
-  const re = /^  <([A-Za-z0-9]+)>\r?\n([\s\S]*?)^  <\/\1>/gm;
+  const re = /^ {2}<([A-Za-z0-9]+)>\r?\n([\s\S]*?)^ {2}<\/\1>/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(xml))) {
     cache.set(m[1]!, parseBlock(m[1]!, m[2]!));

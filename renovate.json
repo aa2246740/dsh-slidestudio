@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "schedule": ["before 6am on monday"],
+  "automerge": false,
+  "dependencyDashboard": true,
+  "ignorePaths": ["vendor/**", "_reference/**", "dsh-slidestudio/pnpm-lock.yaml"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["/^@deepseek-ai\\//", "/^@open-slidestudio\\//"],
+      "enabled": false,
+      "description": "Pinned Harness RC2 and local workspace releases require an explicit compatibility review."
+    }
+  ]
+}

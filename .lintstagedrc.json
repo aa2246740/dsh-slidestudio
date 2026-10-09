@@ -1,0 +1,8 @@
+{
+  "{apps,dsh-slidestudio/src,scripts,packages/*/src}/**/*.{js,mjs,cjs,ts,tsx}": [
+    "prettier --write",
+    "eslint --config eslint.config.mjs --no-warn-ignored"
+  ],
+  "*.config.mjs": ["prettier --write", "eslint --config eslint.config.mjs --no-warn-ignored"],
+  "**/*.{json,css,html,md,yaml,yml}": "prettier --write"
+}

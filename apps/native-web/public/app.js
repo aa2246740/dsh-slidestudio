@@ -4742,14 +4742,10 @@ async function runCommand(cmd, payload = {}) {
     "redo",
   ]);
   if (settleBefore.has(cmd)) {
-    try {
-      await settlePendingEdits();
-    } catch (error) {
-      // Keep the boundary action from overtaking a failed local save. The
-      // shared command wrapper reports the error, and awaiting callers still
-      // receive the rejection so they can retain or roll back their local UI.
-      throw error;
-    }
+    // Keep the boundary action from overtaking a failed local save. The
+    // shared command wrapper reports the error, and awaiting callers still
+    // receive the rejection so they can retain or roll back their local UI.
+    await settlePendingEdits();
   }
   const liveSafe = new Set(["goToPage", "pageRail", "present", "select", "tabSelect", "zoom"]);
   const localCommit = new Set(["setRichText", "setText", "setTableCell", "setNotes"]);
@@ -9815,7 +9811,8 @@ async function resumeGeneration() {
     if (steer) acknowledgeAssistantDraft(steer);
     const terminal = await waitForGenerationResume(sessionId, baselineSignature);
     finishGenerationResume(terminal);
-  } catch (error) {
+  } catch (caughtError) {
+    let error = caughtError;
     if (requestOutcomeUnknown) {
       generationResumePending = false;
       generationResumeUncertainSessionId = sessionId;
@@ -10436,7 +10433,8 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
     await refreshVersions();
     await pollGenerationActivity();
     return { ok: true, applied: lockedItems.length };
-  } catch (error) {
+  } catch (caughtError) {
+    let error = caughtError;
     if (turnMayHaveStarted && snapshotId) {
       try {
         await stopAiReviewTurn(sessionId);
@@ -10932,7 +10930,8 @@ async function executeWorkAgentEdit(
     await pollGenerationActivity();
     releaseAiLock = true;
     result = { snapshotId, snapshotLabel, target, changedPageCount: verifiedChangedPageIds.length };
-  } catch (error) {
+  } catch (caughtError) {
+    let error = caughtError;
     if (turnMayHaveStarted && snapshotId) {
       try {
         await stopAiReviewTurn(sessionId);

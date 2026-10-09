@@ -83,9 +83,14 @@ node --input-type=module -e 'import { homedir } from "node:os"; import { pathToF
 ```sh
 git clone https://github.com/aa2246740/dsh-slidestudio.git
 cd dsh-slidestudio
-npm ci
-npm run build:native
+npm run setup:dev
 ```
+
+这一命令安装锁定依赖、构建原生包、准备固定浏览器，然后运行独立开发
+profile。Hub 在 `http://127.0.0.1:13080`，编辑器在
+`http://127.0.0.1:55200`。Ctrl+C 停止本次启动的服务。后续仅构建用
+`npm run build:native`，启动用 `npm start`；测试命令见 [AGENTS.md](AGENTS.md)。
+开发 profile 是仓库中的 `.dsh/home`，不是桌面端正在使用的 Home。
 
 客户端编译还需插件目录中的开发依赖及 dshx 的 `externalClientBundle` 适配器。设置 `DSHX_HARNESS` 为含 `tools/dshx/src/client-build.js` 的 Harness 路径，在插件目录安装开发依赖后执行 `npm run build --prefix dsh-slidestudio`。官方 Harness 源码不需要修改。
 
@@ -105,9 +110,9 @@ npm run release:package
 
 发布前还需在真实 Harness 中检查双入口、模型同步、生成、设置跳转、下载以及升级后的项目保留。自动回归使用模拟模型边界，不能代替真实模型验收。
 
-| 环境变量 | 作用 |
-| --- | --- |
-| `SLIDESTUDIO_DATA_DIR` | 固定项目目录，需绝对路径 |
+| 环境变量                         | 作用                               |
+| -------------------------------- | ---------------------------------- |
+| `SLIDESTUDIO_DATA_DIR`           | 固定项目目录，需绝对路径           |
 | `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` | 指定浏览器运行时模块，设置后只认它 |
-| `SLIDES_EDITOR_PORT` | 编辑器本地端口，默认 `56200` |
-| `SLIDESTUDIO_SKILL_ROOT` | 可选，覆盖设计资源目录 |
+| `SLIDES_EDITOR_PORT`             | 编辑器本地端口，默认 `56200`       |
+| `SLIDESTUDIO_SKILL_ROOT`         | 可选，覆盖设计资源目录             |

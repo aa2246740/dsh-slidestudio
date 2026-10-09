@@ -259,7 +259,7 @@ export async function embedFontsIntoPptx(buffer, plan) {
     const relsFile = zip.file(relsPath);
     if (!relsFile)
         throw new Error(`native exporter: ${relsPath} missing`);
-    let rels = await relsFile.async("string");
+    const rels = await relsFile.async("string");
     let maxRid = 0;
     for (const m of rels.matchAll(/Id="rId(\d+)"/g)) {
         maxRid = Math.max(maxRid, Number(m[1]));

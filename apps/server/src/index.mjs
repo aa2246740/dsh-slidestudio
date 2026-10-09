@@ -7,6 +7,16 @@ import http from "node:http";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import {
+  assertRequestAllowed,
+  corsHeaders,
+  readJsonBody as readBody,
+  HttpInputError,
+  safeFilename,
+} from "./http-input.mjs";
+import { createLogger } from "./logger.mjs";
+import { assertGenerationInput, generate } from "./generate.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../../..");
@@ -35,204 +45,118 @@ const EXTRA_CORS_ORIGINS = (process.env.OPENSLIDESTUDIO_CORS_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-function isLoopbackOrigin(origin) {
-  try {
-    const u = new URL(origin);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    return (
-      u.hostname === "localhost" ||
-      u.hostname.endsWith(".localhost") ||
-      u.hostname === "127.0.0.1" ||
-      u.hostname === "::1" ||
-      u.hostname === "[::1]"
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Returns the request Origin when it is allowed, else null. */
-function allowedOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return null; // non-browser callers get no CORS headers
-  if (isLoopbackOrigin(origin) || EXTRA_CORS_ORIGINS.includes(origin)) {
-    return origin;
-  }
-  return null;
-}
-
-function corsHeaders(req) {
-  const origin = allowedOrigin(req);
-  if (!origin) return {};
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Vary": "Origin",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  };
-}
-
-function sendJson(req, res, status, body) {
+function sendJson(req, res, status, body, extraOrigins) {
   const data = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    ...corsHeaders(req),
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+    ...corsHeaders(req, extraOrigins),
   });
   res.end(data);
 }
 
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch (e) {
-        reject(e);
+/** Importing this module never binds a port. Tests cross the same HTTP interface. */
+export function createApiServer({
+  agentLoader = loadAgent,
+  exporterLoader = loadExporter,
+  diagnostics = createLogger(),
+  extraOrigins = EXTRA_CORS_ORIGINS,
+} = {}) {
+  return http.createServer(async (req, res) => {
+    const context = diagnostics.observe(req, res);
+    try {
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      const route = `${req.method} ${url.pathname}`;
+      assertRequestAllowed(req, extraOrigins);
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, corsHeaders(req, extraOrigins));
+        return res.end();
       }
-    });
-    req.on("error", reject);
+      if (route === "GET /api/diagnostics") {
+        return sendJson(req, res, 200, diagnostics.snapshot(), extraOrigins);
+      }
+      if (route === "GET /api/openapi") {
+        const schema = JSON.parse(readFileSync(path.join(root, "docs/api/legacy/openapi.json"), "utf8"));
+        return sendJson(req, res, 200, schema, extraOrigins);
+      }
+      if (route === "GET /api/health") {
+        const agent = await agentLoader();
+        const has = agent.hasLlmCredentials();
+        const creds = has ? agent.resolveLlmCredentials() : null;
+        return sendJson(
+          req,
+          res,
+          200,
+          {
+            ok: true,
+            llm: has,
+            source: creds?.source ?? null,
+            model: creds?.model ?? null,
+          },
+          extraOrigins,
+        );
+      }
+
+      if (route === "POST /api/generate") {
+        const body = await readBody(req);
+        assertGenerationInput(body);
+        const result = await generate(body, await agentLoader());
+        return sendJson(req, res, 200, result, extraOrigins);
+      }
+
+      if (route === "POST /api/export-pptx") {
+        const body = await readBody(req);
+        if (!body.deck) return sendJson(req, res, 400, { error: "deck required" }, extraOrigins);
+        const exp = await exporterLoader();
+        const out = await exp.exportDeckToArrayBuffer(body.deck, {
+          filename: body.filename,
+        });
+        const buf = Buffer.from(out.data);
+        res.writeHead(200, {
+          "Content-Type": out.mimeType,
+          "Content-Disposition": `attachment; filename="${safeFilename(out.filename)}"`,
+          "X-Content-Type-Options": "nosniff",
+          ...corsHeaders(req, extraOrigins),
+          "X-Export-Report": Buffer.from(
+            JSON.stringify({
+              degradations: out.report.degradations?.length ?? 0,
+              nativeCoverage: out.report.nativeCoverage,
+              fullyNative: out.report.fullyNative,
+            }),
+          ).toString("base64url"),
+        });
+        res.end(buf);
+        return;
+      }
+
+      sendJson(req, res, 404, { error: "not found" }, extraOrigins);
+    } catch (err) {
+      const status = err instanceof HttpInputError ? err.statusCode : 500;
+      diagnostics.error(err, context);
+      if (status === 413) res.setHeader("Connection", "close");
+      sendJson(
+        req,
+        res,
+        status,
+        {
+          error: status < 500 ? err.message : "internal server error",
+          requestId: context.requestId,
+        },
+        extraOrigins,
+      );
+    }
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
-
-  if (req.method === "OPTIONS") {
-    // Preflight succeeds only for allowed origins — no wildcard, no credentials.
-    res.writeHead(204, corsHeaders(req));
-    res.end();
-    return;
-  }
-
-  try {
-    if (req.method === "GET" && url.pathname === "/api/health") {
-      const agent = await loadAgent();
-      const has = agent.hasLlmCredentials();
-      const creds = has ? agent.resolveLlmCredentials() : null;
-      return sendJson(req, res, 200, {
-        ok: true,
-        llm: has,
-        source: creds?.source ?? null,
-        model: creds?.model ?? null,
-      });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/generate") {
-      const body = await readBody(req);
-      const prompt = String(body.prompt || "").trim();
-      const pins = Array.isArray(body.pins) ? body.pins : undefined;
-      if (!prompt && !(body.references?.length) && !(pins?.length)) {
-        return sendJson(req, res, 400, { error: "prompt required" });
-      }
-
-      const agent = await loadAgent();
-      const modelId = body.modelId || body.model || "auto";
-      // Honest multi-model: pins use the same provider resolution as generate/refine.
-      // RealLlmProvider implements pin-batch (scoped object apply + pinBatch meta).
-      const provider =
-        modelId === "mock-offline" || modelId === "mock"
-          ? new agent.MockProvider({ baseDelayMs: 40 })
-          : agent.resolveProvider({ modelId: modelId === "auto" ? undefined : modelId });
-
-      const steps = [];
-      const run = agent.createAgentRun(
-        {
-          prompt:
-            prompt ||
-            (pins?.length
-              ? `Process ${pins.length} agent annotation(s)`
-              : "Create slides from references"),
-          title: body.title,
-          templateId: body.templateId,
-          modelId,
-          references: body.references,
-          designContract: body.designContract,
-          baseDeck: body.baseDeck,
-          baseVersionId: body.baseVersionId,
-          baseVersionNumber: body.baseVersionNumber,
-          pins,
-          mockSpeed: 0,
-        },
-        { provider, autoStart: true },
-      );
-
-      run.subscribe((ev) => {
-        if (ev.type === "tool_started") {
-          steps.push({
-            id: ev.stepId,
-            tool: ev.tool,
-            label: ev.label,
-            target: ev.target,
-            status: "running",
-          });
-        } else if (ev.type === "tool_completed") {
-          const s = steps.find((x) => x.id === ev.stepId);
-          if (s) {
-            s.status = "completed";
-            s.summary = ev.summary;
-          }
-        } else if (ev.type === "tool_failed") {
-          const s = steps.find((x) => x.id === ev.stepId);
-          if (s) {
-            s.status = "failed";
-            s.error = ev.error;
-          }
-        }
-      });
-
-      const result = await run.wait();
-      return sendJson(req, res, 200, {
-        deck: result.deck,
-        versionId: result.versionId,
-        versionNumber: result.versionNumber,
-        versionLabel: result.versionLabel,
-        summary: result.summary,
-        steps: result.steps?.length ? result.steps : steps,
-        pinBatch: result.pinBatch,
-        provider: provider.id,
-        displayName: provider.displayName,
-      });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/export-pptx") {
-      const body = await readBody(req);
-      if (!body.deck) return sendJson(req, res, 400, { error: "deck required" });
-      const exp = await loadExporter();
-      const out = await exp.exportDeckToArrayBuffer(body.deck, {
-        filename: body.filename,
-      });
-      const buf = Buffer.from(out.data);
-      res.writeHead(200, {
-        "Content-Type": out.mimeType,
-        "Content-Disposition": `attachment; filename="${out.filename}"`,
-        ...corsHeaders(req),
-        "X-Export-Report": Buffer.from(
-          JSON.stringify({
-            degradations: out.report.degradations?.length ?? 0,
-            nativeCoverage: out.report.nativeCoverage,
-            fullyNative: out.report.fullyNative,
-          }),
-        ).toString("base64url"),
-      });
-      res.end(buf);
-      return;
-    }
-
-    sendJson(req, res, 404, { error: "not found" });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[api]", message);
-    sendJson(req, res, 500, { error: message });
-  }
-});
-
-server.listen(PORT, HOST, () => {
-  console.log(`DSH SlideStudio API http://${HOST}:${PORT}`);
-  console.log(`  GET  /api/health`);
-  console.log(`  POST /api/generate   { prompt, modelId? }`);
-  console.log(`  POST /api/export-pptx { deck }`);
-});
+export const server = createApiServer();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  server.listen(PORT, HOST, () => {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : PORT;
+    console.log(`DSH SlideStudio API http://${HOST}:${port}`);
+    console.log(`  GET  /api/health`);
+    console.log(`  POST /api/generate   { prompt, modelId? }`);
+    console.log(`  POST /api/export-pptx { deck }`);
+  });
+}

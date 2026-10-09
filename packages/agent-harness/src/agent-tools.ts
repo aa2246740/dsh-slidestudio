@@ -842,7 +842,7 @@ export function executeGenerateTool(
     try {
       const buffered = writtenPages(state);
       const incoming = parseSkillDeck(args);
-      let skill =
+      const skill =
         incoming ??
         (buffered.length
           ? {

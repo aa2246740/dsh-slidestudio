@@ -115,10 +115,10 @@ async function xaiResponses(cfg, prompt, tools, deps) {
     }
     catch (error) {
         if (deps.abortSignal?.aborted) {
-            throw new Error("xAI hosted web_search cancelled");
+            throw new Error("xAI hosted web_search cancelled", { cause: error });
         }
         if (timeout.aborted) {
-            throw new Error(`xAI hosted web_search timed out after ${cfg.timeoutMs}ms`);
+            throw new Error(`xAI hosted web_search timed out after ${cfg.timeoutMs}ms`, { cause: error });
         }
         throw error;
     }

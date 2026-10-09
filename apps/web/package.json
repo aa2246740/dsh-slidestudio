@@ -7,18 +7,17 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config ../../vitest.config.mjs --project web",
+    "test:list": "vitest list --config ../../vitest.config.mjs --project web"
   },
   "dependencies": {
     "@open-slidestudio/agent-core": "0.1.0",
-    "@open-slidestudio/design-brain": "0.1.0",
     "@open-slidestudio/exporter-pptx": "0.1.0",
     "@open-slidestudio/pptd": "0.1.0",
     "lucide-react": "^0.510.0",
-    "pptxgenjs": "^3.12.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "zod": "^3.24.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

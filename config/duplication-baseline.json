@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "measurements": {
+    "apps/native-web": {
+      "duplicatedLines": 48,
+      "percentage": 0.20607934054611027
+    },
+    "apps/server": {
+      "duplicatedLines": 0,
+      "percentage": 0
+    },
+    "apps/web": {
+      "duplicatedLines": 18,
+      "percentage": 0.39858281665190437
+    },
+    "dsh-slidestudio": {
+      "duplicatedLines": 0,
+      "percentage": 0
+    }
+  }
+}

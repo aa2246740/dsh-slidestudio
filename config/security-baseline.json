@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "reviewedAt": "2026-10-08",
+  "expires": "2026-11-07",
+  "rationale": "Remaining advisories are inherited through pinned Harness RC2/legacy dependencies. Automatic major runtime changes are unsafe; compatibility migration is required. This temporary exception does not assert remediation. New advisories and all critical findings fail.",
+  "findings": [
+    {
+      "name": "@modelcontextprotocol/client",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-6qxp-vccf-f47h",
+      "range": ">=2.0.0 <2.2.0"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+      "range": ">=3.0.0 <5.0.7"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+      "range": ">=4.0.0 <5.0.10"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "range": ">=4.0.0 <5.0.8"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+      "range": ">=4.0.0 <5.0.12"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+      "range": ">=4.0.0 <5.0.11"
+    },
+    {
+      "name": "brace-expansion",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+      "range": ">=4.0.0 <5.0.9"
+    },
+    {
+      "name": "fflate",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-px8p-9vwx-vf98",
+      "range": ">=0.8.0 <0.8.3"
+    },
+    {
+      "name": "image-size",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq",
+      "range": ">=1.2.0 <=2.0.2"
+    },
+    {
+      "name": "image-size",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+      "range": ">=0.6.3 <=2.0.2"
+    },
+    {
+      "name": "protobufjs",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-j3f2-48v5-ccww",
+      "range": ">=7.5.0 <=7.6.4"
+    },
+    {
+      "name": "undici",
+      "severity": "low",
+      "url": "https://github.com/advisories/GHSA-2gqq-gqf2-x968",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-2jfj-6hjv-fm6j",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-3wwx-pv8p-q78v",
+      "range": ">=8.1.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-3xpg-4rpp-hhhm",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-4cwx-7wf7-3272",
+      "range": ">=8.0.0 <8.9.0"
+    },
+    {
+      "name": "undici",
+      "severity": "low",
+      "url": "https://github.com/advisories/GHSA-8436-99hf-9mmv",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-8xcm-r25x-g524",
+      "range": ">=8.0.0 <8.9.0"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-jr45-8vmc-qm54",
+      "range": ">=8.0.0 <8.9.0"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5",
+      "range": ">=8.0.0 <8.9.0"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-pmjh-fq2x-6v4x",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "low",
+      "url": "https://github.com/advisories/GHSA-r53p-7pc4-xj5r",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-rx4f-c7p8-82vq",
+      "range": ">=8.0.0 <8.10.2"
+    },
+    {
+      "name": "undici",
+      "severity": "moderate",
+      "url": "https://github.com/advisories/GHSA-v3r7-h72x-cjcm",
+      "range": ">=8.0.0 <8.9.0"
+    },
+    {
+      "name": "undici",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-w293-vg96-wgc3",
+      "range": ">=8.0.0 <8.10.2"
+    }
+  ]
+}

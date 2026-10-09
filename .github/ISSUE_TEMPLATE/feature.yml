@@ -1,0 +1,16 @@
+name: Feature request
+description: Describe the user outcome and acceptance checks.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: User need and current limitation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks and non-goals
+    validations:
+      required: true

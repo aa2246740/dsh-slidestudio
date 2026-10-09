@@ -1,0 +1,4 @@
+{
+  "apps/web/dist/assets": { "gzipBytes": 400000 },
+  "dsh-slidestudio/lib": { "gzipBytes": 30000, "topLevelOnly": true }
+}

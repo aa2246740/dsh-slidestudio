@@ -1,0 +1,743 @@
+{
+  "version": 1,
+  "exceptions": {
+    "apps/native-web/public/app.js": {
+      "lines": 10956,
+      "functions": {
+        "walk#2": 23,
+        "commitTextEdit#1": 23,
+        "api#1": 27,
+        "paintChartSvg#1": 32,
+        "paintSlide#1": 100,
+        "onDrag#1": 47,
+        "updatePropertyPanel#1": 30,
+        "renderCtxBar#1": 63,
+        "renderChrome#1": 36,
+        "refreshVersions#1": 31,
+        "renderTimeline#1": 24,
+        "callback#450": 24,
+        "callback#462": 21,
+        "positionCommentPopover#1": 24,
+        "setCommentMode#1": 25,
+        "callback#555": 21,
+        "runGenerateFlow#1": 30,
+        "callback#593": 117,
+        "updateGenerationProcessNode#1": 75,
+        "paintWorkspaceEditReceipts#1": 24,
+        "reconcileGenerationProcess#1": 23,
+        "paintEditorGeneration#1": 202,
+        "resumeGeneration#1": 30,
+        "pollGenerationActivity#1": 22,
+        "waitForAiReviewTurn#1": 45,
+        "startCommentBatchReview#1": 61,
+        "executeWorkAgentEdit#1": 105,
+        "callback#739": 33
+      }
+    },
+    "apps/native-web/public/assistant-questions.js": {
+      "functions": {
+        "paint#1": 26
+      }
+    },
+    "apps/native-web/public/chat-markdown.js": {
+      "functions": {
+        "renderChatMarkdown#1": 24
+      }
+    },
+    "apps/native-web/public/generation-live.js": {
+      "functions": {
+        "accept#1": 21
+      }
+    },
+    "apps/native-web/public/generation-process.js": {
+      "lines": 605,
+      "functions": {
+        "generationTerminalPresentation#1": 32,
+        "explicitResultState#1": 24,
+        "projectGenerationProcess#1": 59,
+        "describeProcessRow#1": 39
+      }
+    },
+    "apps/native-web/public/hub-health-state.js": {
+      "functions": {
+        "capabilityViewModel#1": 21
+      }
+    },
+    "apps/native-web/public/hub.js": {
+      "lines": 2048,
+      "functions": {
+        "paintPiModels#1": 22,
+        "paintGenerationShowcase#1": 41,
+        "refreshHealth#1": 23,
+        "renderProviderList#1": 23
+      }
+    },
+    "apps/native-web/public/i18n.js": {
+      "lines": 1341,
+      "functions": {}
+    },
+    "apps/native-web/public/launch-flow.js": {
+      "functions": {
+        "performLaunch#1": 21
+      }
+    },
+    "apps/native-web/public/work-agent-scope.js": {
+      "functions": {
+        "targetFromAssistantIntent#1": 96
+      }
+    },
+    "apps/native-web/src/assistant-edit-scope-dom.test.mjs": {
+      "functions": {
+        "callback#1": 22
+      }
+    },
+    "apps/native-web/src/assistant-structure-dom.test.mjs": {
+      "functions": {
+        "callback#1": 36
+      }
+    },
+    "apps/native-web/src/png-pdf.mjs": {
+      "functions": {
+        "decodePngToRgb#1": 27
+      }
+    },
+    "apps/native-web/src/review-threads.test.mjs": {
+      "lines": 1648,
+      "functions": {}
+    },
+    "apps/native-web/src/server.mjs": {
+      "lines": 4458,
+      "functions": {
+        "captureWorkspaceEditScope#1": 84,
+        "readGenerationActivity#1": 26,
+        "callback#98": 594
+      }
+    },
+    "apps/server/src/index.mjs": {
+      "functions": {
+        "callback#5": 29
+      }
+    },
+    "apps/web/src/components/Workspace.tsx": {
+      "lines": 677,
+      "functions": {
+        "Workspace#1": 41,
+        "onKey#1": 29
+      }
+    },
+    "apps/web/src/components/slide/SlideElementView.tsx": {
+      "lines": 760,
+      "functions": {}
+    },
+    "apps/web/src/store/app-store.ts": {
+      "lines": 1270,
+      "functions": {}
+    },
+    "packages/agent-core/src/image-rebuild.ts": {
+      "functions": {
+        "composeImageRebuildDeck#1": 26
+      }
+    },
+    "packages/agent-core/src/llm-provider.ts": {
+      "functions": {
+        "run#1": 26
+      }
+    },
+    "packages/agent-core/src/llm/compile-outline.ts": {
+      "functions": {
+        "compileComposedElement#1": 30,
+        "callback#12": 27
+      }
+    },
+    "packages/agent-core/src/mock-provider.ts": {
+      "lines": 532,
+      "functions": {
+        "run#1": 27
+      }
+    },
+    "packages/agent-core/src/sample-deck.ts": {
+      "lines": 547,
+      "functions": {}
+    },
+    "packages/agent-harness/src/agent-runtime.test.ts": {
+      "lines": 934,
+      "functions": {}
+    },
+    "packages/agent-harness/src/agent-runtime.ts": {
+      "lines": 503,
+      "functions": {
+        "runAgentLoop#1": 41
+      }
+    },
+    "packages/agent-harness/src/agent-tools.ts": {
+      "lines": 1122,
+      "functions": {
+        "executeGenerateTool#1": 64,
+        "executeGenerateToolAsync#1": 38
+      }
+    },
+    "packages/agent-harness/src/compose-ir.ts": {
+      "lines": 824,
+      "functions": {}
+    },
+    "packages/agent-harness/src/exhibit-paint.ts": {
+      "lines": 695,
+      "functions": {
+        "classifyExhibit#1": 26
+      }
+    },
+    "packages/agent-harness/src/generate-checkpoint.ts": {
+      "functions": {
+        "parseGenerateCheckpoint#1": 21
+      }
+    },
+    "packages/agent-harness/src/generation-provenance.ts": {
+      "functions": {
+        "authenticGenerationStatus#1": 30
+      }
+    },
+    "packages/agent-harness/src/host-hands.test.ts": {
+      "lines": 521,
+      "functions": {}
+    },
+    "packages/agent-harness/src/host-produce.ts": {
+      "functions": {
+        "producePages#1": 23
+      }
+    },
+    "packages/agent-harness/src/index.ts": {
+      "lines": 938,
+      "functions": {}
+    },
+    "packages/agent-harness/src/layout-qa.test.ts": {
+      "lines": 976,
+      "functions": {}
+    },
+    "packages/agent-harness/src/layout-qa.ts": {
+      "lines": 899,
+      "functions": {}
+    },
+    "packages/agent-harness/src/openkimi-source-pack.ts": {
+      "lines": 591,
+      "functions": {}
+    },
+    "packages/agent-harness/src/page-raster.ts": {
+      "lines": 763,
+      "functions": {
+        "assessRenderedLayout#1": 34,
+        "callback#9": 37
+      }
+    },
+    "packages/agent-harness/src/pi-brain.ts": {
+      "lines": 1033,
+      "functions": {
+        "compose#1": 86
+      }
+    },
+    "packages/agent-harness/src/pi-hands.test.ts": {
+      "lines": 547,
+      "functions": {}
+    },
+    "packages/agent-harness/src/pi-hands.ts": {
+      "lines": 1176,
+      "functions": {
+        "runPiHand#1": 89,
+        "mergeSkillStackEvidence#1": 26
+      }
+    },
+    "packages/agent-harness/src/pi-image-content.ts": {
+      "functions": {
+        "parsePayload#1": 27
+      }
+    },
+    "packages/agent-harness/src/pi-rpc.test.ts": {
+      "lines": 1152,
+      "functions": {}
+    },
+    "packages/agent-harness/src/pi-rpc.ts": {
+      "lines": 545,
+      "functions": {
+        "publicToolSummary#1": 22,
+        "nameFromRpcEvent#1": 22
+      }
+    },
+    "packages/agent-harness/src/playbook-recipes.test.ts": {
+      "lines": 688,
+      "functions": {}
+    },
+    "packages/agent-harness/src/playbook-recipes.ts": {
+      "lines": 1008,
+      "functions": {
+        "classroomTitle#1": 21,
+        "recipeKind#1": 21,
+        "hasOfficialRecipeKind#1": 25,
+        "hasOfficialRecipe#1": 26
+      }
+    },
+    "packages/agent-harness/src/playbook.test.ts": {
+      "lines": 739,
+      "functions": {}
+    },
+    "packages/agent-harness/src/playbook.ts": {
+      "functions": {
+        "extractPalette#1": 24
+      }
+    },
+    "packages/agent-harness/src/report-facts.ts": {
+      "functions": {
+        "reportFactIssues#1": 27
+      }
+    },
+    "packages/agent-harness/src/run-ledger.ts": {
+      "lines": 1880,
+      "functions": {
+        "inspectRunLedger#1": 51
+      }
+    },
+    "packages/agent-harness/src/skill-pages.test.ts": {
+      "lines": 906,
+      "functions": {}
+    },
+    "packages/agent-harness/src/skill-pages.ts": {
+      "lines": 1749,
+      "functions": {
+        "parseTextContent#1": 90,
+        "normalizeCanvasElement#1": 56,
+        "expandOfficialRecipeItem#1": 81,
+        "callback#20": 95,
+        "parseElement#1": 49
+      }
+    },
+    "packages/canvas-session/src/index.ts": {
+      "lines": 2732,
+      "functions": {
+        "applyNaturalRefine#1": 46
+      }
+    },
+    "packages/canvas-session/src/session.test.ts": {
+      "lines": 1169,
+      "functions": {}
+    },
+    "packages/design-brain/src/compose.ts": {
+      "functions": {
+        "composeSlide#1": 61
+      }
+    },
+    "packages/design-brain/src/extract.ts": {
+      "functions": {
+        "extractThemeFromHints#1": 34
+      }
+    },
+    "packages/design-brain/src/lint.ts": {
+      "functions": {
+        "callback#2": 34
+      }
+    },
+    "packages/design-brain/src/select-recipe.ts": {
+      "functions": {
+        "hardReject#1": 27,
+        "scoreSpec#1": 23
+      }
+    },
+    "packages/dsh-slides-bundle/src/index.ts": {
+      "functions": {
+        "assertSlidesRowLaw#1": 24
+      }
+    },
+    "packages/dsh-slides-host/src/agent-trace.ts": {
+      "functions": {
+        "traceRowsFromSessionEvent#1": 43
+      }
+    },
+    "packages/dsh-slides-host/src/assistant-intent.ts": {
+      "functions": {
+        "parseAssistantIntent#1": 121
+      }
+    },
+    "packages/dsh-slides-host/src/byok.ts": {
+      "functions": {
+        "parseByokUpsert#1": 21
+      }
+    },
+    "packages/dsh-slides-host/src/host.test.ts": {
+      "lines": 3199,
+      "functions": {}
+    },
+    "packages/dsh-slides-host/src/local-models.ts": {
+      "lines": 807,
+      "functions": {
+        "importLocalDshModels#1": 31
+      }
+    },
+    "packages/dsh-slides-host/src/oauth-login.test.ts": {
+      "lines": 533,
+      "functions": {}
+    },
+    "packages/dsh-slides-host/src/plugin.ts": {
+      "lines": 1094,
+      "functions": {
+        "apply#1": 22,
+        "callback#30": 21
+      }
+    },
+    "packages/dsh-slides-host/src/produce-agent-tools.test.ts": {
+      "lines": 807,
+      "functions": {}
+    },
+    "packages/dsh-slides-host/src/product-progress-guard.test.ts": {
+      "lines": 920,
+      "functions": {}
+    },
+    "packages/dsh-slides-host/src/product-progress-guard.ts": {
+      "lines": 710,
+      "functions": {
+        "reduceProductProgress#1": 50
+      }
+    },
+    "packages/dsh-slides-host/src/routes.ts": {
+      "lines": 1129,
+      "functions": {
+        "reviewScopeEntryFrom#1": 25,
+        "requestGuardFailure#1": 23,
+        "callback#10": 192,
+        "callback#23": 30
+      }
+    },
+    "packages/dsh-slides-host/src/slice-session.ts": {
+      "functions": {
+        "derivePhase#1": 24
+      }
+    },
+    "packages/dsh-slides-host/src/stream-bridge.ts": {
+      "functions": {
+        "handleFrame#1": 28
+      }
+    },
+    "packages/dsh-slides-host/src/tool-loop-guard.ts": {
+      "functions": {
+        "observe#1": 33
+      }
+    },
+    "packages/dsh-slides-host/src/tools.ts": {
+      "lines": 1363,
+      "functions": {
+        "sessionProduceToolAllowlist#1": 24,
+        "executeWritePageOnce#1": 22
+      }
+    },
+    "packages/dsh-slides-host/src/write-page.ts": {
+      "functions": {
+        "normalizeWritePageElement#1": 39
+      }
+    },
+    "packages/exporter-native/src/export-pptd.test.ts": {
+      "lines": 1182,
+      "functions": {}
+    },
+    "packages/exporter-native/src/export-pptd.ts": {
+      "lines": 2459,
+      "functions": {
+        "postProcessPptx#1": 23,
+        "mapText#1": 25,
+        "mapChart#1": 29,
+        "parsePolylinePoints#1": 21,
+        "mapLine#1": 32,
+        "probeImageSize#1": 21,
+        "mapImage#1": 23,
+        "exportProjectToPptx#1": 39
+      }
+    },
+    "packages/exporter-native/src/xml-wellformed.test.ts": {
+      "functions": {
+        "assertWellFormedXml#1": 29
+      }
+    },
+    "packages/exporter-pptx/src/mappers.ts": {
+      "lines": 817,
+      "functions": {}
+    },
+    "packages/pptd-v2/src/chart-layout.ts": {
+      "lines": 513,
+      "functions": {
+        "chartLayout#1": 23
+      }
+    },
+    "packages/pptd-v2/src/chart-semantics.ts": {
+      "functions": {
+        "categoricalChartModel#1": 26
+      }
+    },
+    "packages/pptd-v2/src/font-policy.ts": {
+      "functions": {
+        "normalizeFontFamily#1": 22
+      }
+    },
+    "packages/pptd-v2/src/ooxml-geom.ts": {
+      "functions": {
+        "parseBlock#1": 23,
+        "evalFmla#1": 25
+      }
+    },
+    "packages/pptd-v2/src/shape-catalog.ts": {
+      "lines": 1667,
+      "functions": {}
+    },
+    "packages/pptd-v2/src/shape-path.ts": {
+      "functions": {
+        "shapePath#1": 180
+      }
+    },
+    "packages/pptd-v2/src/theme.ts": {
+      "lines": 630,
+      "functions": {
+        "parseRichText#1": 31,
+        "resolveTextStyle#1": 29
+      }
+    },
+    "packages/pptd-v2/src/write-page-schema.ts": {
+      "lines": 555,
+      "functions": {
+        "schemaIssues#1": 35,
+        "semanticIssues#1": 50
+      }
+    },
+    "packages/pptd/src/commands/undo.ts": {
+      "functions": {
+        "undoCommand#1": 37,
+        "invertCommand#1": 27
+      }
+    },
+    "packages/pptd/src/schema/index.ts": {
+      "lines": 543,
+      "functions": {}
+    },
+    "packages/presentation-run/src/capabilities.ts": {
+      "functions": {
+        "inspectCapabilities#1": 23
+      }
+    },
+    "packages/presentation-run/src/domain/agent-tools.ts": {
+      "lines": 2093,
+      "functions": {
+        "callback#4": 59,
+        "executeGenerateTool#1": 159,
+        "executeGenerateToolAsync#1": 54
+      }
+    },
+    "packages/presentation-run/src/domain/background-color-authority.ts": {
+      "functions": {
+        "activeBackgroundColorOverride#1": 24
+      }
+    },
+    "packages/presentation-run/src/domain/domain-hands.ts": {
+      "lines": 954,
+      "functions": {
+        "runDomainHand#1": 74,
+        "mergeSkillStackEvidence#1": 26
+      }
+    },
+    "packages/presentation-run/src/domain/layout-qa.test.ts": {
+      "lines": 1517,
+      "functions": {}
+    },
+    "packages/presentation-run/src/domain/layout-qa.ts": {
+      "lines": 1372,
+      "functions": {
+        "pageGeometryIssues#1": 21
+      }
+    },
+    "packages/presentation-run/src/domain/openkimi-source-pack.ts": {
+      "lines": 598,
+      "functions": {}
+    },
+    "packages/presentation-run/src/domain/page-raster.ts": {
+      "lines": 834,
+      "functions": {
+        "assessRenderedLayout#1": 34,
+        "callback#11": 37
+      }
+    },
+    "packages/presentation-run/src/domain/persist-page-id.test.ts": {
+      "lines": 639,
+      "functions": {}
+    },
+    "packages/presentation-run/src/domain/playbook-recipes.ts": {
+      "lines": 1008,
+      "functions": {
+        "classroomTitle#1": 21,
+        "recipeKind#1": 21,
+        "hasOfficialRecipeKind#1": 25,
+        "hasOfficialRecipe#1": 26
+      }
+    },
+    "packages/presentation-run/src/domain/playbook.ts": {
+      "functions": {
+        "extractPalette#1": 24
+      }
+    },
+    "packages/presentation-run/src/domain/playwright-runtime.ts": {
+      "lines": 758,
+      "functions": {}
+    },
+    "packages/presentation-run/src/domain/report-facts.ts": {
+      "functions": {
+        "reportFactIssues#1": 27
+      }
+    },
+    "packages/presentation-run/src/domain/review-write-scope.ts": {
+      "functions": {
+        "reviewWriteTargets#1": 26
+      }
+    },
+    "packages/presentation-run/src/domain/run-ledger.ts": {
+      "lines": 1435,
+      "functions": {
+        "inspectRunLedger#1": 42
+      }
+    },
+    "packages/presentation-run/src/domain/skill-pages.ts": {
+      "lines": 1838,
+      "functions": {
+        "parseTextContent#1": 90,
+        "normalizeCanvasElement#1": 59,
+        "normalizeChartInput#1": 24,
+        "expandOfficialRecipeItem#1": 81,
+        "callback#21": 92,
+        "parseElement#1": 46
+      }
+    },
+    "packages/presentation-run/src/domain/theme-pack.test.ts": {
+      "lines": 970,
+      "functions": {}
+    },
+    "packages/presentation-run/src/execution.ts": {
+      "functions": {
+        "projectExecution#1": 73
+      }
+    },
+    "packages/presentation-run/src/generation-activity.ts": {
+      "lines": 507,
+      "functions": {
+        "generationActivityFromLedger#1": 35,
+        "callback#5": 24
+      }
+    },
+    "packages/presentation-run/src/index.test.ts": {
+      "lines": 1683,
+      "functions": {}
+    },
+    "packages/presentation-run/src/produce-gates.ts": {
+      "lines": 988,
+      "functions": {
+        "inspectProduceGates#1": 156
+      }
+    },
+    "packages/presentation-run/src/run.ts": {
+      "lines": 597,
+      "functions": {
+        "execute#1": 53
+      }
+    },
+    "scripts/lib/dsh-profile-sync.mjs": {
+      "functions": {
+        "profileGateFilesStale#1": 21
+      }
+    },
+    "scripts/oracle-compare/public/compare.js": {
+      "functions": {
+        "renderNative#1": 52
+      }
+    },
+    "scripts/oracle-compare/server.mjs": {
+      "functions": {
+        "callback#3": 28
+      }
+    },
+    "scripts/p7-live-acceptance.mjs": {
+      "functions": {
+        "waitTerminal#1": 22,
+        "editorChecks#1": 22
+      }
+    },
+    "scripts/qa/audit-generated-editable-pptx.mjs": {
+      "lines": 595,
+      "functions": {
+        "callback#3": 21,
+        "pptxEvidence#1": 21,
+        "main#1": 95
+      }
+    },
+    "scripts/qa/compare-model-tool-args.mjs": {
+      "functions": {
+        "parseArgs#1": 21
+      }
+    },
+    "scripts/qa/editor-agent-human-audit.mjs": {
+      "functions": {
+        "callback#24": 28
+      }
+    },
+    "scripts/qa/editor-agent-scope-routing.mjs": {
+      "functions": {
+        "callback#15": 22
+      }
+    },
+    "scripts/qa/editor-ai-correction-matrix.mjs": {
+      "lines": 658,
+      "functions": {}
+    },
+    "scripts/qa/editor-canvas-boundaries.mjs": {
+      "lines": 582,
+      "functions": {}
+    },
+    "scripts/qa/editor-canvas-controls.mjs": {
+      "lines": 1197,
+      "functions": {}
+    },
+    "scripts/qa/editor-comment-batch.mjs": {
+      "lines": 600,
+      "functions": {
+        "callback#15": 45
+      }
+    },
+    "scripts/qa/editor-correction-journeys.mjs": {
+      "lines": 1197,
+      "functions": {}
+    },
+    "scripts/qa/editor-inspector-coherent-correction.mjs": {
+      "lines": 693,
+      "functions": {}
+    },
+    "scripts/qa/editor-office-acceptance.mjs": {
+      "lines": 1182,
+      "functions": {}
+    },
+    "scripts/qa/gestures.mjs": {
+      "lines": 655,
+      "functions": {
+        "restartNativeWebServer#1": 21
+      }
+    },
+    "scripts/qa/model-tool-args-lib.mjs": {
+      "functions": {
+        "extractWireToolEvidence#1": 21,
+        "classifyToolArguments#1": 21
+      }
+    },
+    "scripts/qa/record-product-journey.mjs": {
+      "lines": 540,
+      "functions": {
+        "pageLooksLikeDoc#1": 34
+      }
+    },
+    "scripts/verify-generate-qa.mjs": {
+      "lines": 566,
+      "functions": {}
+    },
+    "scripts/verify-tooltips.mjs": {
+      "functions": {
+        "checkAnchor#1": 21
+      }
+    }
+  }
+}
