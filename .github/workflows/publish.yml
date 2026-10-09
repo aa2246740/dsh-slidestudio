@@ -35,7 +35,7 @@ jobs:
       npm_config_auto_install_peers: 'false'
       PNPM_CONFIG_AUTO_INSTALL_PEERS: 'false'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
