@@ -10,7 +10,8 @@ export { inspectCapabilities, inspectProjectCapabilities, persistPresentationRun
 export { rasterRuntimeReady, pinnedPlaywrightRuntimePath, repoPlaywrightRuntimeFile, readPageRaster, savePageRaster, pageRasterRel, } from "./domain/page-raster.js";
 export { resolvePlaywrightRuntime, runtimeFileReady, runtimeLayoutUsable, discoverMachinePlaywright, machineRuntimeReuse, materializeManagedRuntime, provisionManagedRuntime, playwrightRuntimeSource, defaultPlaywrightBrowsersDirs, defaultSlidesStateDir, managedPlaywrightRuntimeDir, managedPlaywrightRuntimeFile, codexPlaywrightRuntimeFile, PINNED_PLAYWRIGHT_VERSION, PINNED_CHROMIUM_REVISION, } from "./domain/playwright-runtime.js";
 export { grokWebSearch, createGrokImageSearchPort, XAI_API_BASE as GROK_XAI_API_BASE, } from "./domain/grok-hosted.js";
-export { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv, GROK_IMAGINE_MODEL, } from "./domain/image-port.js";
+export { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv, imageConfigured, GROK_IMAGINE_MODEL, IMAGE_GENERATE_PRESETS, } from "./domain/image-port.js";
+export { createImageSearchPort, imageSearchConfigFromEnv, imageSearchConfigured, IMAGE_SEARCH_PRESETS, } from "./domain/image-search-port.js";
 export { CAPABILITY_LEDGER, ledgerFate } from "./capability-ledger.js";
 export { listSourceReceipts, recordSourceReceipt, consultedAdoptedExecuted, requireConsultAdoptBeforeWrite, } from "./receipts.js";
 export { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";

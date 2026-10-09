@@ -1586,29 +1586,70 @@ function settingsInput(id) {
   return document.getElementById(id);
 }
 
+function toggleTplBlock(prefix) {
+  const block = settingsInput(`${prefix}-tpl`);
+  if (!block) return;
+  block.hidden = settingsInput(`${prefix}-preset`)?.value !== "template";
+}
+
 function fillEndpoint(prefix, endpoint) {
   const on = endpoint?.kind === "custom";
   const url = settingsInput(`${prefix}-url`);
   const key = settingsInput(`${prefix}-key`);
   const model = settingsInput(`${prefix}-model`);
+  const preset = settingsInput(`${prefix}-preset`);
+  if (preset) preset.value = (on && endpoint.preset) || preset.options[0]?.value || "";
   if (url) url.value = on ? endpoint.url : "";
   if (key) {
     key.value = "";
     key.placeholder = on && endpoint.apiKeySet ? t("已保存，留空则保持") : t("可选");
   }
   if (model) model.value = on ? endpoint.model || "" : "";
+  const tmpl = (on && endpoint.template) || {};
+  const tplMethod = settingsInput(`${prefix}-tpl-method`);
+  const tplHeaders = settingsInput(`${prefix}-tpl-headers`);
+  const tplBody = settingsInput(`${prefix}-tpl-body`);
+  const tplPath = settingsInput(`${prefix}-tpl-path`);
+  const tplAttr = settingsInput(`${prefix}-tpl-attr`);
+  if (tplMethod) tplMethod.value = tmpl.method || "";
+  if (tplHeaders) tplHeaders.value = tmpl.headers ? JSON.stringify(tmpl.headers) : "";
+  if (tplBody) tplBody.value = tmpl.body || "";
+  if (tplPath) tplPath.value = tmpl.imagePath || "";
+  if (tplAttr) tplAttr.value = tmpl.attribution || "";
+  toggleTplBlock(prefix);
 }
 
 function collectEndpoint(prefix) {
   const url = String(settingsInput(`${prefix}-url`)?.value || "").trim();
   if (!url) return { kind: "off" };
   const modelEl = settingsInput(`${prefix}-model`);
-  return {
+  const preset = String(settingsInput(`${prefix}-preset`)?.value || "").trim();
+  const out = {
     kind: "custom",
     url,
     apiKey: String(settingsInput(`${prefix}-key`)?.value || ""),
     model: String(modelEl?.value || "").trim(),
+    preset: preset || undefined,
   };
+  if (preset === "template") {
+    const headersRaw = String(settingsInput(`${prefix}-tpl-headers`)?.value || "").trim();
+    let headers;
+    if (headersRaw) {
+      try {
+        headers = JSON.parse(headersRaw);
+      } catch {
+        throw new Error(t("请求头不是合法 JSON"));
+      }
+    }
+    out.template = {
+      method: String(settingsInput(`${prefix}-tpl-method`)?.value || "").trim() || undefined,
+      headers,
+      body: String(settingsInput(`${prefix}-tpl-body`)?.value || "").trim() || undefined,
+      imagePath: String(settingsInput(`${prefix}-tpl-path`)?.value || "").trim() || undefined,
+      attribution: String(settingsInput(`${prefix}-tpl-attr`)?.value || "").trim() || undefined,
+    };
+  }
+  return out;
 }
 
 async function loadToolSettings() {
@@ -2131,6 +2172,10 @@ document.getElementById("custom-provider-form")?.addEventListener("submit", asyn
     if (status) status.textContent = error instanceof Error ? error.message : t("保存失败");
   }
 });
+
+for (const prefix of ["search", "image"]) {
+  document.getElementById(`${prefix}-preset`)?.addEventListener("change", () => toggleTplBlock(prefix));
+}
 
 document.getElementById("btn-settings-save")?.addEventListener("click", async () => {
   const status = document.getElementById("settings-status");

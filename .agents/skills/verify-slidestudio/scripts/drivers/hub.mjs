@@ -141,7 +141,14 @@ export const features = [
       rec.check("the kernel's model is selected, grouped under its provider", picked.value === "test/cheap" && picked.group === "Local" && picked.text === "cheap", JSON.stringify(picked));
       rec.check("the popup has direct choices and no login entry", (await page.locator('#pi-model [role="option"]').count()) > 0 && (await page.locator("#pi-panel select, #pi-login-status").count()) === 0);
       await page.waitForFunction(() => document.querySelectorAll("#capability-row li").length === 4);
-      const chips = await page.$$eval("#capability-row li", (n) => n.map((x) => `${x.className}:${x.textContent}`));
+      let chips = await page.$$eval("#capability-row li", (n) => n.map((x) => `${x.className}:${x.textContent}`));
+      // the chip row is repainted asynchronously; retry the read if we caught it mid-repaint
+      if (chips.length === 0) {
+        await rec.until(async () => {
+          chips = await page.$$eval("#capability-row li", (n) => n.map((x) => `${x.className}:${x.textContent}`));
+          return chips.length === 4;
+        }, 3000);
+      }
       rec.check("a one-line capability strip lights what this run can use", chips.length === 4 && chips.includes("is-on:看图") && chips.includes("is-on:联网"), chips.join(","));
       rec.check("the choice is remembered for the next visit", await page.evaluate(() => localStorage.getItem("oss.pi.provider") === "test" && localStorage.getItem("oss.pi.model") === "cheap"));
       await rec.shot(page, "04-model-panel");
@@ -401,9 +408,8 @@ export const features = [
       await openHub(page, ctx);
       await page.click("#btn-settings");
       rec.check("设置 swaps the Hub for the settings screen", (await visible(page, "#settings-screen")) && (await page.locator("#home-screen").isHidden()));
-      rec.check("the tools pane is hidden from the nav", await page.locator('[data-settings-pane="tools"]').isHidden());
-      rec.check("the models pane says custom tools are for later", /以后开发/.test(await page.locator("#pane-models .settings-later").innerText()));
-      const panes = { models: "pane-models", oauth: "pane-oauth", appearance: "pane-appearance" };
+      rec.check("the tools pane is a public nav entry", await page.locator('[data-settings-pane="tools"]').isVisible());
+      const panes = { models: "pane-models", oauth: "pane-oauth", tools: "pane-tools", appearance: "pane-appearance" };
       for (const [key, id] of Object.entries(panes)) {
         await page.click(`[data-settings-pane="${key}"]`);
         const shown = await page.$$eval(".settings-pane", (n) => n.filter((x) => !x.hidden).map((x) => x.id));
@@ -419,6 +425,7 @@ export const features = [
       await page.locator("#preset-picker button", { hasText: "Acme" }).click();
       const acme = page.locator("#byok-list .byok-row", { hasText: "Acme" });
       await acme.waitFor();
+      await rec.until(() => sent.adds.length > 0, 3000);
       rec.check("adding a preset opens its key field", (await acme.locator("input[type=password]").count()) === 1 && sent.adds[0]?.preset === "acme");
       await acme.locator("input[type=password]").fill(FAKE_KEY);
       await acme.locator("button", { hasText: "保存" }).click();
@@ -460,20 +467,40 @@ export const features = [
       rec.check("completing the challenge marks it signed in", /已登录/.test(await page.locator("#provider-list .provider-row", { hasText: "Sub 订阅" }).locator(".provider-badge").innerText()));
       await rec.shot(page, "02-oauth");
 
-      // tool endpoints (the nav entry is hidden; the pane and its endpoint still exist)
-      await page.evaluate(() => document.querySelector('[data-settings-pane="tools"]').click());
+      // tool endpoints: 接口格式 presets + 自定义模板, saved through the same PUT
+      await page.click('[data-settings-pane="tools"]');
+      const searchPresets = await page.$$eval("#search-preset option", (n) => n.map((x) => x.value));
+      const imagePresets = await page.$$eval("#image-preset option", (n) => n.map((x) => x.value));
+      rec.check("the search format select lists vendors + template", searchPresets.join(",") === "generic,pixabay,pexels,unsplash,bing,template", searchPresets.join(","));
+      rec.check("the image format select lists vendors + template", imagePresets.join(",") === "openai,dashscope-sync,dashscope-task,gemini-imagen,stability,template", imagePresets.join(","));
+      rec.check("template fields stay hidden until 自定义模板", (await page.locator("#search-tpl").isHidden()) && (await page.locator("#image-tpl").isHidden()));
+      await page.selectOption("#search-preset", "template");
+      rec.check("自定义模板 expands the search template fields", await page.locator("#search-tpl").isVisible());
+      await page.selectOption("#search-preset", "generic");
+      rec.check("a named preset collapses the template fields", await page.locator("#search-tpl").isHidden());
       await page.fill("#search-url", "https://search.verify.example");
       await page.fill("#search-key", FAKE_KEY);
       await page.fill("#image-url", "https://img.verify.example/v1");
       await page.fill("#image-model", "img-model-1");
       await page.click("#btn-settings-save");
       await page.waitForFunction(() => document.getElementById("settings-status")?.textContent === "已保存", null, { timeout: 5000 });
-      rec.check("saving PUTs both endpoints", sent.tools[0]?.imageSearch?.url === "https://search.verify.example" && sent.tools[0]?.imageGenerate?.model === "img-model-1");
+      rec.check("saving PUTs both endpoints with their presets", sent.tools[0]?.imageSearch?.url === "https://search.verify.example" && sent.tools[0]?.imageSearch?.preset === "generic" && sent.tools[0]?.imageGenerate?.model === "img-model-1" && sent.tools[0]?.imageGenerate?.preset === "openai");
       rec.check("the key field empties and says a key is stored", (await page.inputValue("#search-key")) === "" && /已保存/.test((await page.getAttribute("#search-key", "placeholder")) ?? ""), await page.getAttribute("#search-key", "placeholder"));
+      // custom template config: method/path land in the PUT body
+      await page.selectOption("#search-preset", "template");
+      await page.fill("#search-tpl-method", "GET");
+      await page.fill("#search-tpl-path", "hits.0.url");
+      await page.fill("#search-tpl-headers", "{not json");
+      await page.click("#btn-settings-save");
+      rec.check("invalid template headers are refused before the PUT", sent.tools.length === 1 && /请求头不是合法 JSON/.test(await page.locator("#settings-status").innerText()));
+      await page.fill("#search-tpl-headers", "");
+      await page.click("#btn-settings-save");
+      await page.waitForFunction(() => document.getElementById("settings-status")?.textContent === "已保存", null, { timeout: 5000 });
+      rec.check("a template config PUTs preset + template", sent.tools[1]?.imageSearch?.preset === "template" && sent.tools[1]?.imageSearch?.template?.method === "GET" && sent.tools[1]?.imageSearch?.template?.imagePath === "hits.0.url", JSON.stringify(sent.tools[1]?.imageSearch));
       await page.fill("#search-url", "");
       await page.click("#btn-settings-save");
-      await rec.until(() => sent.tools.length === 2, 3000);
-      rec.check("clearing a URL switches that service off", sent.tools[1]?.imageSearch?.kind === "off");
+      await rec.until(() => sent.tools.length === 3, 3000);
+      rec.check("clearing a URL switches that service off", sent.tools[2]?.imageSearch?.kind === "off");
 
       // appearance
       await page.click('[data-settings-pane="appearance"]');

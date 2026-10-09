@@ -124,8 +124,7 @@
         <nav class="settings-nav" data-i18n-aria-label="设置分类" aria-label="设置分类">
           <button type="button" class="is-on" data-settings-pane="models" data-i18n="模型">模型</button>
           <button type="button" data-settings-pane="oauth" data-i18n="订阅登录">订阅登录</button>
-          <!-- 工具（搜图/生图）以后开发，导航先不放出。恢复时把 hidden 拿掉。 -->
-          <button type="button" data-settings-pane="tools" data-i18n="工具" hidden>工具</button>
+          <button type="button" data-settings-pane="tools" data-i18n="工具">工具</button>
           <button type="button" data-settings-pane="appearance" data-i18n="外观">外观</button>
           <p class="settings-dsh-note" id="settings-dsh-note" hidden data-i18n="模型接入与登录由 DSH 设置统一管理。">模型接入与登录由 DSH 设置统一管理。</p>
         </nav>
@@ -162,7 +161,6 @@
               </div>
             </form>
             <span class="llm-status" id="providers-status"></span>
-            <p class="settings-later" data-i18n="自定义工具（搜图/生图）以后开发。">自定义工具（搜图/生图）以后开发。</p>
           </section>
           <section class="settings-pane" id="pane-oauth" hidden>
             <h2 data-i18n="订阅登录">订阅登录</h2>
@@ -177,11 +175,49 @@
           <section class="settings-pane" id="pane-tools" hidden>
             <h2 data-i18n="工具">工具</h2>
             <p data-i18n="搜图、生图在此接服务商。联网检索不外接，只在 Grok / Codex / Claude 等模型自带时可用。URL 留空表示关闭。">搜图、生图在此接服务商。联网检索不外接，只在 Grok / Codex / Claude 等模型自带时可用。URL 留空表示关闭。</p>
+            <p data-i18n="主流接口选对应格式即可直连；客户自有接口选「自定义模板」：填方法/URL/请求体（{{query}}、{{prompt}}、{{key}} 占位）加返回里的图片字段路径。">主流接口选对应格式即可直连；客户自有接口选「自定义模板」：填方法/URL/请求体（{{query}}、{{prompt}}、{{key}} 占位）加返回里的图片字段路径。</p>
+            <label><span data-i18n="搜图接口格式">搜图接口格式</span>
+              <select id="search-preset">
+                <option value="generic" data-i18n="通用 POST {query}">通用 POST {query}</option>
+                <option value="pixabay">Pixabay</option>
+                <option value="pexels">Pexels</option>
+                <option value="unsplash">Unsplash</option>
+                <option value="bing" data-i18n="Bing 图片">Bing 图片</option>
+                <option value="template" data-i18n="自定义模板">自定义模板</option>
+              </select>
+            </label>
             <label><span data-i18n="搜图 URL">搜图 URL</span>
               <input id="search-url" type="url" placeholder="https://…" autocomplete="off" />
             </label>
             <label><span data-i18n="搜图 API Key">搜图 API Key</span>
               <input id="search-key" type="password" data-i18n-placeholder="可选" placeholder="可选" autocomplete="off" />
+            </label>
+            <div id="search-tpl" hidden>
+              <label><span data-i18n="模板 · 请求方法">模板 · 请求方法</span>
+                <input id="search-tpl-method" type="text" placeholder="GET" autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 请求头 JSON">模板 · 请求头 JSON</span>
+                <input id="search-tpl-headers" type="text" placeholder='{"X-Key":"{{key}}"}' autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 请求体 JSON">模板 · 请求体 JSON</span>
+                <input id="search-tpl-body" type="text" placeholder='{"q":"{{query}}"}' autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 图片字段路径">模板 · 图片字段路径</span>
+                <input id="search-tpl-path" type="text" placeholder="data.0.url" autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 署名">模板 · 署名</span>
+                <input id="search-tpl-attr" type="text" data-i18n-placeholder="可选，如 内网图库" placeholder="可选，如 内网图库" autocomplete="off" />
+              </label>
+            </div>
+            <label><span data-i18n="生图接口格式">生图接口格式</span>
+              <select id="image-preset">
+                <option value="openai" data-i18n="OpenAI 兼容">OpenAI 兼容</option>
+                <option value="dashscope-sync" data-i18n="阿里百炼 · 同步（qwen-image）">阿里百炼 · 同步（qwen-image）</option>
+                <option value="dashscope-task" data-i18n="阿里百炼 · 异步任务（wanx）">阿里百炼 · 异步任务（wanx）</option>
+                <option value="gemini-imagen">Gemini Imagen</option>
+                <option value="stability">Stability SD3</option>
+                <option value="template" data-i18n="自定义模板">自定义模板</option>
+              </select>
             </label>
             <label><span data-i18n="生图 URL">生图 URL</span>
               <input id="image-url" type="url" placeholder="https://…/v1" autocomplete="off" />
@@ -192,6 +228,20 @@
             <label><span data-i18n="生图模型">生图模型</span>
               <input id="image-model" type="text" data-i18n-placeholder="可选，如 grok-imagine-image-2.0" placeholder="可选，如 grok-imagine-image-2.0" autocomplete="off" />
             </label>
+            <div id="image-tpl" hidden>
+              <label><span data-i18n="模板 · 请求方法">模板 · 请求方法</span>
+                <input id="image-tpl-method" type="text" placeholder="POST" autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 请求头 JSON">模板 · 请求头 JSON</span>
+                <input id="image-tpl-headers" type="text" placeholder='{"X-Key":"{{key}}"}' autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 请求体 JSON">模板 · 请求体 JSON</span>
+                <input id="image-tpl-body" type="text" placeholder='{"prompt":"{{prompt}}","size":"{{size}}"}' autocomplete="off" />
+              </label>
+              <label><span data-i18n="模板 · 图片字段路径">模板 · 图片字段路径</span>
+                <input id="image-tpl-path" type="text" placeholder="data.0.url" autocomplete="off" />
+              </label>
+            </div>
             <div class="settings-actions">
               <button type="button" id="btn-settings-save" data-i18n="保存">保存</button>
               <span class="llm-status" id="settings-status"></span>
