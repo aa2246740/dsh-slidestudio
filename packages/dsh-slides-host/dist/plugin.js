@@ -1,3 +1,4 @@
+import { runModelSwitchTransaction } from "./model-switch.js";
 import { AssistantQuestions } from "./assistant-questions.js";
 import { hideSlidesSessions, LegacySessionHider, slidesSessionMeta, } from "./session-workspace.js";
 import { cancelAgentOutsideAppend } from "./agent-cancel.js";
@@ -12,10 +13,11 @@ import "@deepseek-ai/dsh-agent";
 import "@deepseek-ai/dsh-tools";
 import "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-attachment";
-import { createPresentationRun, buildCatalogDto, persistPresentationRunProvider, machineRuntimeReuse, provisionManagedRuntime, resolvePlaywrightRuntime, rasterRuntimeReady, } from "@open-slidestudio/presentation-run";
+import { createPresentationRun, buildCatalogDto, persistPresentationRunProvider, machineRuntimeReuse, } from "@open-slidestudio/presentation-run";
 import { bindToolProviderToModelSelection, createSlidesProduceSetup, } from "./produce-agent-setup.js";
 import { reconcileSlidesAgentPlane, wireSlidesAgentPlaneForAgent, } from "./agent-plane.js";
 import { writeSliceRuntime } from "./runtime.js";
+import { createRuntimeProvisionController } from "./runtime-provision.js";
 import { assertGenerationRenderingReady } from "./hub-capability.js";
 import { deckTitleFromBrief, SliceSessionStore } from "./slice-session.js";
 import { handleProductRequest, handleSlidesRequest, turnTextWithAttachments } from "./routes.js";
@@ -39,8 +41,15 @@ import { beginAttempt } from "./session-transition.js";
 import { loadToolSettingsIntoProcess } from "./tool-settings.js";
 import { ToolInvalidArgsLoopGuard } from "./tool-loop-guard.js";
 import { ProductProgressSessionGuard, } from "./product-progress-guard.js";
+export { runModelSwitchTransaction } from "./model-switch.js";
 export const name = "slides-host";
 export const inject = ["tools", "webServer", "agents", "attachments", "llm"];
+/**
+ * Max time /slides/sessions/:id/stop waits for the agent to honour the cancel
+ * before reporting the stop anyway — a hung turn must never keep the operator
+ * control (and the busy flag that drives the editor's "正在中止" state) pending.
+ */
+const OPERATOR_STOP_IDLE_TIMEOUT_MS = 15_000;
 export const Config = z.object({
     workspaceRoot: z.string().default(""),
     dataRoot: z.string().default(""),
@@ -48,16 +57,6 @@ export const Config = z.object({
     /** Mounted inside the user's own DSH Host as a Personal feature. */
     personal: z.boolean().default(false),
 });
-export async function runModelSwitchTransaction(input) {
-    try {
-        input.apply();
-        await input.activate();
-    }
-    catch (error) {
-        input.rollback();
-        throw error;
-    }
-}
 export function apply(ctx, config = {}) {
     const workspaceRoot = pathResolve(config.workspaceRoot?.trim() || process.cwd());
     const dataRoot = pathResolve(config.dataRoot?.trim() || workspaceRoot);
@@ -83,29 +82,21 @@ export function apply(ctx, config = {}) {
     // must not depend on a Codex homedir or a manual setup step.
     const slidesStateDir = pathJoin(dshHome, "data", "dsh-slidestudio");
     const runtimeRoots = { repoRoot: workspaceRoot, homeDir: os.homedir(), stateDir: slidesStateDir };
-    const runtimeResolution = resolvePlaywrightRuntime(process.env, runtimeRoots);
-    if (runtimeResolution.ready) {
-        process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
-    }
-    let runtimeProvisionError;
-    let runtimeProvision;
-    if (!runtimeResolution.ready && !process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim()) {
-        // Point env-only lookups at the managed path so the raster port picks the
-        // runtime up as soon as provisioning finishes writing it.
-        process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
-        runtimeProvision = provisionManagedRuntime(slidesStateDir, {
+    const explicitRuntimeOverride = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim() || "";
+    const runtimeProvision = createRuntimeProvisionController({
+        env: process.env,
+        roots: runtimeRoots,
+        stateDir: slidesStateDir,
+        explicitOverride: explicitRuntimeOverride,
+        provisionOptions: {
             log: (message) => console.log(message),
             // A playwright module/browsers already on the machine saves the
             // matching download (e.g. the reporter's global playwright).
             reuse: machineRuntimeReuse(process.env, runtimeRoots),
-        }).then(() => undefined, (error) => {
-            runtimeProvisionError = error instanceof Error ? error.message : String(error);
-            console.warn("[slides] playwright runtime auto-setup failed:", runtimeProvisionError);
-            // Release the exclusive env pin so a later resolve can adopt a runtime
-            // the user installs after this attempt failed.
-            delete process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
-        });
-    }
+        },
+    });
+    if (runtimeProvision.snapshot().phase === "failed")
+        void runtimeProvision.start();
     const store = new SliceSessionStore(dataRoot);
     store.rebuild();
     const workspaceRegistry = () => ctx.get("workspaceRegistry");
@@ -564,6 +555,8 @@ export function apply(ctx, config = {}) {
         dataRoot,
         dshHome,
         presentation,
+        renderRuntime: () => runtimeProvision.snapshot(),
+        startRenderRuntime: () => runtimeProvision.start(),
         agentBusy(sessionId) {
             return busy.has(sessionId);
         },
@@ -584,7 +577,17 @@ export function apply(ctx, config = {}) {
             try {
                 if (agent) {
                     agent.cancel({ kind: "user" });
-                    await agent.whenIdle();
+                    // Bound the idle wait: an abort signal a hung tool call never honors
+                    // (or a wake that re-arms the driver) would otherwise keep whenIdle
+                    // pending forever — /slides/sessions/:id/stop never answers, `busy`
+                    // never clears, and the editor is stuck on "正在中止" while the
+                    // state polls keep rewriting the run files. Stop reporting must not
+                    // depend on the kernel's abort actually landing.
+                    const timeout = new Promise((resolve) => {
+                        const timer = setTimeout(resolve, OPERATOR_STOP_IDLE_TIMEOUT_MS);
+                        timer.unref?.();
+                    });
+                    await Promise.race([agent.whenIdle(), timeout]);
                 }
             }
             finally {
@@ -644,9 +647,11 @@ export function apply(ctx, config = {}) {
             }
         },
         async createAgent(input) {
-            if (runtimeProvision && !rasterRuntimeReady())
-                await runtimeProvision;
-            assertGenerationRenderingReady({ render: rasterRuntimeReady() }, input.conversationMode, runtimeProvisionError);
+            const pendingRuntimeProvision = runtimeProvision.current();
+            if (pendingRuntimeProvision)
+                await pendingRuntimeProvision;
+            const renderRuntime = runtimeProvision.snapshot();
+            assertGenerationRenderingReady({ render: renderRuntime.phase === "ready" }, input.conversationMode, renderRuntime.error);
             assertHubProduceGatesReady(workspaceRoot);
             bindGrokProduce();
             if (input.provider === "mimo-desktop")

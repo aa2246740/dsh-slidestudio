@@ -31,7 +31,7 @@
         "waitForAiReviewTurn#1": 45,
         "startCommentBatchReview#1": 61,
         "executeWorkAgentEdit#1": 105,
-        "callback#739": 33
+        "callback#735": 33
       }
     },
     "apps/native-web/public/assistant-questions.js": {
@@ -110,7 +110,7 @@
       "functions": {
         "captureWorkspaceEditScope#1": 84,
         "readGenerationActivity#1": 26,
-        "callback#98": 594
+        "callback#93": 594
       }
     },
     "apps/server/src/index.mjs": {
@@ -377,7 +377,7 @@
       "lines": 1094,
       "functions": {
         "apply#1": 22,
-        "callback#30": 21
+        "callback#28": 21
       }
     },
     "packages/dsh-slides-host/src/produce-agent-tools.test.ts": {
@@ -399,8 +399,8 @@
       "functions": {
         "reviewScopeEntryFrom#1": 25,
         "requestGuardFailure#1": 23,
-        "callback#10": 192,
-        "callback#23": 30
+        "callback#9": 192,
+        "callback#17": 30
       }
     },
     "packages/dsh-slides-host/src/slice-session.ts": {

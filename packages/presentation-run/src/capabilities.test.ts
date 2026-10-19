@@ -24,6 +24,11 @@ function stubPlaywrightRuntime(): string {
 export async function launchPinnedChromium() { throw new Error("stub runtime"); }
 `,
   );
+  fs.mkdirSync(path.join(dir, "node_modules", "playwright"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "node_modules", "playwright", "package.json"), JSON.stringify({ version: "1.61.1" }));
+  const browserDir = path.join(dir, "browsers", "chromium_headless_shell-1228");
+  fs.mkdirSync(browserDir, { recursive: true });
+  fs.writeFileSync(path.join(browserDir, "chrome-headless-shell.exe"), "");
   return file;
 }
 
@@ -31,7 +36,13 @@ const missingRuntime = path.join(os.tmpdir(), "no-such-playwright-runtime-oss.mj
 
 describe("inspectCapabilities SSOT", () => {
   it("distinguishes missing rasters, disabled vision, and a text-only route", () => {
-    const base = { env: {}, providerId: "deepseek-account", modelId: "deepseek-flash", ready: true, modelInputModalities: ["text", "image"] as const };
+    const base = {
+      env: {},
+      providerId: "deepseek-account",
+      modelId: "deepseek-flash",
+      ready: true,
+      modelInputModalities: ["text", "image"] as const,
+    };
     const noRaster = inspectCapabilities({ ...base, rasterReady: false });
     assert.equal(noRaster.vision.modelAcceptsImages, true);
     assert.equal(noRaster.vision.unavailableReason, "raster-unavailable");
@@ -39,8 +50,14 @@ describe("inspectCapabilities SSOT", () => {
     const ready = inspectCapabilities({ ...base, rasterReady: true });
     assert.equal(ready.vision.mode, "main-model");
     assert.equal(ready.vision.unavailableReason, undefined);
-    assert.equal(inspectCapabilities({ ...base, rasterReady: true, modelInputModalities: ["text"] }).vision.unavailableReason, "model-input-unsupported");
-    assert.equal(inspectCapabilities({ ...base, rasterReady: true, env: { SLIDESTUDIO_LLM_IMAGE: "0" } }).vision.unavailableReason, "disabled");
+    assert.equal(
+      inspectCapabilities({ ...base, rasterReady: true, modelInputModalities: ["text"] }).vision.unavailableReason,
+      "model-input-unsupported",
+    );
+    assert.equal(
+      inspectCapabilities({ ...base, rasterReady: true, env: { SLIDESTUDIO_LLM_IMAGE: "0" } }).vision.unavailableReason,
+      "disabled",
+    );
   });
   it("opens hosted Grok research, image search, image generate, and main-model vision when raster is ready", () => {
     const env = {
@@ -161,10 +178,7 @@ describe("inspectCapabilities SSOT", () => {
       ready: true,
       rasterReady: true,
     } as const;
-    assert.equal(
-      inspectCapabilities({ ...base, modelId: "DeepSeek-Vision-Exp" }).vision.mode,
-      "none",
-    );
+    assert.equal(inspectCapabilities({ ...base, modelId: "DeepSeek-Vision-Exp" }).vision.mode, "none");
     assert.equal(
       inspectCapabilities({
         ...base,
@@ -189,8 +203,7 @@ describe("inspectCapabilities SSOT", () => {
     };
     assert.equal(inspectCapabilities(base).imageGenerate.configured, false);
     assert.equal(
-      inspectCapabilities({ ...base, SLIDESTUDIO_IMAGE_API_KEY: "test-key" })
-        .imageGenerate.configured,
+      inspectCapabilities({ ...base, SLIDESTUDIO_IMAGE_API_KEY: "test-key" }).imageGenerate.configured,
       true,
     );
     assert.equal(
@@ -220,19 +233,16 @@ describe("inspectCapabilities SSOT", () => {
       SLIDESTUDIO_EDITOR_URL: "http://127.0.0.1:55200",
       SLIDESTUDIO_PLAYWRIGHT_RUNTIME: stubPlaywrightRuntime(),
     };
-    assert.equal(
-      inspectProjectCapabilities(root, env).vision.mode,
-      "main-model",
-    );
+    assert.equal(inspectProjectCapabilities(root, env).vision.mode, "main-model");
     persistPresentationRunProvider(root, {
       providerId: "amd",
       modelId: "same-model",
       ready: true,
       modelInputModalities: [],
     });
-    const rec = JSON.parse(
-      fs.readFileSync(path.join(root, "_agent", "presentation-run.v1.json"), "utf8"),
-    ) as { provider: { modelInputModalities?: string[] } };
+    const rec = JSON.parse(fs.readFileSync(path.join(root, "_agent", "presentation-run.v1.json"), "utf8")) as {
+      provider: { modelInputModalities?: string[] };
+    };
     assert.deepEqual(rec.provider.modelInputModalities, []);
     assert.equal(inspectProjectCapabilities(root, env).vision.mode, "none");
   });
@@ -344,10 +354,10 @@ describe("inspectCapabilities SSOT", () => {
       assert.equal(payload.imageSearch.configured, true);
       assert.equal(payload.imageGenerate.configured, true);
       assert.equal(payload.vision.mode, "main-model");
-      assert.deepEqual(
-        hostedProduceToolNames(inspectProjectCapabilities(root, env)),
-        ["search_image", "generate_image"],
-      );
+      assert.deepEqual(hostedProduceToolNames(inspectProjectCapabilities(root, env)), [
+        "search_image",
+        "generate_image",
+      ]);
     } finally {
       if (prevEditor === undefined) delete process.env.SLIDESTUDIO_EDITOR_URL;
       else process.env.SLIDESTUDIO_EDITOR_URL = prevEditor;

@@ -42,7 +42,15 @@ export SLIDESTUDIO_PLAYWRIGHT_RUNTIME=/absolute/path/to/runtime.mjs
 node --input-type=module -e 'import { homedir } from "node:os"; import { pathToFileURL } from "node:url"; const p = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME || (process.env.DSH_HOME || homedir() + "/.dsh") + "/data/dsh-slidestudio/playwright-runtime/runtime.mjs"; const r = await import(pathToFileURL(p)); console.log(await r.verifyPinnedRuntime());'
 ```
 
-自动安装失败（断网、registry 不可达）时，生成入口会说明失败原因，再由运行环境维护者提供运行时；不要用系统 Chrome 替代。
+首次进入创建页，会显示渲染环境正在准备、已就绪或失败的实际状态。
+安装失败（断网、registry 不可达）时，页面保留具体原因，可以点击“重新准备渲染环境”重试，
+不需要重装插件；连续点击也不会启动多个下载。源码用户还可展开“手动安装与离线配置”，
+在仓库目录运行 `npm run setup:browser`。
+
+显式配置了 `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` 时，插件不会擅自覆盖该路径；修复路径或补齐
+运行时后，点击“重新检查渲染环境”。离线环境需要由维护者提供兼容的完整运行时，不要用系统
+Chrome 替代。环境未就绪时，仍可配置模型、整理需求和打开已有文稿，但截图、渲染检查及依赖
+截图的导出不可用。模型凭据就绪不代表浏览器已经安装完成。
 
 ## 配置模型
 

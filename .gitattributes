@@ -1,2 +1,15 @@
 # Preserve raw oracle text exactly as captured, including source whitespace.
 docs/editor-oracle/baselines/kimi-v1-2026-08-20/editor-live/body-text.txt -whitespace
+packages/agent-harness/skills/**/*.md text eol=lf
+# Bundle YAML is regex-checked as package text and must keep LF on Windows.
+packages/dsh-slides-bundle/cordis.patch.yml text eol=lf
+packages/dsh-slides-bundle/profile.baseline.yaml text eol=lf
+# The OpenKimi source pack is byte-verified against its manifest; keep its
+# declared text files on LF without applying text conversion to binary assets.
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/SKILL.md text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.md text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.txt text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.json text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.js text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.css text eol=lf
+vendor/open-kimi-ppt/skill-1.2.0/skills/open-kimi-ppt/**/*.html text eol=lf

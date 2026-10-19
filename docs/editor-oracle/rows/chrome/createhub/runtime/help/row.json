@@ -1,0 +1,34 @@
+{
+  "id": "chrome.createhub.runtime.help",
+  "version": 1,
+  "status": "implemented",
+  "surface": "chrome.global",
+  "title": "Expand manual browser installation and offline setup instructions",
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "selection": { "kind": "none" },
+    "notes": "Create Hub renderer is installing or unavailable."
+  },
+  "action": {
+    "type": "toggle",
+    "steps": [
+      "Activate Manual and offline setup with pointer or keyboard",
+      "Read source-checkout command and explicit runtime override instructions"
+    ]
+  },
+  "evidence": {
+    "screenshots": { "before": "", "after": "" },
+    "pptd": { "summary": "Read-only disclosure; no document change and no external network request." }
+  },
+  "expectedNative": { "mustChangeDocument": false, "commandHint": "HTMLDetailsElement.open" },
+  "test": {
+    "id": "EO-RUNTIME-002",
+    "automated": true,
+    "selfTestChecklist": [
+      "browser-runtime-panel.spec.mjs: setup command and runtime override guidance are present",
+      "Native disclosure remains keyboard accessible"
+    ]
+  },
+  "oracle": { "source": "derived" },
+  "updatedAt": "2026-10-19T00:00:00.000Z"
+}

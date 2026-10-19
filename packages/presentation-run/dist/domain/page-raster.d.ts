@@ -91,7 +91,7 @@ export declare function normalizeRasterPageToNativeSlideSize(page: RasterPage): 
  * the managed path so Hub can provision it (see provisionManagedRuntime).
  */
 export declare function pinnedPlaywrightRuntimePath(env?: NodeJS.ProcessEnv, roots?: PlaywrightRuntimeRoots): string;
-/** True only when the pinned runtime file exists and exports the launch API. Does not launch Chromium. */
+/** True only when the pinned runtime, Playwright package, and browser are available. */
 export declare function rasterRuntimeReady(env?: NodeJS.ProcessEnv, runtimeFile?: string): boolean;
 export declare function editorUrlFromEnv(env?: NodeJS.ProcessEnv): string | undefined;
 export declare function pageRasterRel(id: string): string;

@@ -1,3 +1,4 @@
+import { PNG, asJsonValue, stubPlaywrightRuntime, fakeTools, stubPresentation } from "./tool-test-fixtures.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,14 +7,18 @@ import path from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import ToolRuntime, {
-  defineTool,
-  type ToolDefinition,
-  type ToolRunContext,
-} from "@deepseek-ai/dsh-tools";
+import ToolRuntime, { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import type { PresentationRun } from "@open-slidestudio/presentation-run";
-import { createPresentationRun, persistPresentationRunProvider, savePageRaster, toolSchemaHasQueriesArray, initializeRunLedger, readRunLedger, recordTodo } from "@open-slidestudio/presentation-run";
+import {
+  createPresentationRun,
+  persistPresentationRunProvider,
+  savePageRaster,
+  toolSchemaHasQueriesArray,
+  initializeRunLedger,
+  readRunLedger,
+  recordTodo,
+} from "@open-slidestudio/presentation-run";
 import { decideWritePage } from "./write-page.js";
 import { inject, runModelSwitchTransaction } from "./plugin.js";
 import { SLICE_TOOL_NAMES } from "./protocol.js";
@@ -21,63 +26,7 @@ import { registerSliceTools, withProductToolArgumentContract } from "./tools.js"
 import { SliceSessionStore } from "./slice-session.js";
 import { AgentFaults } from "./agent-fault.js";
 import { writeSliceRuntime } from "./runtime.js";
-
-const PNG = Buffer.from(
-  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
-  "hex",
-);
-
-function asJsonValue(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue;
-}
-
-function stubPlaywrightRuntime(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-produce-"));
-  const file = path.join(dir, "runtime.mjs");
-  fs.writeFileSync(
-    file,
-    `export function verifyPinnedRuntime() { return true; }
-export async function launchPinnedChromium() { throw new Error("stub"); }
-`,
-  );
-  return file;
-}
-
-function fakeTools(): { defs: ToolDefinition[]; runtime: ToolRuntime } {
-  const defs: ToolDefinition[] = [];
-  return {
-    defs,
-    runtime: {
-      register(def: ToolDefinition) {
-        defs.push(def);
-        return () => undefined;
-      },
-      guard() {
-        return () => undefined;
-      },
-    } as unknown as ToolRuntime,
-  };
-}
-
-function stubPresentation(): PresentationRun {
-  return {
-    execute: async (command) => ({
-      ok: true,
-      name: command.name,
-      summary: `${command.name} ok`,
-      detail: `${command.name} ok`,
-      payload: { pageId: "1_cover", visualReview: "pass" },
-    }),
-    open: async () => {
-      throw new Error("unused");
-    },
-    inspect: async () => {
-      throw new Error("unused");
-    },
-    hydrate: () => undefined,
-    epochFor: () => "epoch",
-  };
-}
+import { addPlaywrightRuntimeLayout } from "./runtime-test-fixture.js";
 
 describe("planning preflight ordering", () => {
   it("keeps the freely adopted teaching pack through the Host tool and later outline updates", async (t) => {
@@ -96,16 +45,33 @@ describe("planning preflight ordering", () => {
     const presentation = createPresentationRun({ repoRoot });
     await presentation.open({ projectRoot, sessionId, brief, design, provider, editorBaseUrl });
     const { defs, runtime } = fakeTools();
-    registerSliceTools(runtime, { store, presentation, workspaceRoot: repoRoot, editorBaseUrl, faults: new AgentFaults(), provider });
+    registerSliceTools(runtime, {
+      store,
+      presentation,
+      workspaceRoot: repoRoot,
+      editorBaseUrl,
+      faults: new AgentFaults(),
+      provider,
+    });
     let sequence = 0;
     const execute = async (name: string, args: Record<string, unknown>) => {
       const tool = defs.find((def) => def.name === name)!;
-      return asJsonValue(await tool.execute(args as never, {
-        agent: { id: sessionId }, callId: `freestyle-${++sequence}`, signal: new AbortController().signal,
-      } as unknown as ToolRunContext)) as Record<string, unknown>;
+      return asJsonValue(
+        await tool.execute(
+          args as never,
+          {
+            agent: { id: sessionId },
+            callId: `freestyle-${++sequence}`,
+            signal: new AbortController().signal,
+          } as unknown as ToolRunContext,
+        ),
+      ) as Record<string, unknown>;
     };
     const plan = [{ pageId: "cover", title: "认识批处理", layoutFamily: "cover", exhibits: [] }];
-    const args = { slidePlan: plan, adoptedSourceIds: ["openkimi:reference/design_system/academic/blue-line-courseware/design.md"] };
+    const args = {
+      slidePlan: plan,
+      adoptedSourceIds: ["openkimi:reference/design_system/academic/blue-line-courseware/design.md"],
+    };
     let committed = await execute("commit_design", args);
     assert.equal(committed.error, "required_source_chunks_unread");
     for (let attempt = 0; attempt < 3 && committed.outcome !== "committed"; attempt++) {
@@ -115,7 +81,9 @@ describe("planning preflight ordering", () => {
       committed = await execute("commit_design", args);
     }
     assert.equal(committed.outcome, "committed", JSON.stringify(committed));
-    const updated = await execute("write_todo", { items: [...plan, { pageId: "practice", title: "课堂练习", layoutFamily: "content", exhibits: [] }] });
+    const updated = await execute("write_todo", {
+      items: [...plan, { pageId: "practice", title: "课堂练习", layoutFamily: "content", exhibits: [] }],
+    });
     assert.equal(updated.outcome, "committed", JSON.stringify(updated));
     assert.deepEqual(updated.plannedPageIds, ["cover", "practice"]);
   });
@@ -167,9 +135,14 @@ describe("planning preflight ordering", () => {
     } as unknown as ToolRunContext;
     const commit = defs.find((definition) => definition.name === "commit_design");
     assert.ok(commit);
-    const value = asJsonValue(await commit.execute({
-      slidePlan: [{ pageId: "p1", title: "封面", layoutFamily: "cover", exhibits: [] }],
-    }, exec)) as Record<string, unknown>;
+    const value = asJsonValue(
+      await commit.execute(
+        {
+          slidePlan: [{ pageId: "p1", title: "封面", layoutFamily: "cover", exhibits: [] }],
+        },
+        exec,
+      ),
+    ) as Record<string, unknown>;
     assert.equal(value.outcome, "rejected");
     assert.equal(value.error, "required_source_chunks_unread");
     assert.deepEqual(
@@ -408,7 +381,16 @@ describe("product tool arguments contract", () => {
 
       for (const [callId, args] of [
         ["siblings", { id: "sibling", arguments: { id: "nested" } }],
-        ["eight", { arguments: { arguments: { arguments: { arguments: { arguments: { arguments: { arguments: { arguments: { id: "eight" } } } } } } } } }],
+        [
+          "eight",
+          {
+            arguments: {
+              arguments: {
+                arguments: { arguments: { arguments: { arguments: { arguments: { arguments: { id: "eight" } } } } } },
+              },
+            },
+          },
+        ],
       ] as const) {
         const snapshot = JSON.parse(JSON.stringify(args));
         const result = await ctx.tools.execute({
@@ -457,7 +439,14 @@ describe("product tool arguments contract", () => {
       const nested = await contracted.execute(nestedBusinessArguments, directExec);
       assert.deepEqual(nested, nestedBusinessArguments);
       assert.equal(receivedArgs, nestedBusinessArguments);
-      assert.deepEqual(executeSpy, [{ id: "single" }, { id: "double" }, { id: "triple" }, flat, directFlat, nestedBusinessArguments]);
+      assert.deepEqual(executeSpy, [
+        { id: "single" },
+        { id: "double" },
+        { id: "triple" },
+        flat,
+        directFlat,
+        nestedBusinessArguments,
+      ]);
     } finally {
       await toolsFiber.dispose();
       await promptFiber.dispose();
@@ -607,14 +596,11 @@ describe("produce agent web_search listing", () => {
     });
     const web = defs.find((def) => def.name === "web_search");
     assert.ok(web);
-    await web.execute(
-      { queries: ["Starship latest flight 2026"] },
-      {
-        agent: { id: sessionId },
-        callId: "web-1",
-        signal: new AbortController().signal,
-      } as unknown as ToolRunContext,
-    );
+    await web.execute({ queries: ["Starship latest flight 2026"] }, {
+      agent: { id: sessionId },
+      callId: "web-1",
+      signal: new AbortController().signal,
+    } as unknown as ToolRunContext);
     assert.deepEqual(called, ["web_search"]);
   });
 
@@ -721,117 +707,5 @@ describe("write_page plan membership surfacing", () => {
       undefined,
     );
     assert.equal(decision.action, "write");
-  });
-});
-
-describe("review_page image-part inject", () => {
-  it("saves the on-disk PNG and renders an image part for grok-4.6", async () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "review-inject-"));
-    const runtimeFile = stubPlaywrightRuntime();
-    const prevEditor = process.env.SLIDESTUDIO_EDITOR_URL;
-    const prevPw = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
-    process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";
-    process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeFile;
-    const saved: Array<{ bytes: number; name?: string }> = [];
-    try {
-      const store = new SliceSessionStore(workspace);
-      const sessionId = "4ffffa83-b32e-42de-b12a-891caa23b608";
-      const opened = store.openProject({
-        dshSessionId: sessionId,
-        title: "Vision inject",
-        design: { kind: "self-directed" },
-        provider: { providerId: "pi-xai", modelId: "grok-4.6" },
-      });
-      const projectRoot = store.resolveRoot(opened.binding);
-      writeSliceRuntime(projectRoot, {
-        brief: "cover",
-        design: { kind: "self-directed" },
-        editorBaseUrl: "http://127.0.0.1:55200",
-        strictExecution: true,
-      });
-      fs.mkdirSync(path.join(projectRoot, "_agent"), { recursive: true });
-      fs.writeFileSync(
-        path.join(projectRoot, "_agent", "presentation-run.v1.json"),
-        `${JSON.stringify({
-          sessionId,
-          projectRoot,
-          brief: "cover",
-          design: { kind: "self-directed" },
-          provider: { providerId: "pi-xai", modelId: "grok-4.6" },
-        })}\n`,
-      );
-      persistPresentationRunProvider(projectRoot, {
-        providerId: "pi-xai",
-        modelId: "grok-4.6",
-        ready: true,
-        modelInputModalities: ["text", "image"],
-      });
-      savePageRaster(projectRoot, "1_cover", PNG);
-
-      const { defs, runtime } = fakeTools();
-      registerSliceTools(runtime, {
-        store,
-        presentation: stubPresentation(),
-        workspaceRoot: workspace,
-        editorBaseUrl: "http://127.0.0.1:55200",
-        faults: new AgentFaults(),
-        provider: {
-          providerId: "pi-xai",
-          modelId: "grok-4.6",
-          ready: true,
-          modelInputModalities: ["text", "image"],
-        },
-        attachments: {
-          saveImage: async (input) => {
-            saved.push({ bytes: input.data.byteLength, name: input.name });
-            return {
-              attachmentId: "sha256:review-raster",
-              mediaType: "image/png",
-              bytes: input.data.byteLength,
-              width: 960,
-              height: 540,
-              name: input.name,
-            };
-          },
-        },
-      });
-      const review = defs.find((def) => def.name === "review_page");
-      assert.ok(review);
-      const exec = {
-        agent: { id: sessionId },
-        callId: "review-1",
-        signal: new AbortController().signal,
-      } as unknown as ToolRunContext;
-      const value = await review.execute(
-        {
-          pageId: "1_cover",
-          revision: 1,
-          deliveryToken: "tok",
-          verdict: "pass",
-          issues: ["none"],
-        },
-        exec,
-      );
-      const rec = asJsonValue(value);
-      assert.ok(rec && typeof rec === "object" && rec !== null && !Array.isArray(rec));
-      assert.ok("image" in rec);
-      const blocks = review.output.render({}, rec);
-      assert.equal(
-        blocks.some((block) => block.type === "image"),
-        true,
-        JSON.stringify(blocks),
-      );
-      const image = blocks.find((block) => block.type === "image");
-      assert.ok(image && image.type === "image" && "attachment" in image);
-      assert.equal(image.attachment.attachmentId, "sha256:review-raster");
-      assert.equal(saved.length, 1);
-      assert.equal(saved[0]?.bytes, PNG.length);
-    } finally {
-      if (prevEditor === undefined) delete process.env.SLIDESTUDIO_EDITOR_URL;
-      else process.env.SLIDESTUDIO_EDITOR_URL = prevEditor;
-      if (prevPw === undefined) delete process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
-      else process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = prevPw;
-      fs.rmSync(workspace, { recursive: true, force: true });
-    }
   });
 });

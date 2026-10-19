@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "./source-files.mjs";
+import { parseTypeDiagnostics } from "./type-diagnostics.mjs";
 
 /**
  * checkJs adoption ratchet for the JavaScript apps. `tsc -p <app>/tsconfig.json`
@@ -32,11 +33,7 @@ for (const app of apps) {
     maxBuffer: 20 * 1024 * 1024,
   });
   const out = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  const findings = out
-    .split("\n")
-    .map((line) => line.match(/^(.+?)\(\d+,\d+\): error (TS\d+: .+)$/))
-    .filter(Boolean)
-    .map((m) => `${m[1]} ${m[2]}`);
+  const findings = parseTypeDiagnostics(out);
   if (result.error) throw result.error;
   if (result.status === null || (result.status === 2 && findings.length === 0)) {
     // tsc crashed without diagnostics (missing tsconfig, OOM) is itself a failure.

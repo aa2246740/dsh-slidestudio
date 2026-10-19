@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const PINNED_PLAYWRIGHT_VERSION = "1.61.1";
 export const PINNED_CHROMIUM_REVISION = "1228";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 export function repoPlaywrightRuntimeFile(repoRoot) {
   return path.join(repoRoot, ".runtime", "playwright", "runtime.mjs");
@@ -60,6 +62,7 @@ function readRuntimeStamp(runtimeFile) {
 
 const EXECUTABLE_NAMES = new Set([
   "chrome-headless-shell",
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",
@@ -102,14 +105,10 @@ export function runtimeLayoutUsable(runtimeFile, env = process.env) {
   }
   const browserDirName =
     stamp.browserDirName ?? `chromium_headless_shell-${stamp.revision ?? PINNED_CHROMIUM_REVISION}`;
-  const browsersDirs = [
-    env.PLAYWRIGHT_BROWSERS_PATH?.trim(),
-    stamp.browsersDir,
-    path.join(dir, "browsers"),
-  ].filter(Boolean);
-  return browsersDirs.some(
-    (base) => findBrowserExecutable(path.join(base, browserDirName)) !== "",
+  const browsersDirs = [env.PLAYWRIGHT_BROWSERS_PATH?.trim(), stamp.browsersDir, path.join(dir, "browsers")].filter(
+    Boolean,
   );
+  return browsersDirs.some((base) => findBrowserExecutable(path.join(base, browserDirName)) !== "");
 }
 
 /**
@@ -121,7 +120,7 @@ export function runtimeLayoutUsable(runtimeFile, env = process.env) {
  */
 export function resolvePlaywrightRuntimeFile(
   env = process.env,
-  roots = { repoRoot: env.OPEN_SLIDESTUDIO_ROOT?.trim() || process.cwd(), homeDir: os.homedir() },
+  roots = { repoRoot: env.OPEN_SLIDESTUDIO_ROOT?.trim() || REPO_ROOT, homeDir: os.homedir() },
 ) {
   const configured = env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim();
   if (configured) {

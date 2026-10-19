@@ -1,3 +1,6 @@
+import { TOOL_RUNTIME_I18N } from "./tool-runtime-i18n.js";
+import { WORKSPACE_REVIEW_I18N } from "./workspace-review-i18n.js";
+
 /**
  * Shared UI language for the hub and editor pages. Language resolves from the
  * `?lang=` URL param (the DSH plugin passes the host's active locale), then a
@@ -7,30 +10,12 @@
  * falls back to Chinese, so new copy never breaks the page.
  */
 
+/** @type {Record<string, string>} */
 const EN = {
-  "视觉检查已在运行配置中关闭": "Visual review is disabled in the runtime configuration",
-  "页面渲染环境未就绪，暂时无法截图检查；请查看安装说明中的渲染运行时配置": "Page rendering is not ready, so screenshot review is unavailable. See the rendering runtime section of the installation guide.",
+  ...TOOL_RUNTIME_I18N,
+  ...WORKSPACE_REVIEW_I18N,
   "当前模型尚未连接，请在 DSH 设置中完成登录或配置": "This model is not connected. Sign in or configure it in DSH Settings.",
   "Harness 未声明当前模型支持图片输入，请选择支持看图的模型": "Harness does not declare image input for this model. Choose an image-capable model.",
-  "页面规划尚未完成": "The page plan is incomplete",
-  "页面规划需要补全": "The page plan needs to be completed",
-  "还有 {n} 页尚未写入": "{n} planned pages have not been written",
-  "页面与当前规划不一致，需要核对": "The document pages do not match the current plan",
-  "有 {n} 页尚未完成截图与排版检查": "{n} pages still need screenshots and layout checks",
-  "有 {n} 页的截图尚未送达当前模型": "Screenshots for {n} pages have not reached the selected model",
-  "有 {n} 页尚未完成视觉检查": "{n} pages still need visual review",
-  "有 {n} 页未通过检查，需要修订": "{n} pages failed review and need revision",
-  "整稿结构检查尚未通过": "The deck has not passed structural review",
-  "页面检查已通过，尚未完成合稿": "Page checks passed; final assembly is still pending",
-  "文稿已合稿，尚未完成导出": "The deck is assembled; export is still pending",
-  "必需参考资料尚未读完": "Required references have not all been read",
-  "项目暂时无法读取，请检查文件是否可访问": "The project cannot be read. Check that its files are accessible.",
-  "项目中存在重复页面标识，需要修复后继续": "Duplicate page identifiers must be resolved before continuing",
-  "暂时无法确认生成会话状态，请等待连接恢复": "The generation session status is unavailable. Wait for the connection to recover.",
-  "页面截图或排版检查尚未通过": "Page screenshots or layout checks are still incomplete",
-  "页面截图尚未送达模型，或视觉检查尚未完成": "Page screenshots have not reached the model, or visual review is incomplete",
-  "模型已结束本轮回复，但尚未完成整稿检查与合稿": "The model ended its reply before completing deck checks and final assembly",
-  "模型接入与登录由 DSH 设置统一管理。": "Model access and sign-in are managed in DSH Settings.",
 
   "按附带的 {p0} 条批注修改文稿，可在下方补充要求": "Apply the attached {p0} comments to the deck — add requirements below",
   "保存失败：{p0}。草稿仍保留，可重试。": "Save failed: {p0}. Draft kept — retry.",
@@ -60,9 +45,6 @@ const EN = {
   "{p0} + {p1}（当前字体）": "{p0} + {p1} (current font)",
   "{p0}/{p1} 页已实时更新": "{p0}/{p1} pages updated live",
   "{p0} 条批注 · {p1} 页": "{p0} comments · {p1} pages",
-  "{p0}；{p1}。服务端保护状态不确定；未恢复版本，也未确认释放版本保护。本标签继续禁止写入。": "{p0}; {p1}. Server protection state unknown — version neither restored nor released. This tab stays write-protected.",
-  "{p0}：将删除页面 {p1}。删除后可通过版本历史找回，确定继续吗？": "{p0}: deleting page {p1}. Recoverable via version history — continue?",
-  "{p0}：将推翻当前 {p1} 页文稿，按新大纲整体重写。重写前版本会自动存入版本历史，确定继续吗？": "{p0}: rewriting all {p1} pages to the new outline. The pre-rewrite version is saved to history — continue?",
   // ---- brand / common ----
   "DSH SlideStudio · 创建": "DSH SlideStudio",
   "DSH SlideStudio · 编辑器": "DSH SlideStudio · Editor",
@@ -129,13 +111,28 @@ const EN = {
   "模型（逗号分隔）": "Models (comma-separated)",
   "粘贴后保存，只留在这台电脑": "Paste to save — stays on this computer",
   "保存提供方": "Save provider",
-  "自定义工具（搜图/生图）以后开发。": "Custom tools (image search/generation) are coming later.",
   "Grok、Codex、Claude 等走账号授权。登录后模型自带的检索由供应商托管。": "Grok, Codex, Claude and others sign in via account authorization. Once signed in, provider-hosted search comes with the model.",
   "主题只改变产品界面，不影响文稿本身的配色与字体。选择保存在这台电脑的浏览器里。": "Themes only change the product UI — never your deck's colors or fonts. The choice is saved in this browser.",
   "界面主题": "UI theme",
   "搜图、生图在此接服务商。联网检索不外接，只在 Grok / Codex / Claude 等模型自带时可用。URL 留空表示关闭。": "Connect image-search and image-generation providers here. Web search isn't pluggable — it's available only when models like Grok / Codex / Claude ship it. Leave a URL empty to disable.",
+  "主流接口选对应格式即可直连；客户自有接口选「自定义模板」：填方法/URL/请求体（{{query}}、{{prompt}}、{{key}} 占位）加返回里的图片字段路径。": "Mainstream APIs connect directly via their format preset. For a custom API pick \"Custom template\": set the method/URL/body ({{query}}, {{prompt}}, {{key}} placeholders) plus the image field path in the response.",
+  "搜图接口格式": "Image search format",
+  "通用 POST {query}": "Generic POST {query}",
+  "Bing 图片": "Bing Images",
+  "自定义模板": "Custom template",
   "搜图 URL": "Image search URL",
   "搜图 API Key": "Image search API key",
+  "生图接口格式": "Image gen format",
+  "OpenAI 兼容": "OpenAI-compatible",
+  "阿里百炼 · 同步（qwen-image）": "Alibaba Bailian · sync (qwen-image)",
+  "阿里百炼 · 异步任务（wanx）": "Alibaba Bailian · async task (wanx)",
+  "模板 · 请求方法": "Template · method",
+  "模板 · 请求头 JSON": "Template · headers JSON",
+  "模板 · 请求体 JSON": "Template · body JSON",
+  "模板 · 图片字段路径": "Template · image field path",
+  "模板 · 署名": "Template · attribution",
+  "可选，如 内网图库": "Optional, e.g. Intranet gallery",
+  "请求头不是合法 JSON": "Headers are not valid JSON",
   "生图 URL": "Image gen URL",
   "生图 API Key": "Image gen API key",
   "生图模型": "Image gen model",
@@ -380,8 +377,10 @@ const EN = {
   "联网检索 · 未配置": "Web search · not configured",
   "搜图工具 · 已配置": "Image search · configured",
   "搜图工具 · 未配置": "Image search · not configured",
+  "搜图工具 · 未配置（可在 设置 → 工具 接入）": "Image search · not configured (set it up under Settings → Tools)",
   "生图工具 · 已配置": "Image gen · configured",
   "生图工具 · 未配置": "Image gen · not configured",
+  "生图工具 · 未配置（可在 设置 → 工具 接入）": "Image gen · not configured (set it up under Settings → Tools)",
   "供应商列表无效": "Provider list is invalid",
   "没有可用的生成模型": "No generation models available",
   "请选择供应商和模型": "Pick a provider and model",
@@ -1316,10 +1315,12 @@ export function lang() {
  * Translate one Chinese source string. In zh mode the key returns unchanged;
  * in en mode the dictionary hit (or the key itself when untranslated) returns.
  * `{name}` placeholders interpolate from params.
+ * @param {string} text
+ * @param {Record<string, string | number>} [params]
  */
 export function t(text, params) {
   let out = active === "en" ? (EN[text] ?? text) : text;
-  if (params) out = out.replace(/\{(\w+)\}/g, (m, k) => (params[k] ?? m));
+  if (params) out = out.replace(/\{(\w+)\}/g, (m, k) => String(params[k] ?? m));
   return out;
 }
 

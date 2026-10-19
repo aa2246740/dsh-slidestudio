@@ -8,12 +8,15 @@ import { type SlidesLlmModel } from "./args.js";
 import { type RuntimeModelCatalog } from "./local-models.js";
 import { type EditorAttachment } from "./generation-input.js";
 export type { EditorAttachment } from "./generation-input.js";
+import type { RenderRuntimeSnapshot } from "./runtime-provision.js";
 export type SlidesHostRuntime = {
     questions?: AssistantQuestions;
     store: SliceSessionStore;
     workspaceRoot: string;
     dataRoot?: string;
     dshHome: string;
+    renderRuntime?: () => RenderRuntimeSnapshot;
+    startRenderRuntime?: () => Promise<void>;
     presentation: PresentationRun;
     agentBusy: (sessionId: string) => boolean;
     markBusy: (sessionId: string) => void;

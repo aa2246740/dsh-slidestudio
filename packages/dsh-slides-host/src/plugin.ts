@@ -1,3 +1,4 @@
+import { runModelSwitchTransaction } from "./model-switch.js";
 import { AssistantQuestions } from "./assistant-questions.js";
 import {
   hideSlidesSessions,
@@ -26,9 +27,6 @@ import {
   buildCatalogDto,
   persistPresentationRunProvider,
   machineRuntimeReuse,
-  provisionManagedRuntime,
-  resolvePlaywrightRuntime,
-  rasterRuntimeReady,
   type ModelInputModality,
 } from "@open-slidestudio/presentation-run";
 import {
@@ -42,6 +40,7 @@ import {
   type SlidesAgentPlaneDeps,
 } from "./agent-plane.js";
 import { writeSliceRuntime } from "./runtime.js";
+import { createRuntimeProvisionController } from "./runtime-provision.js";
 import { assertGenerationRenderingReady } from "./hub-capability.js";
 import { deckTitleFromBrief, SliceSessionStore } from "./slice-session.js";
 import { handleProductRequest, handleSlidesRequest, turnTextWithAttachments, type SlidesHostRuntime } from "./routes.js";
@@ -117,6 +116,8 @@ import {
 declare module "@deepseek-ai/cordis" {
   interface Context {
     webServer: {
+      /** The listening port (set once the service has activated). */
+      readonly port?: number;
       register(route: {
         kind: "exact" | "prefix";
         path: string;
@@ -126,8 +127,16 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
+export { runModelSwitchTransaction } from "./model-switch.js";
 export const name = "slides-host";
 export const inject = ["tools", "webServer", "agents", "attachments", "llm"];
+
+/**
+ * Max time /slides/sessions/:id/stop waits for the agent to honour the cancel
+ * before reporting the stop anyway — a hung turn must never keep the operator
+ * control (and the busy flag that drives the editor's "正在中止" state) pending.
+ */
+const OPERATOR_STOP_IDLE_TIMEOUT_MS = 15_000;
 
 export const Config = z.object({
   workspaceRoot: z.string().default(""),
@@ -144,19 +153,7 @@ export type SlidesHostConfig = {
   personal?: boolean;
 };
 
-export async function runModelSwitchTransaction(input: {
-  apply: () => void;
-  activate: () => void | Promise<void>;
-  rollback: () => void;
-}): Promise<void> {
-  try {
-    input.apply();
-    await input.activate();
-  } catch (error) {
-    input.rollback();
-    throw error;
-  }
-}
+
 
 export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   const workspaceRoot = pathResolve(config.workspaceRoot?.trim() || process.cwd());
@@ -183,32 +180,20 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
   // must not depend on a Codex homedir or a manual setup step.
   const slidesStateDir = pathJoin(dshHome, "data", "dsh-slidestudio");
   const runtimeRoots = { repoRoot: workspaceRoot, homeDir: os.homedir(), stateDir: slidesStateDir };
-  const runtimeResolution = resolvePlaywrightRuntime(process.env, runtimeRoots);
-  if (runtimeResolution.ready) {
-    process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
-  }
-  let runtimeProvisionError: string | undefined;
-  let runtimeProvision: Promise<void> | undefined;
-  if (!runtimeResolution.ready && !process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim()) {
-    // Point env-only lookups at the managed path so the raster port picks the
-    // runtime up as soon as provisioning finishes writing it.
-    process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeResolution.path;
-    runtimeProvision = provisionManagedRuntime(slidesStateDir, {
+  const explicitRuntimeOverride = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim() || "";
+  const runtimeProvision = createRuntimeProvisionController({
+    env: process.env,
+    roots: runtimeRoots,
+    stateDir: slidesStateDir,
+    explicitOverride: explicitRuntimeOverride,
+    provisionOptions: {
       log: (message: string) => console.log(message),
       // A playwright module/browsers already on the machine saves the
       // matching download (e.g. the reporter's global playwright).
       reuse: machineRuntimeReuse(process.env, runtimeRoots),
-    }).then(
-      () => undefined,
-      (error: unknown) => {
-        runtimeProvisionError = error instanceof Error ? error.message : String(error);
-        console.warn("[slides] playwright runtime auto-setup failed:", runtimeProvisionError);
-        // Release the exclusive env pin so a later resolve can adopt a runtime
-        // the user installs after this attempt failed.
-        delete process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
-      },
-    );
-  }
+    },
+  });
+  if (runtimeProvision.snapshot().phase === "failed") void runtimeProvision.start();
   const store = new SliceSessionStore(dataRoot);
   store.rebuild();
   const workspaceRegistry = () => ctx.get("workspaceRegistry") as SlidesWorkspaceRegistry | undefined;
@@ -730,6 +715,8 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     dataRoot,
     dshHome,
     presentation,
+    renderRuntime: () => runtimeProvision.snapshot(),
+    startRenderRuntime: () => runtimeProvision.start(),
     agentBusy(sessionId) {
       return busy.has(sessionId);
     },
@@ -750,7 +737,17 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       try {
         if (agent) {
           agent.cancel({ kind: "user" });
-          await agent.whenIdle();
+          // Bound the idle wait: an abort signal a hung tool call never honors
+          // (or a wake that re-arms the driver) would otherwise keep whenIdle
+          // pending forever — /slides/sessions/:id/stop never answers, `busy`
+          // never clears, and the editor is stuck on "正在中止" while the
+          // state polls keep rewriting the run files. Stop reporting must not
+          // depend on the kernel's abort actually landing.
+          const timeout = new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, OPERATOR_STOP_IDLE_TIMEOUT_MS);
+            timer.unref?.();
+          });
+          await Promise.race([agent.whenIdle(), timeout]);
         }
       } finally {
         busy.delete(sessionId);
@@ -806,11 +803,13 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       }
     },
     async createAgent(input) {
-      if (runtimeProvision && !rasterRuntimeReady()) await runtimeProvision;
+      const pendingRuntimeProvision = runtimeProvision.current();
+      if (pendingRuntimeProvision) await pendingRuntimeProvision;
+      const renderRuntime = runtimeProvision.snapshot();
       assertGenerationRenderingReady(
-        { render: rasterRuntimeReady() },
+        { render: renderRuntime.phase === "ready" },
         input.conversationMode,
-        runtimeProvisionError,
+        renderRuntime.error,
       );
       assertHubProduceGatesReady(workspaceRoot);
       bindGrokProduce();

@@ -2,64 +2,62 @@ import type { AssistantQuestions } from "./assistant-questions.js";
 import { assistantIntentHistory, type AssistantIntent, type AssistantIntentInput } from "./assistant-intent.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
-import { discussionInstruction, discussionOnly, generationInstruction, readConversation, recordConversationMessage, type ConversationMessage } from "./assistant-conversation.js";
+import {
+  discussionInstruction,
+  discussionOnly,
+  generationInstruction,
+  readConversation,
+  recordConversationMessage,
+  type ConversationMessage,
+} from "./assistant-conversation.js";
 import path from "node:path";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import {
-  authorizePageEdits, buildCatalogDto, inspectProjectCapabilities, inspectProjectExecution,
-  readVerifiedDelivery, resolveCatalogPreviewFile, type PresentationRun,
+  authorizePageEdits,
+  inspectProjectCapabilities,
+  inspectProjectExecution,
+  readVerifiedDelivery,
+  type PresentationRun,
 } from "@open-slidestudio/presentation-run";
-import { deckTitleFromBrief, pickCoverRevision, pickRasterFile, pickRequestedRasterFile, SliceSessionStore } from "./slice-session.js";
 import {
-  connectionState,
-  deleteHomeKey,
-  saveHomeKey,
-  slidesProviders,
-  hostedProviders,
-  withDshModelCatalog,
-} from "./providers.js";
-import {
-  BYOK_PRESETS,
-  parseByokUpsert,
-  readByokProviders,
-  removeByokProvider,
-  upsertByokProvider,
-} from "./byok.js";
-import { readXaiLoginSnapshot, routeHasNativeSearch } from "./oauth-login.js";
+  deckTitleFromBrief,
+  pickCoverRevision,
+  pickRasterFile,
+  pickRequestedRasterFile,
+  SliceSessionStore,
+} from "./slice-session.js";
+import { connectionState, deleteHomeKey, saveHomeKey, slidesProviders } from "./providers.js";
+import { parseByokUpsert, readByokProviders, removeByokProvider, upsertByokProvider } from "./byok.js";
 import { loadProject } from "@open-slidestudio/pptd-v2";
 import { editorOrigin as defaultEditorOrigin, proxyToEditor, shouldProxyToEditor } from "./product-proxy.js";
 import { isForbiddenGenerateRoute, type SlidesLlmModel } from "./args.js";
-import {
-  loadSlidesModelCatalog,
-  modelInputModalities,
-  removeLocalProviderProfile,
-  upsertLocalProviderProfile,
-  type RuntimeModelCatalog,
-} from "./local-models.js";
+import { removeLocalProviderProfile, upsertLocalProviderProfile, type RuntimeModelCatalog } from "./local-models.js";
 import { isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
 import { markInterruptedTurn } from "./interruption.js";
 import {
-  assertExpectedAttempt, beginAttempt, parseExpectedAttemptId, parseModelSelection, readAttempt,
-  SessionTransitionConflict, withSessionTransition,
+  assertExpectedAttempt,
+  beginAttempt,
+  parseExpectedAttemptId,
+  parseModelSelection,
+  readAttempt,
+  SessionTransitionConflict,
+  withSessionTransition,
 } from "./session-transition.js";
 import {
-  generationFormat, verifiedAttachment, assertAttachmentBudget, attachmentDeliveryBlock, inputSha256,
+  generationFormat,
+  verifiedAttachment,
+  assertAttachmentBudget,
+  attachmentDeliveryBlock,
+  inputSha256,
   type EditorAttachment,
 } from "./generation-input.js";
 export type { EditorAttachment } from "./generation-input.js";
-import { hubCapabilityCard } from "./hub-capability.js";
-import { inspectHubProduceGates, assertHubProduceGatesReady, StaleProduceGatesError } from "./produce-gates.js";
+import { assertHubProduceGatesReady, StaleProduceGatesError } from "./produce-gates.js";
 import { attachSessionLive } from "./session-live.js";
-import {
-  mergeToolSettingsEnv,
-  parseToolSettingsPatch,
-  readStoredToolSettings,
-  readToolSettings,
-  toToolSettingsView,
-  writeToolSettings,
-  applyToolSettingsToEnv,
-} from "./tool-settings.js";
+import type { RenderRuntimeSnapshot } from "./runtime-provision.js";
+import { handleRuntimeRoutes } from "./runtime-routes.js";
+import { readJson, sendJson } from "./http-json.js";
 
 export type SlidesHostRuntime = {
   questions?: AssistantQuestions;
@@ -67,6 +65,8 @@ export type SlidesHostRuntime = {
   workspaceRoot: string;
   dataRoot?: string;
   dshHome: string;
+  renderRuntime?: () => RenderRuntimeSnapshot;
+  startRenderRuntime?: () => Promise<void>;
   presentation: PresentationRun;
   agentBusy: (sessionId: string) => boolean;
   markBusy: (sessionId: string) => void;
@@ -108,7 +108,11 @@ export type SlidesHostRuntime = {
 };
 
 /** The read endpoint and recovery transition use the same live projection. */
-function currentExecution(runtime: SlidesHostRuntime, binding: NonNullable<ReturnType<SliceSessionStore["bindingFor"]>>, phase: string) {
+function currentExecution(
+  runtime: SlidesHostRuntime,
+  binding: NonNullable<ReturnType<SliceSessionStore["bindingFor"]>>,
+  phase: string,
+) {
   const root = runtime.store.resolveRoot(binding);
   const wait = readRateLimitWait(root);
   const fault = readAgentError(root);
@@ -119,10 +123,15 @@ function currentExecution(runtime: SlidesHostRuntime, binding: NonNullable<Retur
     capability: inspectProjectCapabilities(root),
     verifiedDelivery: readVerifiedDelivery(root),
     currentAttemptId: readAttempt(root)?.attemptId ?? null,
-    terminalFault: fault ? {
-      attemptId: fault.attemptId, code: fault.code, message: fault.detail, phase,
-      recoverable: !isHardProviderFault(fault),
-    } : undefined,
+    terminalFault: fault
+      ? {
+          attemptId: fault.attemptId,
+          code: fault.code,
+          message: fault.detail,
+          phase,
+          recoverable: !isHardProviderFault(fault),
+        }
+      : undefined,
     binding: { provider: binding.provider, design: binding.design },
   });
 }
@@ -130,16 +139,23 @@ function currentExecution(runtime: SlidesHostRuntime, binding: NonNullable<Retur
 /** A batch id is a receipt only while the project file still holds it preparing. */
 function pendingCommentSubmissionId(root: string, authorizationId: string): string | undefined {
   const id = /^comment-batch:[a-f0-9-]{36}$/.test(authorizationId)
-    ? authorizationId.slice("comment-batch:".length) : "";
+    ? authorizationId.slice("comment-batch:".length)
+    : "";
   if (!id) return undefined;
   try {
     const file = path.join(root, "_agent", "comment-submissions.v1.json");
     if (!fs.existsSync(file)) return undefined;
     const value = JSON.parse(fs.readFileSync(file, "utf8")) as { submissions?: unknown };
     const submissions = Array.isArray(value?.submissions) ? value.submissions : [];
-    return submissions.some((item) => item && typeof item === "object"
-      && (item as Record<string, unknown>).id === id
-      && (item as Record<string, unknown>).status === "preparing") ? id : undefined;
+    return submissions.some(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        (item as Record<string, unknown>).id === id &&
+        (item as Record<string, unknown>).status === "preparing",
+    )
+      ? id
+      : undefined;
   } catch {
     return undefined;
   }
@@ -159,7 +175,7 @@ function attachmentIdsFromBody(value: unknown): string[] {
       typeof item === "string"
         ? item
         : item && typeof item === "object" && !Array.isArray(item)
-          ? (item as Record<string, unknown>).id ?? ""
+          ? ((item as Record<string, unknown>).id ?? "")
           : "",
     ).trim();
     if (!id || id.length > 200 || id.includes("/")) {
@@ -180,7 +196,7 @@ export async function resolveEditorAttachments(
   const attachments: EditorAttachment[] = [];
   for (const id of attachmentIds) {
     const response = await fetchImpl(`${editorOrigin}/api/attachments/${encodeURIComponent(id)}`);
-    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) throw new Error(String(body.error || `attachment not found: ${id}`));
     attachments.push(verifiedAttachment(id, body));
   }
@@ -188,7 +204,10 @@ export async function resolveEditorAttachments(
   return attachments;
 }
 
-async function selectedAttachments(runtime: SlidesHostRuntime, ids: readonly string[]): Promise<readonly EditorAttachment[]> {
+async function selectedAttachments(
+  runtime: SlidesHostRuntime,
+  ids: readonly string[],
+): Promise<readonly EditorAttachment[]> {
   const resolved = await (runtime.resolveAttachments ?? resolveEditorAttachments)(ids);
   if (resolved.length !== ids.length) throw new Error("attachment resolver did not return every selected file");
   const expectedStoreId = inputSha256(path.resolve(runtime.dataRoot ?? runtime.workspaceRoot, "output", "attachments"));
@@ -229,7 +248,9 @@ function reviewScopeEntryFrom(scope: Record<string, unknown>, page: Record<strin
   const kind = scope.kind;
   const pageId = String(scope.pageId ?? "").trim();
   const pageRevision = Number(scope.pageRevision);
-  const pageSha256 = String(scope.pageSha256 ?? "").trim().toLowerCase();
+  const pageSha256 = String(scope.pageSha256 ?? "")
+    .trim()
+    .toLowerCase();
   const commentId = String(scope.commentId ?? "").trim();
   const commentRevision = Number(scope.commentRevision);
   if (kind !== "elements" && kind !== "page") throw new Error("review scope kind must be elements or page");
@@ -239,7 +260,13 @@ function reviewScopeEntryFrom(scope: Record<string, unknown>, page: Record<strin
   if (!Number.isSafeInteger(pageRevision) || pageRevision < 1 || pageRevision !== Number(edit.revision)) {
     throw new Error("review scope pageRevision must match editorEdit.revision");
   }
-  if (!/^[a-f0-9]{64}$/.test(pageSha256) || pageSha256 !== String(edit.pageSha256 ?? "").trim().toLowerCase()) {
+  if (
+    !/^[a-f0-9]{64}$/.test(pageSha256) ||
+    pageSha256 !==
+      String(edit.pageSha256 ?? "")
+        .trim()
+        .toLowerCase()
+  ) {
     throw new Error("review scope pageSha256 must match editorEdit.pageSha256");
   }
   if (!commentId || !Number.isSafeInteger(commentRevision) || commentRevision < 1) {
@@ -334,62 +361,21 @@ export function turnTextWithReviewScope(
   if (!scopes.length) return text;
   if (scopes.length === 1) {
     const only = scopes[0]!;
-    const target = only.kind === "elements"
-      ? `Only modify the exact selected elementIds ${JSON.stringify(only.elementIds)}. Do not modify page metadata, element order, or any other element.`
-      : "This is an explicit whole-page review. Modify only this page and no other page or deck metadata.";
+    const target =
+      only.kind === "elements"
+        ? `Only modify the exact selected elementIds ${JSON.stringify(only.elementIds)}. Do not modify page metadata, element order, or any other element.`
+        : "This is an explicit whole-page review. Modify only this page and no other page or deck metadata.";
     return `${text}\n\n<editor_review_scope>\nServer-verified scope for comment ${JSON.stringify(only.commentId)} revision ${only.commentRevision}: pageId=${JSON.stringify(only.pageId)}, pageRevision=${only.pageRevision}, pageSha256=${only.pageSha256}. ${target}\n</editor_review_scope>`;
   }
   const pageIds = new Set(scopes.map((entry) => entry.pageId));
   const blocks = scopes.map((entry) => {
-    const target = entry.kind === "elements"
-      ? `For this comment, modify only elementIds ${JSON.stringify(entry.elementIds)} on this page.`
-      : "This is an explicit whole-page review for this page only.";
+    const target =
+      entry.kind === "elements"
+        ? `For this comment, modify only elementIds ${JSON.stringify(entry.elementIds)} on this page.`
+        : "This is an explicit whole-page review for this page only.";
     return `- comment ${JSON.stringify(entry.commentId)} revision ${entry.commentRevision}: pageId=${JSON.stringify(entry.pageId)}, pageRevision=${entry.pageRevision}, pageSha256=${entry.pageSha256}. ${target}`;
   });
   return `${text}\n\n<editor_review_scope>\nServer-verified batch scope for ${scopes.length} comments across ${pageIds.size} page(s). Work only inside these pages and element sets, keep every other page untouched, and pass each page's own pageSha256 as its expectedPageSha256.\n${blocks.join("\n")}\n</editor_review_scope>`;
-}
-
-function capabilityEnv(home: string): NodeJS.ProcessEnv {
-  const stored = readStoredToolSettings(home);
-  return stored ? mergeToolSettingsEnv(process.env, stored) : process.env;
-}
-
-function availableRoster(runtime: SlidesHostRuntime, catalog?: RuntimeModelCatalog) {
-  return (runtime.managedModels ? hostedProviders(catalog ?? new Map()) : withDshModelCatalog(slidesProviders(runtime.dshHome), catalog)).map((provider) => {
-    const health = runtime.providerHealth?.(provider.id);
-    if (!health) return provider;
-    // Adapter faults remain visible in the hosted picker; DSH owns the roster.
-    if (runtime.managedModels) return { ...provider, degraded: true, degradedReason: health.reason };
-    return health.kind === "broken"
-      ? { ...provider, ready: false, readyReason: health.reason }
-      : { ...provider, degraded: true, degradedReason: health.reason };
-  });
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
-
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    total += buf.length;
-    if (total > MAX_JSON_BODY_BYTES) throw new Error("request body too large");
-    chunks.push(buf);
-  }
-  if (chunks.length === 0) return {};
-  const raw = Buffer.concat(chunks).toString("utf8");
-  if (!raw.trim()) return {};
-  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 const LOOPBACK_HOST_RE = /^(?:127\.0\.0\.1|\[?::1\]?|localhost)(?::\d+)?$/i;
@@ -422,7 +408,8 @@ function requestGuardFailure(req: IncomingMessage): string | undefined {
   const type = String(req.headers?.["content-type"] ?? "");
   // Browsers send `Content-Length: 0` on a bodyless POST (session stop); only a
   // request that actually carries bytes has a body whose type must be JSON.
-  const hasBody = Number(req.headers?.["content-length"] ?? 0) > 0 ||
+  const hasBody =
+    Number(req.headers?.["content-length"] ?? 0) > 0 ||
     /chunked/i.test(String(req.headers?.["transfer-encoding"] ?? ""));
   if ((type || hasBody) && !/^application\/json\b/i.test(type)) {
     return "mutating requests require application/json";
@@ -443,11 +430,7 @@ function match(pathname: string, pattern: string): Record<string, string> | unde
   return params;
 }
 
-export function handleProductRequest(
-  runtime: SlidesHostRuntime,
-  req: IncomingMessage,
-  res: ServerResponse,
-): boolean {
+export function handleProductRequest(runtime: SlidesHostRuntime, req: IncomingMessage, res: ServerResponse): boolean {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
   if (pathname === "/api/generate" || pathname === "/api/generate-status") {
@@ -471,11 +454,7 @@ export function handleProductRequest(
   return false;
 }
 
-export function handleSlidesRequest(
-  runtime: SlidesHostRuntime,
-  req: IncomingMessage,
-  res: ServerResponse,
-): void {
+export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMessage, res: ServerResponse): void {
   void (async () => {
     const guardFailure = requestGuardFailure(req);
     if (guardFailure) {
@@ -484,146 +463,7 @@ export function handleSlidesRequest(
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const pathname = url.pathname;
-    if (req.method === "GET" && pathname === "/slides/catalog") {
-      sendJson(res, 200, buildCatalogDto(runtime.workspaceRoot));
-      return;
-    }
-    const previewParams = match(pathname, "/slides/catalog/previews/:sourceId");
-    if (req.method === "GET" && previewParams) {
-      const preview = resolveCatalogPreviewFile(previewParams.sourceId!, runtime.workspaceRoot);
-      if (!preview) {
-        sendJson(res, 404, { error: "unknown catalog preview" });
-        return;
-      }
-      res.writeHead(200, {
-        "content-type": preview.mediaType, "content-length": preview.bytes.length,
-        etag: `"${preview.sha256}"`, "cache-control": "public, max-age=0, must-revalidate",
-      });
-      res.end(preview.bytes);
-      return;
-    }
-    if (req.method === "GET" && pathname === "/slides/health") {
-      const connection = connectionState(runtime.dshHome);
-      const produceGates = inspectHubProduceGates(runtime.workspaceRoot);
-      const wantProvider = url.searchParams.get("provider")?.trim() || "";
-      const wantModel = url.searchParams.get("model")?.trim() || "";
-      const modelCatalog = await runtime.listModelCatalog?.();
-      const roster = availableRoster(runtime, modelCatalog);
-      const selectedProvider = wantProvider || (runtime.managedModels ? roster.find((row) => row.ready)?.id : undefined) || connection.providerId;
-      const selectedRow = roster.find((item) => item.id === selectedProvider);
-      const selectedModel = wantModel || selectedRow?.models?.[0] || connection.model;
-      const modelKnown = selectedRow?.models.includes(selectedModel) ?? false;
-      const selectedReady = modelKnown && selectedRow?.ready === true;
-      const selectedModalities = modelInputModalities(
-        runtime.dshHome,
-        selectedProvider,
-        selectedModel,
-        modelCatalog,
-      );
-      sendJson(res, 200, {
-        ok: true,
-        product: "DSH SlideStudio",
-        kernel: "dsh",
-        minimaxReady: connection.ready,
-        generateReady: selectedReady && produceGates.ok,
-        produceGates: {
-          ok: produceGates.ok,
-          id: produceGates.id,
-          missing: produceGates.missing,
-          failed: produceGates.failed,
-          hashMatch: produceGates.hashMatch,
-          emptyWriteRejected: produceGates.emptyWriteRejected,
-          emptyCreateHasNoSeed: produceGates.emptyCreateHasNoSeed,
-          generateReady: produceGates.generateReady,
-        },
-        connection,
-        selection: {
-          providerId: selectedProvider,
-          model: selectedModel,
-          ready: Boolean(selectedReady),
-        },
-        capability: hubCapabilityCard({
-          providerId: selectedProvider,
-          modelId: selectedModel,
-          modelInputModalities: selectedModalities,
-          ready: Boolean(selectedReady),
-          env: capabilityEnv(runtime.dshHome),
-          nativeSearch:
-            routeHasNativeSearch(selectedProvider) && Boolean(selectedReady),
-        }),
-      });
-      return;
-    }
-    if (req.method === "GET" && pathname === "/slides/tool-settings") {
-      sendJson(res, 200, { ok: true, settings: toToolSettingsView(readToolSettings(runtime.dshHome)) });
-      return;
-    }
-    if (req.method === "PUT" && pathname === "/slides/tool-settings") {
-      try {
-        const previous = readToolSettings(runtime.dshHome);
-        const settings = parseToolSettingsPatch(await readJson(req), previous);
-        writeToolSettings(runtime.dshHome, settings);
-        applyToolSettingsToEnv(process.env, settings);
-        sendJson(res, 200, { ok: true, settings: toToolSettingsView(settings) });
-      } catch (error) {
-        sendJson(res, 400, {
-          ok: false,
-          error: error instanceof Error ? error.message : "invalid tool settings",
-        });
-      }
-      return;
-    }
-    if (req.method === "GET" && pathname === "/slides/models") {
-      const catalog = await runtime.listModelCatalog?.();
-      const groups = availableRoster(runtime, catalog)
-        .filter((provider) => provider.ready && provider.models.length > 0)
-        .map((provider) => ({
-          providerId: provider.id,
-          providerName: provider.name,
-          ready: true,
-          degraded: provider.degraded ?? false,
-          degradedReason: provider.degradedReason,
-          nativeSearch: provider.nativeSearch ?? false,
-          modelEfforts: provider.modelEfforts,
-          efforts: provider.efforts,
-          models: provider.models.map((id) => ({
-            id,
-            name: catalog?.get(provider.id)?.get(id)?.name || id,
-            inputModalities: modelInputModalities(runtime.dshHome, provider.id, id, catalog) ?? [],
-          })),
-        }));
-      sendJson(res, 200, groups);
-      return;
-    }
-    if (req.method === "GET" && pathname === "/slides/providers") {
-      const connection = connectionState(runtime.dshHome);
-      const xai = readXaiLoginSnapshot(runtime.dshHome);
-      const catalog = loadSlidesModelCatalog(runtime.dshHome);
-      const providers = availableRoster(runtime, await runtime.listModelCatalog?.());
-      sendJson(res, 200, {
-        providers,
-        connection,
-        catalog: catalog
-          ? {
-              defaultProvider: catalog.defaultProvider,
-              defaultModel: catalog.defaultModel,
-              excluded: catalog.excluded,
-              oauthSkipped: catalog.oauthSkipped,
-            }
-          : undefined,
-        oauth: {
-          available: xai.status === "signed-in",
-          ...(xai.status === "signed-in"
-            ? { route: "pi-xai" }
-            : {
-                reason:
-                  "OAuth grants stay in the local DSH App. This product uses an isolated DSH_HOME and will not copy them.",
-              }),
-        },
-        presets: BYOK_PRESETS,
-      });
-      return;
-    }
+    if (await handleRuntimeRoutes(runtime, req, res, url, { match })) return;
     if (req.method === "POST" && pathname === "/slides/providers") {
       try {
         const body = await readJson(req);
@@ -723,12 +563,17 @@ export function handleSlidesRequest(
     }
     const questionParams = match(pathname, "/slides/sessions/:sessionId/questions/:questionId");
     if (req.method === "POST" && questionParams) {
-      if (!runtime.questions || !runtime.store.bindingFor(questionParams.sessionId!)) { sendJson(res, 404, { error: "Unknown slide session" }); return; }
+      if (!runtime.questions || !runtime.store.bindingFor(questionParams.sessionId!)) {
+        sendJson(res, 404, { error: "Unknown slide session" });
+        return;
+      }
       const body = await readJson(req);
       try {
         runtime.questions.settle(questionParams.sessionId!, questionParams.questionId!, body);
         sendJson(res, 200, { ok: true });
-      } catch (error) { sendJson(res, 409, { ok: false, error: error instanceof Error ? error.message : String(error) }); }
+      } catch (error) {
+        sendJson(res, 409, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
     const stateParams = match(pathname, "/slides/state/:sessionId");
@@ -759,7 +604,7 @@ export function handleSlidesRequest(
       const execution = root && binding ? currentExecution(runtime, binding, snap.phase.kind) : undefined;
       sendJson(res, 200, {
         ...snap,
-        questions: binding ? runtime.questions?.list(sessionId) ?? [] : [],
+        questions: binding ? (runtime.questions?.list(sessionId) ?? []) : [],
         agentStatus: runtime.agentBusy(sessionId) ? "busy" : "idle",
         kernel: "dsh",
         hostDirected: false,
@@ -800,29 +645,48 @@ export function handleSlidesRequest(
       const sessionId = String(body.sessionId || "");
       const binding = runtime.store.bindingFor(sessionId);
       if (!text || text.length > 20_000) {
-        sendJson(res, 400, { error: "需要有效文稿会话与消息内容" }); return;
+        sendJson(res, 400, { error: "需要有效文稿会话与消息内容" });
+        return;
       }
       if (!runtime.resolveAssistantIntent) {
-        sendJson(res, 503, { error: "助手正在更新，请稍后重试；输入内容已保留。" }); return;
+        sendJson(res, 503, { error: "助手正在更新，请稍后重试；输入内容已保留。" });
+        return;
       }
       // Hub submissions have no session yet: classify discuss-vs-generate as
       // its own visible request so the create call after it returns at once.
       if (body.hub === true) {
-        const plan = await runtime.resolveAssistantIntent({ text, pageCount: 0, currentPage: 1, selectedCount: 0, history: [],
-          modelSelection: parseModelSelection(body.modelSelection) });
-        sendJson(res, 200, { ok: true, ...plan }); return;
+        const plan = await runtime.resolveAssistantIntent({
+          text,
+          pageCount: 0,
+          currentPage: 1,
+          selectedCount: 0,
+          history: [],
+          modelSelection: parseModelSelection(body.modelSelection),
+        });
+        sendJson(res, 200, { ok: true, ...plan });
+        return;
       }
       if (!binding) {
-        sendJson(res, 400, { error: "需要有效文稿会话与消息内容" }); return;
+        sendJson(res, 400, { error: "需要有效文稿会话与消息内容" });
+        return;
       }
       if (runtime.agentBusy(sessionId)) {
-        sendJson(res, 409, { error: "助手仍在处理上一条消息，输入内容已保留。" }); return;
+        sendJson(res, 409, { error: "助手仍在处理上一条消息，输入内容已保留。" });
+        return;
       }
       const pageCount = runtime.store.inspect(sessionId).project.pageCount;
       const currentPage = Number(body.currentPage) || 1;
       const selectedCount = Number(body.selectedCount) || 0;
-      if (!Number.isSafeInteger(currentPage) || currentPage < 1 || currentPage > Math.max(1,pageCount) || !Number.isSafeInteger(selectedCount) || selectedCount < 0 || selectedCount > 1000) {
-        sendJson(res, 400, { error: "页面上下文已失效，请重新载入后再试。" }); return;
+      if (
+        !Number.isSafeInteger(currentPage) ||
+        currentPage < 1 ||
+        currentPage > Math.max(1, pageCount) ||
+        !Number.isSafeInteger(selectedCount) ||
+        selectedCount < 0 ||
+        selectedCount > 1000
+      ) {
+        sendJson(res, 400, { error: "页面上下文已失效，请重新载入后再试。" });
+        return;
       }
       const projectRoot = runtime.store.resolveRoot(binding);
       // The intent model resolves semantic anchors ("封面后", "目录页前")
@@ -832,20 +696,31 @@ export function handleSlidesRequest(
         const project = loadProject(projectRoot);
         pages = project.pages.map((loaded, index) => {
           const id = path.basename(loaded.path).replace(/\.page$/i, "");
-          const title = loaded.page.elements
-            .map((element) => element.elementType === "text"
-              ? String((element.content as { text?: unknown } | undefined)?.text ?? "").trim() : "")
-            .find((text) => text.length > 0) ?? "";
+          const title =
+            loaded.page.elements
+              .map((element) =>
+                element.elementType === "text"
+                  ? String((element.content as { text?: unknown } | undefined)?.text ?? "").trim()
+                  : "",
+              )
+              .find((text) => text.length > 0) ?? "";
           return { id, title: title.slice(0, 60) || id, position: index + 1 };
         });
       } catch {
         pages = undefined;
       }
-      const plan = await runtime.resolveAssistantIntent({ text, sessionId, pageCount, currentPage, selectedCount, pages,
+      const plan = await runtime.resolveAssistantIntent({
+        text,
+        sessionId,
+        pageCount,
+        currentPage,
+        selectedCount,
+        pages,
         modelSelection: parseModelSelection(body.modelSelection),
         history: assistantIntentHistory(projectRoot),
       });
-      sendJson(res, 200, { ok: true, ...plan }); return;
+      sendJson(res, 200, { ok: true, ...plan });
+      return;
     }
     if (req.method === "POST" && pathname === "/slides/sessions") {
       const body = await readJson(req);
@@ -876,21 +751,34 @@ export function handleSlidesRequest(
         format = generationFormat(body.kind, body.layout);
         attachments = await selectedAttachments(runtime, attachmentIdsFromBody(body.attachments));
       } catch (error) {
-        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error), code: "invalid_generation_input" });
+        sendJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+          code: "invalid_generation_input",
+        });
         return;
       }
       let discuss = body.conversationMode === "discuss";
       if (body.conversationMode === "auto") {
         if (!runtime.resolveAssistantIntent) {
-          sendJson(res, 503, { error: "助手正在更新，请稍后重试；输入内容已保留。" }); return;
+          sendJson(res, 503, { error: "助手正在更新，请稍后重试；输入内容已保留。" });
+          return;
         }
-        const plan = await runtime.resolveAssistantIntent({ text: brief, pageCount: 0, currentPage: 1, selectedCount: 0, history: [],
-          modelSelection: provider && model ? {provider, model, ...(reasoningEffort ? {reasoningEffort} : {})} : undefined,
+        const plan = await runtime.resolveAssistantIntent({
+          text: brief,
+          pageCount: 0,
+          currentPage: 1,
+          selectedCount: 0,
+          history: [],
+          modelSelection:
+            provider && model ? { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) } : undefined,
         });
         discuss = plan.intent === "discuss";
       }
       const created = await runtime.createAgent({
-        brief, kind: format.kind, layout: format.layout, attachments,
+        brief,
+        kind: format.kind,
+        layout: format.layout,
+        attachments,
         conversationMode: discuss ? "discuss" : undefined,
         designSystemId: designSystemId && designSystemId !== "freestyle" ? designSystemId : undefined,
         provider: provider || undefined,
@@ -924,12 +812,20 @@ export function handleSlidesRequest(
       try {
         await withSessionTransition(sessionId, async () => {
           if (runtime.agentBusy(sessionId)) {
-            throw new SessionTransitionConflict("session_busy", "session is busy; wait or stop before switching models");
+            throw new SessionTransitionConflict(
+              "session_busy",
+              "session is busy; wait or stop before switching models",
+            );
           }
           const binding = runtime.store.bindingFor(sessionId);
           if (!binding) throw new Error("unknown session");
           assertExpectedAttempt(runtime.store.resolveRoot(binding), expectedAttemptId);
-          await runtime.switchModel(sessionId, model, provider || undefined, String(body.reasoningEffort ?? "").trim() || undefined);
+          await runtime.switchModel(
+            sessionId,
+            model,
+            provider || undefined,
+            String(body.reasoningEffort ?? "").trim() || undefined,
+          );
         });
       } catch (error) {
         if (error instanceof SessionTransitionConflict) {
@@ -988,7 +884,9 @@ export function handleSlidesRequest(
         attachments = await selectedAttachments(runtime, attachmentIdsFromBody(body.attachments));
       } catch (error) {
         sendJson(res, 400, {
-          error: error instanceof Error ? error.message : String(error), code: "invalid_attachment", kernel: "dsh",
+          error: error instanceof Error ? error.message : String(error),
+          code: "invalid_attachment",
+          kernel: "dsh",
         });
         return;
       }
@@ -998,7 +896,10 @@ export function handleSlidesRequest(
         modelSelection = parseModelSelection(body.modelSelection);
         expectedAttemptId = parseExpectedAttemptId(body.expectedAttemptId);
       } catch (error) {
-        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error), code: "invalid_generation_input" });
+        sendJson(res, 400, {
+          error: error instanceof Error ? error.message : String(error),
+          code: "invalid_generation_input",
+        });
         return;
       }
       if (modelSelection && isForbiddenGenerateRoute(modelSelection.provider, modelSelection.model)) {
@@ -1009,11 +910,17 @@ export function handleSlidesRequest(
       const editorEdit = body.editorEdit;
       const discuss = body.conversationMode === "discuss";
       if (discuss && (editorEdit !== undefined || body.resumeGeneration === true || body.steer === true)) {
-        sendJson(res, 400, { error: "Discussion cannot authorize edits or steer generation", code: "invalid_conversation_mode" });
+        sendJson(res, 400, {
+          error: "Discussion cannot authorize edits or steer generation",
+          code: "invalid_conversation_mode",
+        });
         return;
       }
       if (body.resumeGeneration === true && editorEdit !== undefined) {
-        sendJson(res, 400, { error: "Generation recovery cannot also be an editor edit", code: "invalid_generation_resume" });
+        sendJson(res, 400, {
+          error: "Generation recovery cannot also be an editor edit",
+          code: "invalid_generation_resume",
+        });
         return;
       }
       let editorEditAuthorized = false;
@@ -1036,17 +943,21 @@ export function handleSlidesRequest(
         }
         try {
           const rawPages = Array.isArray(edit.pages) ? edit.pages : [edit];
-          authorizePageEdits(runtime.store.resolveRoot(binding), rawPages.map((rawPage) => {
-            const page = rawPage && typeof rawPage === "object" && !Array.isArray(rawPage)
-              ? rawPage as Record<string, unknown>
-              : {};
-            return {
-              authorizationId: String(edit.authorizationId ?? page.authorizationId ?? ""),
-              pageId: String(page.pageId ?? ""),
-              revision: Number(page.revision),
-              pageSha256: String(page.pageSha256 ?? ""),
-            };
-          }));
+          authorizePageEdits(
+            runtime.store.resolveRoot(binding),
+            rawPages.map((rawPage) => {
+              const page =
+                rawPage && typeof rawPage === "object" && !Array.isArray(rawPage)
+                  ? (rawPage as Record<string, unknown>)
+                  : {};
+              return {
+                authorizationId: String(edit.authorizationId ?? page.authorizationId ?? ""),
+                pageId: String(page.pageId ?? ""),
+                revision: Number(page.revision),
+                pageSha256: String(page.pageSha256 ?? ""),
+              };
+            }),
+          );
           editorEditAuthorized = true;
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -1056,7 +967,14 @@ export function handleSlidesRequest(
       }
       let userMessage: ConversationMessage | undefined;
       const turnText = turnTextWithReviewScope(
-        turnTextWithAttachments(discuss ? discussionInstruction(text, String(body.context || "").slice(0, 3000)) : body.conversationMode === "generate" ? generationInstruction(text) : text, attachments),
+        turnTextWithAttachments(
+          discuss
+            ? discussionInstruction(text, String(body.context || "").slice(0, 3000))
+            : body.conversationMode === "generate"
+              ? generationInstruction(text)
+              : text,
+          attachments,
+        ),
         editorReviewScopes,
       );
       try {
@@ -1066,8 +984,10 @@ export function handleSlidesRequest(
           if (root) assertExpectedAttempt(root, expectedAttemptId);
           if (body.resumeGeneration === true) {
             const current = bound ? runtime.store.inspect(sessionId) : undefined;
-            const resumable = current && (["paused", "failed"].includes(current.phase.kind)
-              || (bound && currentExecution(runtime, bound, current.phase.kind).recovery.kind === "continue"));
+            const resumable =
+              current &&
+              (["paused", "failed"].includes(current.phase.kind) ||
+                (bound && currentExecution(runtime, bound, current.phase.kind).recovery.kind === "continue"));
             if (runtime.agentBusy(sessionId) || !resumable) {
               throw new SessionTransitionConflict(
                 "generation_resume_conflict",
@@ -1082,7 +1002,10 @@ export function handleSlidesRequest(
             if (!live) throw new Error("unknown session");
             if (root) {
               if (discussionOnly(root)) {
-                throw new SessionTransitionConflict("invalid_conversation_mode", "讨论回合不能被纠偏；等它结束后再发送新的消息");
+                throw new SessionTransitionConflict(
+                  "invalid_conversation_mode",
+                  "讨论回合不能被纠偏；等它结束后再发送新的消息",
+                );
               }
               recordConversationMessage(root, String(body.userText || text), readConversation(root).mode);
             }
@@ -1096,7 +1019,12 @@ export function handleSlidesRequest(
             return;
           }
           if (modelSelection) {
-            await runtime.switchModel(sessionId, modelSelection.model, modelSelection.provider, modelSelection.reasoningEffort);
+            await runtime.switchModel(
+              sessionId,
+              modelSelection.model,
+              modelSelection.provider,
+              modelSelection.reasoningEffort,
+            );
           }
           runtime.cancelRateLimitWait(sessionId);
           let agent = runtime.getAgent(sessionId);
@@ -1107,10 +1035,19 @@ export function handleSlidesRequest(
           if (!agent) throw new Error("unknown session");
           if (root) {
             if (!discuss) beginAttempt(root, readAgentError(root));
-            const authorizationId = editorEditAuthorized ? String((editorEdit as Record<string, unknown>).authorizationId || "") : "";
+            const authorizationId = editorEditAuthorized
+              ? String((editorEdit as Record<string, unknown>).authorizationId || "")
+              : "";
             const reviewSubmissionId = editorReviewScopes?.length
-              ? pendingCommentSubmissionId(root, authorizationId) : undefined;
-            userMessage = recordConversationMessage(root, String(body.userText || text), discuss ? "discuss" : editorEditAuthorized ? "edit" : "generate", reviewSubmissionId, typeof body.clientRequestId === "string" ? body.clientRequestId : undefined);
+              ? pendingCommentSubmissionId(root, authorizationId)
+              : undefined;
+            userMessage = recordConversationMessage(
+              root,
+              String(body.userText || text),
+              discuss ? "discuss" : editorEditAuthorized ? "edit" : "generate",
+              reviewSubmissionId,
+              typeof body.clientRequestId === "string" ? body.clientRequestId : undefined,
+            );
           }
           runtime.markBusy(sessionId);
           await runtime.ensureSessionRunnable?.(sessionId);

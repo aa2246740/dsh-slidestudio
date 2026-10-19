@@ -1,10 +1,16 @@
 /**
  * Pluggable image generate. No public-web scrape.
- * Intranet/local OpenAI-compatible /v1/images/generations, or xAI grok-imagine.
- * When generate is on, fail closed — never write a fake placeholder PNG.
+ * Presets cover the mainstream vendor wire formats (OpenAI images,
+ * DashScope sync/async, Gemini Imagen, Stability SD3); `template` maps
+ * an arbitrary sync JSON API onto {{var}} interpolation + a dotted
+ * response path. When generate is on, fail closed — never write a fake
+ * placeholder PNG.
  */
 import { placeholderSize } from "./placeholder-png.js";
 import { XAI_API_BASE } from "./grok-hosted.js";
+import { buildTemplateRequest, jsonPath, templateVars } from "./endpoint-template.js";
+import { aspectRatio, dashscopeSyncSize, dashscopeTaskSize, generatePreset, sizeForAspect, stabilityAspect, } from "./image-presets.js";
+export { IMAGE_GENERATE_PRESETS } from "./image-presets.js";
 export const GROK_IMAGINE_MODEL = "grok-imagine-image-2.0";
 export function imageConfigFromEnv(env = process.env) {
     const disabled = env.SLIDESTUDIO_IMAGE === "0";
@@ -17,9 +23,23 @@ export function imageConfigFromEnv(env = process.env) {
         baseUrl: baseUrl || undefined,
         apiKey: env.SLIDESTUDIO_IMAGE_API_KEY || env.SLIDESTUDIO_LLM_API_KEY,
         model: env.SLIDESTUDIO_IMAGE_MODEL?.trim() || undefined,
+        preset: env.SLIDESTUDIO_IMAGE_PRESET?.trim() || undefined,
+        template: templateFromEnv(env.SLIDESTUDIO_IMAGE_TEMPLATE),
         timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 60_000,
         enabled: !disabled && Boolean(baseUrl),
     };
+}
+function templateFromEnv(raw) {
+    const text = raw?.trim();
+    if (!text)
+        return undefined;
+    try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 /** Signed-in Grok: always the xAI imagine endpoint. Missing token fails at generate. */
 export function grokImageConfigFromEnv(env = process.env) {
@@ -28,11 +48,15 @@ export function grokImageConfigFromEnv(env = process.env) {
         baseUrl: env.SLIDESTUDIO_IMAGE_BASE_URL?.trim() || XAI_API_BASE,
         apiKey: env.SLIDESTUDIO_IMAGE_API_KEY?.trim() || undefined,
         model: env.SLIDESTUDIO_IMAGE_MODEL?.trim() || GROK_IMAGINE_MODEL,
+        preset: env.SLIDESTUDIO_IMAGE_PRESET?.trim() || undefined,
+        template: templateFromEnv(env.SLIDESTUDIO_IMAGE_TEMPLATE),
         timeoutMs: Number(env.SLIDESTUDIO_IMAGE_TIMEOUT_MS) || 60_000,
     };
 }
 export function imageConfigured(cfg = imageConfigFromEnv()) {
-    return Boolean(cfg.enabled && cfg.baseUrl && cfg.apiKey);
+    // The template preset may describe a keyless intranet API; every named
+    // vendor preset authenticates with an API key.
+    return Boolean(cfg.enabled && cfg.baseUrl && (cfg.apiKey || cfg.preset === "template"));
 }
 function imagesUrl(baseUrl) {
     if (/\/images\/generations\/?$/.test(baseUrl))
@@ -74,26 +98,6 @@ export function aspectFromSlot(width, height) {
         }
     }
     return bestId;
-}
-function aspectRatio(aspect) {
-    const raw = (aspect || "16:9").trim();
-    if (raw === "square")
-        return "1:1";
-    if (raw === "portrait")
-        return "3:4";
-    if (raw === "widescreen")
-        return "16:9";
-    return raw;
-}
-function sizeForAspect(aspect) {
-    const ratio = aspectRatio(aspect);
-    if (ratio === "1:1")
-        return "1024x1024";
-    if (ratio === "3:4" || ratio === "9:16")
-        return "1024x1536";
-    if (ratio === "4:3")
-        return "1024x768";
-    return "1536x1024";
 }
 export function pngSizeFromBytes(bytes) {
     if (bytes.length < 24)
@@ -145,46 +149,238 @@ async function bytesFromApiPayload(parsed, fetchFn, signal) {
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length < 64)
         throw new Error("image URL returned empty bytes");
-    const mime = /jpe?g/i.test(res.headers.get("content-type") ?? "") || /\.jpe?g(\?|$)/i.test(url)
-        ? "image/jpeg"
-        : "image/png";
+    const mime = /jpe?g/i.test(res.headers.get("content-type") ?? "") || /\.jpe?g(\?|$)/i.test(url) ? "image/jpeg" : "image/png";
     return { bytes, mime };
 }
+async function readJson(res, label) {
+    const body = await res.text();
+    if (!res.ok)
+        throw new Error(`${label} HTTP ${res.status}: ${body.slice(0, 180)}`);
+    try {
+        return JSON.parse(body);
+    }
+    catch {
+        throw new Error(`${label} returned non-JSON`);
+    }
+}
+async function bytesFromImageUrl(url, fetchFn, signal, headers) {
+    const res = await fetchFn(url, { signal, headers });
+    if (!res.ok)
+        throw new Error(`image URL HTTP ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length < 64)
+        throw new Error("image URL returned empty bytes");
+    const mime = /jpe?g/i.test(res.headers.get("content-type") ?? "") || /\.jpe?g(\?|$)/i.test(url) ? "image/jpeg" : "image/png";
+    return { bytes, mime };
+}
+function bytesFromB64(b64) {
+    const bytes = Buffer.from(b64, "base64");
+    if (bytes.length < 64)
+        throw new Error("image API returned empty bytes");
+    return { bytes, mime: "image/png" };
+}
+/** OpenAI-compatible /images/generations contract. */
+async function generateViaOpenai(cfg, prompt, aspect, fetchFn, signal) {
+    const res = await fetchFn(imagesUrl(cfg.baseUrl), {
+        method: "POST",
+        signal,
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${cfg.apiKey.trim()}`,
+        },
+        body: JSON.stringify(requestBody(cfg, prompt, aspect)),
+    });
+    const parsed = await readJson(res, "image");
+    return bytesFromApiPayload(parsed, fetchFn, signal);
+}
+/** DashScope synchronous multimodal-generation (qwen-image). */
+async function generateViaDashscopeSync(cfg, prompt, aspect, fetchFn, signal) {
+    const base = cfg.baseUrl.replace(/\/+$/, "");
+    const url = /services\/aigc\/multimodal-generation\/generation\/?$/.test(base)
+        ? base
+        : `${base}/api/v1/services/aigc/multimodal-generation/generation`;
+    const res = await fetchFn(url, {
+        method: "POST",
+        signal,
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${cfg.apiKey.trim()}`,
+        },
+        body: JSON.stringify({
+            model: cfg.model || "qwen-image",
+            input: { messages: [{ role: "user", content: [{ text: prompt.slice(0, 800) }] }] },
+            parameters: { size: dashscopeSyncSize(aspect), n: 1 },
+        }),
+    });
+    const parsed = await readJson(res, "image");
+    const urlOut = jsonPath(parsed, "output.choices.0.message.content");
+    const items = Array.isArray(urlOut) ? urlOut : [];
+    for (const item of items) {
+        const image = item && typeof item === "object" ? item.image : undefined;
+        if (typeof image === "string" && image.startsWith("http")) {
+            return bytesFromImageUrl(image, fetchFn, signal);
+        }
+    }
+    throw new Error("image API returned no image url");
+}
+/** DashScope async text2image task (wanx): create → poll task → results[].url. */
+async function generateViaDashscopeTask(cfg, prompt, aspect, fetchFn, signal) {
+    const base = cfg.baseUrl.replace(/\/+$/, "");
+    const createUrl = /\/api\/v1\/services\/aigc\/text2image\/image-synthesis\/?$/i.test(base)
+        ? base
+        : `${base}/api/v1/services/aigc/text2image/image-synthesis`;
+    const taskRoot = base.replace(/\/api\/v1\/services\/aigc\/text2image\/image-synthesis\/?$/i, "").replace(/\/+$/, "");
+    const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey.trim()}`,
+    };
+    const res = await fetchFn(createUrl, {
+        method: "POST",
+        signal,
+        headers: { ...headers, "X-DashScope-Async": "enable" },
+        body: JSON.stringify({
+            model: cfg.model || "wanx2.1-t2i-turbo",
+            input: { prompt: prompt.slice(0, 800) },
+            parameters: { size: dashscopeTaskSize(aspect), n: 1 },
+        }),
+    });
+    const created = await readJson(res, "image task");
+    const taskId = jsonPath(created, "output.task_id");
+    if (typeof taskId !== "string" || !taskId) {
+        throw new Error("image task returned no task_id");
+    }
+    const taskUrl = `${taskRoot}/api/v1/tasks/${taskId}`;
+    const deadline = Date.now() + (cfg.timeoutMs ?? 60_000);
+    for (;;) {
+        const poll = await fetchFn(taskUrl, { signal, headers });
+        const task = await readJson(poll, "image task");
+        const status = String(jsonPath(task, "output.task_status") ?? "").toUpperCase();
+        if (status === "SUCCEEDED") {
+            const imageUrl = jsonPath(task, "output.results.0.url");
+            if (typeof imageUrl !== "string" || !imageUrl) {
+                throw new Error("image task SUCCEEDED without results[].url");
+            }
+            return bytesFromImageUrl(imageUrl, fetchFn, signal);
+        }
+        if (status && status !== "PENDING" && status !== "RUNNING") {
+            const message = jsonPath(task, "output.message") ?? jsonPath(task, "message");
+            throw new Error(`image task ${status}: ${String(message ?? "").slice(0, 120)}`);
+        }
+        if (Date.now() > deadline)
+            throw new Error("image task timed out");
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+}
+/** Gemini Imagen :predict (generativelanguage.googleapis.com). */
+async function generateViaGeminiImagen(cfg, prompt, aspect, fetchFn, signal) {
+    const base = cfg.baseUrl.replace(/\/+$/, "");
+    const url = /:predict\??.*$/.test(base)
+        ? base
+        : `${base}/models/${encodeURIComponent(cfg.model || "imagen-3.0-generate-002")}:predict`;
+    const sep = url.includes("?") ? "&" : "?";
+    const res = await fetchFn(`${url}${sep}key=${encodeURIComponent(cfg.apiKey.trim())}`, {
+        method: "POST",
+        signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            instances: [{ prompt: prompt.slice(0, 800) }],
+            parameters: { sampleCount: 1, aspectRatio: aspectRatio(aspect) },
+        }),
+    });
+    const parsed = await readJson(res, "image");
+    const b64 = jsonPath(parsed, "predictions.0.bytesBase64Encoded");
+    if (typeof b64 !== "string" || !b64) {
+        throw new Error("image API returned no predictions[].bytesBase64Encoded");
+    }
+    return bytesFromB64(b64);
+}
+/** Stability AI v2beta sd3 (multipart form). */
+async function generateViaStability(cfg, prompt, aspect, fetchFn, signal) {
+    const base = cfg.baseUrl.replace(/\/+$/, "");
+    const url = /stable-image\/generate\/sd3\/?$/.test(base) ? base : `${base}/v2beta/stable-image/generate/sd3`;
+    const form = new FormData();
+    form.append("prompt", prompt.slice(0, 800));
+    form.append("aspect_ratio", stabilityAspect(aspect));
+    form.append("output_format", "png");
+    if (cfg.model)
+        form.append("model", cfg.model);
+    const res = await fetchFn(url, {
+        method: "POST",
+        signal,
+        headers: { Authorization: `Bearer ${cfg.apiKey.trim()}`, Accept: "application/json" },
+        body: form,
+    });
+    const parsed = await readJson(res, "image");
+    const b64 = jsonPath(parsed, "image");
+    if (typeof b64 !== "string" || !b64) {
+        throw new Error("image API returned no image field");
+    }
+    return bytesFromB64(b64);
+}
+/** Custom template: {{prompt}}/{{size}}/{{model}}/{{key}} + dotted imagePath. */
+async function generateViaTemplate(cfg, prompt, aspect, fetchFn, signal) {
+    const tmpl = cfg.template;
+    if (!tmpl?.imagePath) {
+        throw new Error("template preset requires template.imagePath (response image field path)");
+    }
+    const size = sizeForAspect(aspect);
+    const [width, height] = size.split("x");
+    const vars = templateVars({
+        prompt: prompt.slice(0, 800),
+        size,
+        width,
+        height,
+        aspect: aspectRatio(aspect),
+        model: cfg.model,
+        n: "1",
+        key: cfg.apiKey?.trim(),
+        apikey: cfg.apiKey?.trim(),
+    });
+    const req = buildTemplateRequest({ ...tmpl, url: tmpl.url || cfg.baseUrl }, vars);
+    const res = await fetchFn(req.url, { ...req.init, signal });
+    const parsed = await readJson(res, "image");
+    const raw = jsonPath(parsed, tmpl.imagePath);
+    if (typeof raw !== "string" || !raw) {
+        throw new Error(`template imagePath ${tmpl.imagePath} resolved to nothing`);
+    }
+    if (/^https?:\/\//i.test(raw))
+        return bytesFromImageUrl(raw, fetchFn, signal);
+    return bytesFromB64(raw);
+}
 async function generateViaApi(cfg, prompt, aspect, deps) {
-    if (!cfg.apiKey?.trim()) {
+    const preset = generatePreset(cfg.preset);
+    if (preset !== "template" && !cfg.apiKey?.trim()) {
         throw new Error("image generate has no API key — refusing to write a placeholder PNG");
     }
     const fetchFn = deps.fetch ?? fetch;
-    const url = imagesUrl(cfg.baseUrl);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs ?? 60_000);
     try {
-        const res = await fetchFn(url, {
-            method: "POST",
-            signal: ctrl.signal,
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${cfg.apiKey.trim()}`,
-            },
-            body: JSON.stringify(requestBody(cfg, prompt, aspect)),
-        });
-        const body = await res.text();
-        if (!res.ok) {
-            throw new Error(`image HTTP ${res.status}: ${body.slice(0, 180)}`);
+        let out;
+        switch (preset) {
+            case "dashscope-sync":
+                out = await generateViaDashscopeSync(cfg, prompt, aspect, fetchFn, ctrl.signal);
+                break;
+            case "dashscope-task":
+                out = await generateViaDashscopeTask(cfg, prompt, aspect, fetchFn, ctrl.signal);
+                break;
+            case "gemini-imagen":
+                out = await generateViaGeminiImagen(cfg, prompt, aspect, fetchFn, ctrl.signal);
+                break;
+            case "stability":
+                out = await generateViaStability(cfg, prompt, aspect, fetchFn, ctrl.signal);
+                break;
+            case "template":
+                out = await generateViaTemplate(cfg, prompt, aspect, fetchFn, ctrl.signal);
+                break;
+            default:
+                out = await generateViaOpenai(cfg, prompt, aspect, fetchFn, ctrl.signal);
         }
-        let parsed;
-        try {
-            parsed = JSON.parse(body);
-        }
-        catch {
-            throw new Error("image API returned non-JSON");
-        }
-        const { bytes, mime } = await bytesFromApiPayload(parsed, fetchFn, ctrl.signal);
-        const measured = pngSizeFromBytes(bytes);
+        const measured = pngSizeFromBytes(out.bytes);
         const ph = placeholderSize(aspect);
         return {
-            bytes,
-            mime,
+            bytes: out.bytes,
+            mime: out.mime,
             width: measured?.width ?? ph.width,
             height: measured?.height ?? ph.height,
             kind: "generated",

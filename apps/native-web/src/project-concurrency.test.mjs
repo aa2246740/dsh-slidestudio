@@ -15,18 +15,27 @@ function textElement(id, text) {
 
 function writeTwoPageProject(root, firstText, secondText) {
   fs.mkdirSync(path.join(root, "pages"), { recursive: true });
-  fs.writeFileSync(path.join(root, "deck.pptd"), `${JSON.stringify({
-    version: "v2",
-    title: path.basename(root),
-    size: [960, 540],
-    theme: {},
-    pages: ["pages/01_page.page", "pages/02_page.page"],
-  })}\n`);
-  for (const [name, text] of [["01_page", firstText], ["02_page", secondText]]) {
-    fs.writeFileSync(path.join(root, "pages", `${name}.page`), `${JSON.stringify({
-      pageType: "content",
-      elements: [textElement(`${name}-title`, text)],
-    })}\n`);
+  fs.writeFileSync(
+    path.join(root, "deck.pptd"),
+    `${JSON.stringify({
+      version: "v2",
+      title: path.basename(root),
+      size: [960, 540],
+      theme: {},
+      pages: ["pages/01_page.page", "pages/02_page.page"],
+    })}\n`,
+  );
+  for (const [name, text] of [
+    ["01_page", firstText],
+    ["02_page", secondText],
+  ]) {
+    fs.writeFileSync(
+      path.join(root, "pages", `${name}.page`),
+      `${JSON.stringify({
+        pageType: "content",
+        elements: [textElement(`${name}-title`, text)],
+      })}\n`,
+    );
   }
   fs.mkdirSync(path.join(root, "media"), { recursive: true });
 }
@@ -62,7 +71,14 @@ async function command(base, root, cmd) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(cmd),
   });
-  assert.equal(res.status, 200, await res.clone().text().catch(() => ""));
+  assert.equal(
+    res.status,
+    200,
+    await res
+      .clone()
+      .text()
+      .catch(() => ""),
+  );
   return res.json();
 }
 
@@ -103,6 +119,21 @@ describe("concurrent project sessions", () => {
     assert.equal(seenB.model.pageIndex, 0);
     assert.match(JSON.stringify(seenA.model.elements), /A two/);
     assert.match(JSON.stringify(seenB.model.elements), /B one/);
+  });
+
+  it("reloads a live session after an external project change", async () => {
+    const base = await httpEndpoint();
+    const root = fixture();
+    writeTwoPageProject(root, "Before disk edit", "Second page");
+    await openProject(base, root);
+
+    const pagePath = path.join(root, "pages", "01_page.page");
+    const page = JSON.parse(fs.readFileSync(pagePath, "utf8"));
+    page.elements[0].content.text = "After disk edit";
+    fs.writeFileSync(pagePath, `${JSON.stringify(page)}\n`);
+
+    const loaded = await model(base, root);
+    assert.match(JSON.stringify(loaded.model.elements), /After disk edit/);
   });
 
   it("serves media from the requested project, not the last opened one", async () => {

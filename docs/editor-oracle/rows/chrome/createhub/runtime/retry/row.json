@@ -1,0 +1,33 @@
+{
+  "id": "chrome.createhub.runtime.retry",
+  "version": 1,
+  "status": "implemented",
+  "surface": "chrome.global",
+  "title": "Retry or recheck the browser rendering runtime",
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "selection": { "kind": "none" },
+    "notes": "Create Hub has an unavailable renderer; no document is mutated."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["Open Create Hub", "Click Retry browser setup", "Observe installing, ready or actionable failure state"]
+  },
+  "evidence": {
+    "screenshots": { "before": "", "after": "" },
+    "pptd": { "summary": "No document change; installation only affects the managed browser runtime." },
+    "network": "POST /slides/runtime starts one setup attempt; GET /slides/runtime observes readiness."
+  },
+  "expectedNative": { "mustChangeDocument": false, "commandHint": "runtimePanel.refresh(true)" },
+  "test": {
+    "id": "EO-RUNTIME-001",
+    "automated": true,
+    "selfTestChecklist": [
+      "browser-runtime-panel.spec.mjs: retry posts once",
+      "Readiness callback refreshes capability state",
+      "Failures stay retryable and render diagnostics as text"
+    ]
+  },
+  "oracle": { "source": "derived" },
+  "updatedAt": "2026-10-19T00:00:00.000Z"
+}

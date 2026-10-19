@@ -20,9 +20,7 @@ function inside(parent, child) {
  * legacy row then fails the sequence check below instead of decoding silently.
  */
 export function decodeJournalContent(content, decodeStorageRecord) {
-  const decodeRecord = typeof decodeStorageRecord === "function"
-    ? decodeStorageRecord
-    : (record) => [record];
+  const decodeRecord = typeof decodeStorageRecord === "function" ? decodeStorageRecord : (record) => [record];
   const lines = content.split("\n");
   if (!lines[0]?.trim()) throw new Error("session journal has no header");
   const events = [];
@@ -96,7 +94,8 @@ async function readerFor(sessionsRoot) {
     new session.SessionStore(ctx);
     // DSH renamed the export: JsonlSessionPersistence is the package default now
     // (the named export it used to be is gone since 0.1.5-rc.2).
-    const JsonlSessionPersistence = persistence.JsonlSessionPersistence ?? persistence.default;
+    const JsonlSessionPersistence =
+      Reflect.get(persistence, "JsonlSessionPersistence") ?? Reflect.get(persistence, "default");
     if (typeof JsonlSessionPersistence !== "function") {
       throw new Error("session journal backend is unavailable in this DSH build");
     }
@@ -109,7 +108,7 @@ async function readerFor(sessionsRoot) {
       SessionId: session.SessionId,
       // Absent on DSH >= 0.1.5-rc.2; decodeJournalContent falls back to a
       // passthrough decoder for those journals.
-      decodeStorageRecord: session.decodeStorageRecord,
+      decodeStorageRecord: Reflect.get(session, "decodeStorageRecord"),
     };
   })();
   readers.set(sessionsRoot, pending);
@@ -152,9 +151,9 @@ export async function readProjectSessionTrace({
     if (!stored) return cached?.rows ?? [];
     if (cached?.revision === stored.revision) return cached.rows;
 
-    const trace = traceModule ?? await import(
-      `${pathToFileURL(path.join(root, "packages", "dsh-slides-host", "dist", "agent-trace.js")).href}`
-    );
+    const trace =
+      traceModule ??
+      (await import(`${pathToFileURL(path.join(root, "packages", "dsh-slides-host", "dist", "agent-trace.js")).href}`));
     const rows = stored.events.flatMap((event) => trace.traceRowsFromSessionEvent(event));
     projected.set(cacheKey, { revision: stored.revision, rows });
     return rows;
