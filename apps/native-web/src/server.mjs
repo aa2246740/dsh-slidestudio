@@ -23,10 +23,12 @@ import { buildPdfFromPngs } from "./png-pdf.mjs";
 import { AttachmentStore, parseAttachmentBuffer, attachmentPublic, decodeAttachmentUpload as decodeDataUrl } from "./attachments.mjs";
 import { diagnostics } from "./logger.mjs";
 import { loadRootEnv } from "../../../scripts/lib/root-env.mjs";
+import { loadFeatureFlags } from "../../../scripts/lib/feature-flags.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../../..");
 loadRootEnv(ROOT);
+const FLAGS = loadFeatureFlags(ROOT);
 const DATA_ROOT = path.resolve(process.env.SLIDESTUDIO_DATA_DIR || ROOT);
 
 // Runtime packages must resolve to ONE copy each: bare `@open-slidestudio/*`
@@ -2271,9 +2273,12 @@ const RETENTION_DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** Days to keep generated projects without modification. 0 disables. Default 0: keep user work until explicitly removed. */
-function retentionDaysFromEnv(env = process.env) {
-  const raw = String(env.SLIDESTUDIO_RETENTION_DAYS ?? "0").trim();
-  if (raw === "") return 0;
+function retentionDaysFromEnv(env = process.env, flags = FLAGS) {
+  const raw = String(env.SLIDESTUDIO_RETENTION_DAYS ?? "").trim();
+  if (raw === "") {
+    const flagged = Number(flags.get("project_retention_days"));
+    return Number.isFinite(flagged) && flagged > 0 ? flagged : 0;
+  }
   const days = Number(raw);
   if (!Number.isFinite(days) || days < 0) {
     throw new Error("SLIDESTUDIO_RETENTION_DAYS must be a non-negative number of days");
@@ -2470,6 +2475,7 @@ function harnessResearchConfig() {
 
 /** Image generate is optional. LLM chat URL alone is not a generate API. */
 function harnessImageConfigured() {
+  if (FLAGS.get("image_generate") === false) return false;
   if (process.env.SLIDESTUDIO_IMAGE === "0") return false;
   if (process.env.SLIDESTUDIO_IMAGE_BASE_URL?.trim()) return true;
   return process.env.SLIDESTUDIO_IMAGE === "1" && Boolean(process.env.SLIDESTUDIO_LLM_BASE_URL?.trim());

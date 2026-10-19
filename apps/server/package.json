@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch src/index.mjs",
     "start": "node src/index.mjs",
+    "typecheck": "node ../../scripts/quality/check-types.mjs --app server",
     "test": "vitest run --config ../../vitest.config.mjs --project server",
     "test:list": "vitest list --config ../../vitest.config.mjs --project server"
   },

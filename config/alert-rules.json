@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "id": "security-ratchet",
+      "handler": "ops-sentinel.mjs",
+      "notifier": "github-issues",
+      "check": "quality:security",
+      "description": "Dependency advisory and secret-hygiene gate; also fires when the security baseline expires."
+    },
+    {
+      "id": "baseline-freshness",
+      "handler": "ops-sentinel.mjs",
+      "notifier": "github-issues",
+      "check": "baseline-expiry",
+      "description": "Flags quality baselines whose recorded review window has expired or ends within 7 days."
+    },
+    {
+      "id": "readiness-quality-failure",
+      "handler": "ops-sentinel.mjs",
+      "notifier": "github-issues",
+      "check": "workflow_run",
+      "description": "Fires when the Readiness quality workflow completes with a failure conclusion on main."
+    }
+  ]
+}

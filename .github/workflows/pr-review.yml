@@ -1,0 +1,79 @@
+name: PR review digest
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate review digest comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo, number } = context.issue;
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner, repo, pull_number: number, per_page: 100,
+            });
+            const groups = { native: [], legacy: [], plugin: [], tooling: [], docs: [], config: [], other: [] };
+            for (const f of files) {
+              const p = f.filename;
+              if (p.startsWith('packages/pptd-v2/') || p.startsWith('packages/project-store/') ||
+                  p.startsWith('packages/exporter-native/') || p.startsWith('packages/canvas-session/') ||
+                  p.startsWith('packages/presentation-run/') || p.startsWith('packages/agent-harness/') ||
+                  p.startsWith('packages/dsh-slides-') || p.startsWith('apps/native-web/')) groups.native.push(p);
+              else if (p.startsWith('dsh-slidestudio/')) groups.plugin.push(p);
+              else if (p.startsWith('apps/web/') || p.startsWith('apps/server/') ||
+                       p.startsWith('packages/pptd/') || p.startsWith('packages/agent-core/') ||
+                       p.startsWith('packages/exporter-pptx/') || p.startsWith('packages/design-brain/')) groups.legacy.push(p);
+              else if (p.startsWith('config/') || p.startsWith('.github/')) groups.config.push(p);
+              else if (p.startsWith('scripts/')) groups.tooling.push(p);
+              else if (/\.(md|mdx)$/.test(p) || p.startsWith('docs/')) groups.docs.push(p);
+              else groups.other.push(p);
+            }
+            const risk = [];
+            if (files.some(f => /^config\/.*-baseline\.json$/.test(f.filename)))
+              risk.push('quality baselines changed — the PR body must explain existing debt per `.github/PULL_REQUEST_TEMPLATE.md`');
+            if (files.some(f => f.filename.includes('pnpm-lock.yaml') || f.filename === 'package-lock.json'))
+              risk.push('lockfile changed — expect Dependabot cooldown / release-age policy to apply');
+            if (files.some(f => /^\.github\/workflows\//.test(f.filename)))
+              risk.push('workflow change — confirm gates still run on PRs');
+            if (groups.native.length && groups.legacy.length)
+              risk.push('native and legacy surfaces both touched — keep PPTD v2 as disk SSOT');
+            const rows = Object.entries(groups)
+              .filter(([, v]) => v.length)
+              .map(([k, v]) => `| ${k} | ${v.length} |`)
+              .join('\n');
+            const body = [
+              '<!-- pr-review-digest -->',
+              '### Automated review digest',
+              '',
+              `Files changed: ${files.length}`,
+              '',
+              '| Surface | Files |',
+              '| --- | --- |',
+              rows,
+              '',
+              'Required gates for this change: `quality` (lint, source/debt/drift/duplication ratchets, secrets, coverage), `bundle-budget`, plus `native`/`legacy`/`smoke-legacy`/`gate1-legacy` on the product CI workflow.',
+              '',
+              risk.length ? `**Reviewer flags**\n${risk.map(r => `- ${r}`).join('\n')}` : 'No structural flags raised.',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            const existing = comments.find(c => c.user.login === 'github-actions[bot]' && c.body.includes('<!-- pr-review-digest -->'));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            }

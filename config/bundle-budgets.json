@@ -1,4 +1,6 @@
 {
   "apps/web/dist/assets": { "gzipBytes": 400000 },
-  "dsh-slidestudio/lib": { "gzipBytes": 30000, "topLevelOnly": true }
+  "dsh-slidestudio/lib": { "gzipBytes": 30000, "topLevelOnly": true },
+  "apps/native-web/public": { "gzipBytes": 350000 },
+  "apps/server/src": { "gzipBytes": 12000 }
 }

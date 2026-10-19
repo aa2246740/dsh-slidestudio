@@ -1,0 +1,38 @@
+name: Ops sentinel
+
+# Scheduled and event-driven alerting: evaluates config/alert-rules.json through
+# scripts/quality/ops-sentinel.mjs and delivers failures as GitHub issues.
+
+on:
+  schedule:
+    - cron: "17 2 * * 1" # weekly Monday 02:17 UTC
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Readiness quality"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sentinel:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Evaluate alert rules and notify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTINEL_WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SENTINEL_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+        run: node scripts/quality/ops-sentinel.mjs

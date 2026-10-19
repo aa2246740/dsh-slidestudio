@@ -304,4 +304,22 @@ export const apiContracts = {
       },
     },
   },
+  web: {
+    title: "Legacy web SPA static surface",
+    port: 5173,
+    source: "apps/web/public/health.json",
+    paths: {
+      "/health.json": {
+        get: operation(
+          "webHealth",
+          "Static health probe served by the vite dev server",
+          object({ status: { type: "string", enum: ["ok"] }, app: string, version: string }, [
+            "status",
+            "app",
+            "version",
+          ]),
+        ),
+      },
+    },
+  },
 };
