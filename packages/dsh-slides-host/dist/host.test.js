@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createServer, request } from "node:http";
 import { inspectCapabilities, inspectProjectCapabilities, persistPresentationRunProvider, hostedProduceToolNames, } from "@open-slidestudio/presentation-run";
 import { decideWritePage, normalizeWritePageArgs } from "./write-page.js";
 import { aiReviewPageVersionConflict, autoRenderWriteOutcome, formatWritePageOutcome, produceToolAllowlist, readPageFromProject, sessionProduceCapabilities, sliceToolGuard, } from "./tools.js";
@@ -21,7 +22,7 @@ import { inspectHubProduceGates, assertHubProduceGatesReady, emptyWriteIsRejecte
 import { editorReviewScopesFromEdit, turnTextWithReviewScope, } from "./routes.js";
 import { bindHomeKeys, connectionState, deleteHomeKey, saveHomeKey, slidesProviderHasModel, slidesProviders, hostedProviders, } from "./providers.js";
 import { routeHasNativeSearch } from "./oauth-login.js";
-import { PRODUCT_HOME, redirectRootToProductHome, shouldProxyToEditor } from "./product-proxy.js";
+import { PRODUCT_HOME, proxyToEditor, redirectRootToProductHome, shouldProxyToEditor } from "./product-proxy.js";
 import { deckTitleFromBrief, displayDeckTitle, pickCoverRevision, pickRasterFile, pickRequestedRasterFile, SliceSessionStore, slugTitle, } from "./slice-session.js";
 import { SLICE_TOOL_NAMES } from "./protocol.js";
 import { readConversation, recordConversationMessage } from "./assistant-conversation.js";
@@ -1499,12 +1500,115 @@ describe("product home", () => {
     });
 });
 describe("product proxy", () => {
+    async function listen(server) {
+        await new Promise((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", () => {
+                server.off("error", reject);
+                resolve();
+            });
+        });
+        const address = server.address();
+        if (!address || typeof address === "string")
+            throw new Error("Expected a loopback TCP listener");
+        return `http://127.0.0.1:${address.port}`;
+    }
+    async function close(server) {
+        if (!server.listening)
+            return;
+        await new Promise((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+        });
+    }
+    function post(frontOrigin, headers) {
+        return new Promise((resolve, reject) => {
+            const outgoing = request(`${frontOrigin}/app/api/open`, { method: "POST", headers }, (response) => {
+                let body = "";
+                response.setEncoding("utf8");
+                response.on("data", (chunk) => {
+                    body += chunk;
+                });
+                response.on("end", () => resolve({ statusCode: response.statusCode, body }));
+            });
+            outgoing.on("error", reject);
+            outgoing.end();
+        });
+    }
+    async function withProxyServers(verify) {
+        const requests = [];
+        const upstream = createServer((req, res) => {
+            requests.push({
+                method: req.method,
+                path: req.url,
+                host: req.headers.host,
+                origin: req.headers.origin,
+            });
+            res.writeHead(202, { "content-type": "text/plain" });
+            res.end("upstream response");
+        });
+        const upstreamOrigin = await listen(upstream);
+        const front = createServer((req, res) => proxyToEditor(req, res, upstreamOrigin));
+        try {
+            const frontOrigin = await listen(front);
+            await verify({ frontOrigin, upstreamOrigin, requests });
+        }
+        finally {
+            await close(front);
+            await close(upstream);
+        }
+    }
     it("does not proxy generate or Pi routes to the editor sidecar", () => {
         assert.equal(shouldProxyToEditor("/api/generate"), false);
         assert.equal(shouldProxyToEditor("/api/pi/auth"), false);
         assert.equal(shouldProxyToEditor("/app/hub.html"), true);
         assert.equal(shouldProxyToEditor("/app/api/export"), true);
         assert.equal(shouldProxyToEditor("/api/export"), true);
+    });
+    it("rewrites same-origin mutations to the editor origin and preserves the upstream response", async () => {
+        await withProxyServers(async ({ frontOrigin, upstreamOrigin, requests }) => {
+            const response = await post(frontOrigin, {
+                host: new URL(frontOrigin).host,
+                origin: frontOrigin,
+                "sec-fetch-site": "same-origin",
+            });
+            assert.equal(response.statusCode, 202);
+            assert.equal(response.body, "upstream response");
+            assert.deepEqual(requests, [
+                {
+                    method: "POST",
+                    path: "/api/open",
+                    host: new URL(upstreamOrigin).host,
+                    origin: upstreamOrigin,
+                },
+            ]);
+        });
+    });
+    it("rejects mutations from a different Origin without contacting the editor", async () => {
+        await withProxyServers(async ({ frontOrigin, requests }) => {
+            const frontUrl = new URL(frontOrigin);
+            const frontPort = Number(frontUrl.port);
+            const otherPort = frontPort === 65535 ? frontPort - 1 : frontPort + 1;
+            const response = await post(frontOrigin, {
+                host: frontUrl.host,
+                origin: `${frontUrl.protocol}//${frontUrl.hostname}:${otherPort}`,
+                "sec-fetch-site": "same-origin",
+            });
+            assert.equal(response.statusCode, 403);
+            assert.equal(response.body, JSON.stringify({ error: "cross-site mutation rejected" }));
+            assert.equal(requests.length, 0);
+        });
+    });
+    it("rejects cross-site fetch mutations without contacting the editor", async () => {
+        await withProxyServers(async ({ frontOrigin, requests }) => {
+            const response = await post(frontOrigin, {
+                host: new URL(frontOrigin).host,
+                origin: frontOrigin,
+                "sec-fetch-site": "cross-site",
+            });
+            assert.equal(response.statusCode, 403);
+            assert.equal(response.body, JSON.stringify({ error: "cross-site mutation rejected" }));
+            assert.equal(requests.length, 0);
+        });
     });
 });
 describe("editor Agent batch review scope", () => {
