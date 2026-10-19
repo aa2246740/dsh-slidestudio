@@ -5,6 +5,7 @@
  * Hub generate must not depend on a Codex homedir that may be missing on the box.
  */
 import { execFile } from "node:child_process";
+import { npmInvocation } from "./lib/npm-command.mjs";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -169,8 +170,8 @@ async function npmInstall() {
     )}\n`,
   );
   const npmArgs = ["install", "--prefix", runtimeRoot, "--ignore-scripts", "--no-audit", "--no-fund"];
-  const npmExecPath = process.env.npm_execpath;
-  await execFileAsync(npmExecPath ? process.execPath : "npm", npmExecPath ? [npmExecPath, ...npmArgs] : npmArgs, {
+  const npm = npmInvocation(npmArgs);
+  await execFileAsync(npm.command, npm.args, {
     cwd: ROOT,
     env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" },
     maxBuffer: 10 * 1024 * 1024,

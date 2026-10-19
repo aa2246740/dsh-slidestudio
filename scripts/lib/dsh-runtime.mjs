@@ -19,10 +19,7 @@ export const EDITOR_ORIGIN = `http://127.0.0.1:${EDITOR_PORT}`;
 function nodeHasZstd(bin) {
   const probe = spawnSync(
     bin,
-    [
-      "-e",
-      "import('node:zlib').then((z) => { process.exit(typeof z.createZstdDecompress === 'function' ? 0 : 2); })",
-    ],
+    ["-e", "import('node:zlib').then((z) => { process.exit(typeof z.createZstdDecompress === 'function' ? 0 : 2); })"],
     { stdio: "ignore" },
   );
   return probe.status === 0;
@@ -34,18 +31,14 @@ export function zstdNodeBinDir() {
   }
   const nvmRoot = path.join(os.homedir(), ".nvm", "versions", "node");
   if (fs.existsSync(nvmRoot)) {
-    const versions = fs
-      .readdirSync(nvmRoot)
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    const versions = fs.readdirSync(nvmRoot).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
     for (const version of versions) {
       const dir = path.join(nvmRoot, version, "bin");
       const bin = path.join(dir, "node");
       if (fs.existsSync(bin) && nodeHasZstd(bin)) return dir;
     }
   }
-  throw new Error(
-    `DSH rc.2 needs Node >= 22.19.0 (zlib createZstdDecompress). Current process is ${process.version}.`,
-  );
+  throw new Error(`DSH rc.2 needs Node >= 22.19.0 (zlib createZstdDecompress). Current process is ${process.version}.`);
 }
 
 function firstNonempty(values) {
@@ -56,11 +49,7 @@ function firstNonempty(values) {
 }
 
 function bindMinimaxKeysForChild(env) {
-  const value = firstNonempty([
-    env.MINIMAX_CN_API_KEY,
-    env.MINIMAXCN_API_KEY,
-    env.MINIMAX_API_KEY,
-  ]);
+  const value = firstNonempty([env.MINIMAX_CN_API_KEY, env.MINIMAXCN_API_KEY, env.MINIMAX_API_KEY]);
   if (value) {
     env.MINIMAX_CN_API_KEY = value;
     env.MINIMAXCN_API_KEY = value;
@@ -74,20 +63,33 @@ export function dshEnv(extra = {}) {
   return bindMinimaxKeysForChild({
     ...process.env,
     ...extra,
-    OPEN_SLIDESTUDIO_ROOT:
-      extra.OPEN_SLIDESTUDIO_ROOT ?? process.env.OPEN_SLIDESTUDIO_ROOT ?? process.cwd(),
+    OPEN_SLIDESTUDIO_ROOT: extra.OPEN_SLIDESTUDIO_ROOT ?? process.env.OPEN_SLIDESTUDIO_ROOT ?? process.cwd(),
     PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
   });
 }
 
+/** `node_modules/.bin/dsh` is a shell shim Windows cannot spawn; run the package entry with the current Node instead. */
+export function dshCommand(dsh, args) {
+  const entry = path.join(path.dirname(dsh), "..", "@deepseek-ai", "dsh", "lib", "bin.js");
+  return fs.existsSync(entry) ? { command: process.execPath, args: [entry, ...args] } : { command: dsh, args };
+}
+
+/** DSH's launcher starts only when `import.meta.main` exists (Node 22.18+ / 24.2+; this repo requires 22.19+ / 24.11+); older Node exits 0 silently. */
+export function assertDshNodeRuntime() {
+  if (typeof import.meta.main === "boolean") return;
+  throw new Error(
+    `Node ${process.versions.node} cannot start DSH (import.meta.main is missing). Install Node 22.19+ or 24.11+ and retry.`,
+  );
+}
+
 export function spawnSlidesDsh(opts) {
+  assertDshNodeRuntime();
   ensureSlidesProfileCurrent(opts.cwd, opts.home);
   if (DSH_PORT === 3080) {
-    throw new Error(
-      "SLIDES_DSH_PORT=3080 collides with DSH.app's default port. Use 13080 (product default).",
-    );
+    throw new Error("SLIDES_DSH_PORT=3080 collides with DSH.app's default port. Use 13080 (product default).");
   }
-  const child = spawn(opts.dsh, ["--profile", "slides", "--port", String(DSH_PORT), "--no-open"], {
+  const dsh = dshCommand(opts.dsh, ["--profile", "slides", "--port", String(DSH_PORT), "--no-open"]);
+  const child = spawn(dsh.command, dsh.args, {
     cwd: opts.cwd,
     env: dshEnv({
       DSH_HOME: opts.home,
@@ -161,9 +163,7 @@ export async function waitHttpOk(url, timeoutMs, label, childState) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (childState?.exited) {
-      throw new Error(
-        `${label} exited before ${url} (code=${childState.code} signal=${childState.signal})`,
-      );
+      throw new Error(`${label} exited before ${url} (code=${childState.code} signal=${childState.signal})`);
     }
     try {
       const res = await fetch(url);

@@ -189,7 +189,7 @@ async function scenario({
   await page.route(
     "**/api/reviews/ai-lock/status**",
     /** @param {RecoveryRoute} route */ async (route) => {
-      statusCalls += 1;
+      const statusCall = ++statusCalls;
       const url = new URL(route.request().url());
       assert.equal(url.searchParams.get("project"), project);
       assert.equal(url.searchParams.get("token"), token);
@@ -208,13 +208,13 @@ async function scenario({
       } else {
         await route.fulfill({ json: guard });
       }
-      if (statusCalls === 1) resolveStatusSeen();
+      if (statusCall === 1) resolveStatusSeen();
     },
   );
   await page.route(
     "**/slides/state/recovery-session",
     /** @param {RecoveryRoute} route */ async (route) => {
-      stateCalls += 1;
+      const stateCall = ++stateCalls;
       if (agentStatus === "missing") {
         await route.fulfill({
           status: 404,
@@ -224,7 +224,7 @@ async function scenario({
       } else {
         await route.fulfill({ json: { agentStatus } });
       }
-      if (stateCalls === 2) resolveTwoStateCalls();
+      if (stateCall === 2) resolveTwoStateCalls();
     },
   );
   await page.route("**/slides/sessions/**/events", /** @param {RecoveryRoute} route */ (route) => route.abort());

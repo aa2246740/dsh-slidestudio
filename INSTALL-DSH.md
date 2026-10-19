@@ -14,7 +14,7 @@ dsh plugin --profile web add dsh-slidestudio
 
 预编译包通过 `dsh.bundle.patch` 激活服务端和客户端，无需安装时构建，也不要再手动添加重复 patch。约定来自官方[发布指南](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.zh.md)与[插件管理器](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-plugin-manager/README.zh.md)。
 
-要求 Node.js `^22.19.0 || >=24.0.0`、DSH `>=0.2.0-rc.2 <0.3.0-0`。Personal 可选；使用时需 `>=0.2.8 <0.3.0`。安装 Personal 后从其侧栏进入；未安装时从主导航进入。
+要求 Node.js `^22.19.0 || >=24.11.0`、DSH `>=0.2.0-rc.2 <0.3.0-0`。Personal 可选；使用时需 `>=0.2.8 <0.3.0`。安装 Personal 后从其侧栏进入；未安装时从主导航进入。
 
 ## 渲染运行时
 

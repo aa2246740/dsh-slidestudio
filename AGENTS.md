@@ -6,7 +6,7 @@ Build a real product, not a pixel-clone of Kimi branding. Reuse **interaction pa
 
 ## Setup and development
 
-Run commands from the repository root with Node.js `^22.19.0 || >=24.0.0` and npm.
+Run commands from the repository root with Node.js `^22.19.0 || >=24.11.0` and npm.
 
 ```sh
 npm run setup:dev

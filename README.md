@@ -56,7 +56,7 @@ dsh plugin --profile web add dsh-slidestudio
 
 ## 源码开发
 
-要求 Node.js `^22.19.0 || >=24.0.0` 和 npm。在克隆后的仓库根目录运行：
+要求 Node.js `^22.19.0 || >=24.11.0` 和 npm。在克隆后的仓库根目录运行：
 
 ```sh
 npm run setup:dev
