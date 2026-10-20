@@ -1,44 +1,31 @@
+import { REPO_ROOT, coverPage, invokeSlides } from "./host-test-fixtures.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
-import { inspectCapabilities, inspectProjectCapabilities, persistPresentationRunProvider, hostedProduceToolNames } from "@open-slidestudio/presentation-run";
+import { createServer, request } from "node:http";
+import { inspectCapabilities, inspectProjectCapabilities, persistPresentationRunProvider, hostedProduceToolNames, } from "@open-slidestudio/presentation-run";
 import { decideWritePage, normalizeWritePageArgs } from "./write-page.js";
-import { aiReviewPageVersionConflict, autoRenderWriteOutcome, formatWritePageOutcome, produceToolAllowlist, readPageFromProject, sessionProduceCapabilities, sliceToolGuard } from "./tools.js";
+import { aiReviewPageVersionConflict, autoRenderWriteOutcome, formatWritePageOutcome, produceToolAllowlist, readPageFromProject, sessionProduceCapabilities, sliceToolGuard, } from "./tools.js";
 import { acquireProjectLease, readProjectLease } from "./lease.js";
 import { writeSliceRuntime, readSliceRuntimeFile, briefForOpenProject } from "./runtime.js";
-import { DROPPED_CHART_DETAIL, initializeRunLedger, parseSkillPage, PRODUCE_GATE_REL_FILES, packColorWriteContextFrom, stableSha256 } from "@open-slidestudio/presentation-run";
+import { DROPPED_CHART_DETAIL, initializeRunLedger, parseSkillPage, PRODUCE_GATE_REL_FILES, packColorWriteContextFrom, stableSha256, } from "@open-slidestudio/presentation-run";
 import { loadProject, saveProject, normalizeWritePageDialect } from "@open-slidestudio/pptd-v2";
+import { addPlaywrightRuntimeLayout } from "./runtime-test-fixture.js";
 import { commandHash, lookupToolReceipt, recordToolReceipt } from "./receipts.js";
 import { coerceSlidePlan, resolveSlidesLlmRoute, assertMinimaxCnGenerateReady, assertSlidesGenerateReady, bindMinimaxCnKey, markOpenRouterHardFailed, resetGenerateRouteState, OPENROUTER_MINIMAX_FREE_MODEL, } from "./args.js";
 import { classifyAgentError, friendlyProviderCause, isHardProviderFault, isMinimaxCnFailoverFault, isMinimaxTokenPlanExhausted, isOpenRouterFailoverFault, isWaitAndResumeFault, parseRetryAfterMs, rateLimitWaitMs, RATE_LIMIT_BACKOFF_CAP_MS, RATE_LIMIT_BACKOFF_MS, recordAgentError, writeRateLimitWait, } from "./agent-fault.js";
 import { RateLimitResumeController } from "./rate-limit-resume.js";
 import { pagesHintForBrief, directorBrief } from "./director-brief.js";
 import { inspectHubProduceGates, assertHubProduceGatesReady, emptyWriteIsRejectedByLoadedHost, emptyCreateHasNoSeedFromLoadedPptd, StaleProduceGatesError, } from "./produce-gates.js";
-import { handleSlidesRequest, editorReviewScopeFromEdit, editorReviewScopesFromEdit, resolveEditorAttachments, turnTextWithAttachments, turnTextWithReviewScope, } from "./routes.js";
-import { bindHomeKeys, connectionState, deleteHomeKey, saveHomeKey, assertNoSecretLeak, slidesProviderHasModel, slidesProviders, hostedProviders, } from "./providers.js";
+import { editorReviewScopesFromEdit, turnTextWithReviewScope, } from "./routes.js";
+import { bindHomeKeys, connectionState, deleteHomeKey, saveHomeKey, slidesProviderHasModel, slidesProviders, hostedProviders, } from "./providers.js";
 import { routeHasNativeSearch } from "./oauth-login.js";
-import { PRODUCT_HOME, redirectRootToProductHome, shouldProxyToEditor } from "./product-proxy.js";
+import { PRODUCT_HOME, proxyToEditor, redirectRootToProductHome, shouldProxyToEditor } from "./product-proxy.js";
 import { deckTitleFromBrief, displayDeckTitle, pickCoverRevision, pickRasterFile, pickRequestedRasterFile, SliceSessionStore, slugTitle, } from "./slice-session.js";
 import { SLICE_TOOL_NAMES } from "./protocol.js";
 import { readConversation, recordConversationMessage } from "./assistant-conversation.js";
-const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../..");
-const coverPage = {
-    id: "cover",
-    pageType: "cover",
-    elements: [
-        {
-            elementId: "title",
-            elementType: "text",
-            bounds: [80, 200, 800, 80],
-            content: { text: "光合作用", fontSize: 36 },
-        },
-    ],
-};
 describe("read_page", () => {
     it("returns the complete persisted page body as a write_page baseline without changing it", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "read-page-"));
@@ -98,7 +85,14 @@ describe("read_page", () => {
         fs.writeFileSync(path.join(root, "deck.pptd"), JSON.stringify({ version: "v2", title: "Locked read", size: [960, 540], pages: ["pages/03_kpi.page"] }));
         const page = {
             pageType: "content",
-            elements: [{ elementId: "title", elementType: "text", bounds: [60, 60, 800, 60], content: { text: "人工更新", fontSize: 30 } }],
+            elements: [
+                {
+                    elementId: "title",
+                    elementType: "text",
+                    bounds: [60, 60, 800, 60],
+                    content: { text: "人工更新", fontSize: 30 },
+                },
+            ],
         };
         fs.writeFileSync(path.join(root, "pages", "03_kpi.page"), JSON.stringify(page));
         fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
@@ -195,6 +189,7 @@ describe("Grok produce tool allowlist", () => {
         fs.writeFileSync(runtime, `export function verifyPinnedRuntime() { return true; }
 export async function launchPinnedChromium() { throw new Error("stub"); }
 `);
+        addPlaywrightRuntimeLayout(runtime);
         const prevEditor = process.env.SLIDESTUDIO_EDITOR_URL;
         const prevPw = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
         process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";
@@ -659,8 +654,21 @@ describe("write_page MiniMax dialect", () => {
                     elementId: "birth-chart",
                     elementType: "chart",
                     bounds: [60, 252, 560, 230],
-                    data: { cols: ["年份", "累计产量"], rows: [[1925, 1], [1935, 80]] },
-                    series: [{ type: "bar", encode: { x: "年份", y: "累计产量" }, fill: { $text: "#52DA92" }, dataLabels: { show: "true" } }],
+                    data: {
+                        cols: ["年份", "累计产量"],
+                        rows: [
+                            [1925, 1],
+                            [1935, 80],
+                        ],
+                    },
+                    series: [
+                        {
+                            type: "bar",
+                            encode: { x: "年份", y: "累计产量" },
+                            fill: { $text: "#52DA92" },
+                            dataLabels: { show: "true" },
+                        },
+                    ],
                     title: { $text: "徕卡 I 累计产量增长（千台）" },
                     legend: { $text: "false" },
                     dataLabels: { show: "true" },
@@ -1127,7 +1135,10 @@ describe("minimax-cn generate route", () => {
             provider: "minimax-cn",
             model: "MiniMax-M3",
         });
-        assert.deepEqual(resolveSlidesLlmRoute({ SLIDESTUDIO_GEMINI_MODEL: "gemini-3.5-flash-lite" }), { provider: "minimax-cn", model: "MiniMax-M3" });
+        assert.deepEqual(resolveSlidesLlmRoute({ SLIDESTUDIO_GEMINI_MODEL: "gemini-3.5-flash-lite" }), {
+            provider: "minimax-cn",
+            model: "MiniMax-M3",
+        });
         assert.deepEqual(resolveSlidesLlmRoute({ SLIDESTUDIO_LLM_MODEL: "MiniMax-M2.7" }), {
             provider: "minimax-cn",
             model: "MiniMax-M2.7",
@@ -1137,7 +1148,10 @@ describe("minimax-cn generate route", () => {
             SLIDESTUDIO_LLM_MODEL: "DeepSeek-V4-Flash",
             AMD_API_KEY: "sk-test-amd",
         }), { provider: "amd", model: "DeepSeek-V4-Flash" });
-        assert.deepEqual(assertMinimaxCnGenerateReady({ MINIMAX_API_KEY: "test-not-a-live-key" }), { provider: "minimax-cn", model: "MiniMax-M3" });
+        assert.deepEqual(assertMinimaxCnGenerateReady({ MINIMAX_API_KEY: "test-not-a-live-key" }), {
+            provider: "minimax-cn",
+            model: "MiniMax-M3",
+        });
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "route-roster-"));
         assert.equal(slidesProviderHasModel(home, "minimax-cn", "MiniMax-M3"), true);
         assert.equal(slidesProviderHasModel(home, "minimax-cn", "unknown-model"), false);
@@ -1262,41 +1276,6 @@ describe("minimax-cn generate route", () => {
         resetGenerateRouteState();
         assert.equal(assertMinimaxCnGenerateReady(env).provider, "minimax-cn");
         resetGenerateRouteState();
-    });
-});
-describe("BYOK minimax-cn", () => {
-    it("stores the key in DSH home with 0600 and never echoes it", () => {
-        resetGenerateRouteState();
-        const prevCn = process.env.MINIMAX_CN_API_KEY;
-        const prevCloud = process.env.MINIMAXCN_API_KEY;
-        const prevAlias = process.env.MINIMAX_API_KEY;
-        const home = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-home-"));
-        try {
-            saveHomeKey(home, "minimax-cn", "sk-test-not-for-git");
-            const file = path.join(home, "credentials", "minimax-cn.key");
-            assert.equal(fs.existsSync(file), true);
-            const mode = fs.statSync(file).mode & 0o777;
-            assert.equal(mode, 0o600);
-            const state = connectionState(home, {});
-            assert.equal(state.ready, true);
-            assert.equal(state.source, "dsh-home");
-            assert.doesNotMatch(JSON.stringify(state), /sk-test-not-for-git/);
-            assert.throws(() => assertNoSecretLeak("leak sk-test-not-for-git", ["sk-test-not-for-git"]), /secret leak/);
-        }
-        finally {
-            if (prevCn === undefined)
-                delete process.env.MINIMAX_CN_API_KEY;
-            else
-                process.env.MINIMAX_CN_API_KEY = prevCn;
-            if (prevCloud === undefined)
-                delete process.env.MINIMAXCN_API_KEY;
-            else
-                process.env.MINIMAXCN_API_KEY = prevCloud;
-            if (prevAlias === undefined)
-                delete process.env.MINIMAX_API_KEY;
-            else
-                process.env.MINIMAX_API_KEY = prevAlias;
-        }
     });
 });
 describe("multi-provider API keys", () => {
@@ -1441,12 +1420,20 @@ describe("native-first search routes", () => {
             defaultModel: "grok-4.6",
             providers: [
                 { id: "pi-xai", name: "Grok (xAI)", apiKeyEnv: "TEST_NO_XAI_KEY", models: ["grok-4.6"], ready: false },
-                { id: "minimax-cn", name: "MiniMax 中国", apiKeyEnv: "MINIMAX_CN_API_KEY", models: ["MiniMax-M3"], ready: false },
+                {
+                    id: "minimax-cn",
+                    name: "MiniMax 中国",
+                    apiKeyEnv: "MINIMAX_CN_API_KEY",
+                    models: ["MiniMax-M3"],
+                    ready: false,
+                },
             ],
         }));
         fs.writeFileSync(path.join(home, ".dsh-oauth-auth.json"), JSON.stringify({
             version: 1,
-            credentials: { xai: { type: "oauth", access: "test-access", refresh: "test-refresh", expires: Date.now() + 60_000 } },
+            credentials: {
+                xai: { type: "oauth", access: "test-access", refresh: "test-refresh", expires: Date.now() + 60_000 },
+            },
         }));
         const rows = slidesProviders(home);
         assert.equal(rows.filter((row) => row.id === "pi-xai").length, 1);
@@ -1464,7 +1451,12 @@ describe("native-first search routes", () => {
 });
 describe("product home", () => {
     function capture(method, url) {
-        const sent = { status: 0, headers: {}, body: "", headersSent: false };
+        const sent = {
+            status: 0,
+            headers: {},
+            body: "",
+            headersSent: false,
+        };
         const req = { method, url };
         const res = {
             get headersSent() {
@@ -1508,6 +1500,63 @@ describe("product home", () => {
     });
 });
 describe("product proxy", () => {
+    async function listen(server) {
+        await new Promise((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", () => {
+                server.off("error", reject);
+                resolve();
+            });
+        });
+        const address = server.address();
+        if (!address || typeof address === "string")
+            throw new Error("Expected a loopback TCP listener");
+        return `http://127.0.0.1:${address.port}`;
+    }
+    async function close(server) {
+        if (!server.listening)
+            return;
+        await new Promise((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+        });
+    }
+    function post(frontOrigin, headers) {
+        return new Promise((resolve, reject) => {
+            const outgoing = request(`${frontOrigin}/app/api/open`, { method: "POST", headers }, (response) => {
+                let body = "";
+                response.setEncoding("utf8");
+                response.on("data", (chunk) => {
+                    body += chunk;
+                });
+                response.on("end", () => resolve({ statusCode: response.statusCode, body }));
+            });
+            outgoing.on("error", reject);
+            outgoing.end();
+        });
+    }
+    async function withProxyServers(verify) {
+        const requests = [];
+        const upstream = createServer((req, res) => {
+            requests.push({
+                method: req.method,
+                path: req.url,
+                host: req.headers.host,
+                origin: req.headers.origin,
+            });
+            res.writeHead(202, { "content-type": "text/plain" });
+            res.end("upstream response");
+        });
+        const upstreamOrigin = await listen(upstream);
+        const front = createServer((req, res) => proxyToEditor(req, res, upstreamOrigin));
+        try {
+            const frontOrigin = await listen(front);
+            await verify({ frontOrigin, upstreamOrigin, requests });
+        }
+        finally {
+            await close(front);
+            await close(upstream);
+        }
+    }
     it("does not proxy generate or Pi routes to the editor sidecar", () => {
         assert.equal(shouldProxyToEditor("/api/generate"), false);
         assert.equal(shouldProxyToEditor("/api/pi/auth"), false);
@@ -1515,15 +1564,53 @@ describe("product proxy", () => {
         assert.equal(shouldProxyToEditor("/app/api/export"), true);
         assert.equal(shouldProxyToEditor("/api/export"), true);
     });
+    it("rewrites same-origin mutations to the editor origin and preserves the upstream response", async () => {
+        await withProxyServers(async ({ frontOrigin, upstreamOrigin, requests }) => {
+            const response = await post(frontOrigin, {
+                host: new URL(frontOrigin).host,
+                origin: frontOrigin,
+                "sec-fetch-site": "same-origin",
+            });
+            assert.equal(response.statusCode, 202);
+            assert.equal(response.body, "upstream response");
+            assert.deepEqual(requests, [
+                {
+                    method: "POST",
+                    path: "/api/open",
+                    host: new URL(upstreamOrigin).host,
+                    origin: upstreamOrigin,
+                },
+            ]);
+        });
+    });
+    it("rejects mutations from a different Origin without contacting the editor", async () => {
+        await withProxyServers(async ({ frontOrigin, requests }) => {
+            const frontUrl = new URL(frontOrigin);
+            const frontPort = Number(frontUrl.port);
+            const otherPort = frontPort === 65535 ? frontPort - 1 : frontPort + 1;
+            const response = await post(frontOrigin, {
+                host: frontUrl.host,
+                origin: `${frontUrl.protocol}//${frontUrl.hostname}:${otherPort}`,
+                "sec-fetch-site": "same-origin",
+            });
+            assert.equal(response.statusCode, 403);
+            assert.equal(response.body, JSON.stringify({ error: "cross-site mutation rejected" }));
+            assert.equal(requests.length, 0);
+        });
+    });
+    it("rejects cross-site fetch mutations without contacting the editor", async () => {
+        await withProxyServers(async ({ frontOrigin, requests }) => {
+            const response = await post(frontOrigin, {
+                host: new URL(frontOrigin).host,
+                origin: frontOrigin,
+                "sec-fetch-site": "cross-site",
+            });
+            assert.equal(response.statusCode, 403);
+            assert.equal(response.body, JSON.stringify({ error: "cross-site mutation rejected" }));
+            assert.equal(requests.length, 0);
+        });
+    });
 });
-function completeAttachmentFixture(id, name, text) {
-    const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
-    return {
-        id, name, text, bytes: Buffer.byteLength(text), chars: text.length, parsed: true, complete: true,
-        parser: "utf8-full-v1", originalSha256: hash(text), textSha256: hash(text),
-        storeId: hash(path.join(REPO_ROOT, "output", "attachments")),
-    };
-}
 describe("editor Agent batch review scope", () => {
     const shaA = "a".repeat(64);
     const shaB = "b".repeat(64);
@@ -1535,8 +1622,24 @@ describe("editor Agent batch review scope", () => {
         ],
         reviewScope: {
             items: [
-                { kind: "elements", pageId: "01_page", elementIds: ["title", "title"], pageRevision: 3, pageSha256: shaA, commentId: "c1", commentRevision: 1 },
-                { kind: "page", pageId: "02_page", elementIds: [], pageRevision: 5, pageSha256: shaB, commentId: "c2", commentRevision: 2 },
+                {
+                    kind: "elements",
+                    pageId: "01_page",
+                    elementIds: ["title", "title"],
+                    pageRevision: 3,
+                    pageSha256: shaA,
+                    commentId: "c1",
+                    commentRevision: 1,
+                },
+                {
+                    kind: "page",
+                    pageId: "02_page",
+                    elementIds: [],
+                    pageRevision: 5,
+                    pageSha256: shaB,
+                    commentId: "c2",
+                    commentRevision: 2,
+                },
             ],
         },
         ...overrides,
@@ -1554,14 +1657,27 @@ describe("editor Agent batch review scope", () => {
     });
     it("accepts multiple independent comments on one page, regardless of item order", () => {
         const edit = batchEdit();
-        edit.reviewScope.items.splice(1, 0, { kind: "elements", pageId: "01_page", elementIds: ["subtitle", "body"], pageRevision: 3, pageSha256: shaA, commentId: "c3", commentRevision: 4 });
+        edit.reviewScope.items.splice(1, 0, {
+            kind: "elements",
+            pageId: "01_page",
+            elementIds: ["subtitle", "body"],
+            pageRevision: 3,
+            pageSha256: shaA,
+            commentId: "c3",
+            commentRevision: 4,
+        });
         edit.reviewScope.items.reverse();
         const scopes = editorReviewScopesFromEdit(edit);
         assert.equal(scopes.length, 3);
-        assert.deepEqual(scopes.find(scope => scope.commentId === "c1")?.elementIds, ["title"]);
-        assert.deepEqual(scopes.find(scope => scope.commentId === "c3")?.elementIds, ["subtitle", "body"]);
+        assert.deepEqual(scopes.find((scope) => scope.commentId === "c1")?.elementIds, ["title"]);
+        assert.deepEqual(scopes.find((scope) => scope.commentId === "c3")?.elementIds, ["subtitle", "body"]);
         assert.match(turnTextWithReviewScope("Apply", scopes), /3 comments across 2 page/);
-        assert.throws(() => editorReviewScopesFromEdit({ ...edit, reviewScope: { items: [...edit.reviewScope.items, { ...edit.reviewScope.items[0], pageId: "outside", commentId: "c4" }] } }), /authorized editorEdit.pages/);
+        assert.throws(() => editorReviewScopesFromEdit({
+            ...edit,
+            reviewScope: {
+                items: [...edit.reviewScope.items, { ...edit.reviewScope.items[0], pageId: "outside", commentId: "c4" }],
+            },
+        }), /authorized editorEdit.pages/);
     });
     it("keeps the single-page contract byte-identical", () => {
         const single = editorReviewScopesFromEdit({
@@ -1569,7 +1685,15 @@ describe("editor Agent batch review scope", () => {
             pageId: "01_page",
             revision: 7,
             pageSha256: shaA,
-            reviewScope: { kind: "elements", pageId: "01_page", elementIds: ["title"], pageRevision: 7, pageSha256: shaA, commentId: "review-1", commentRevision: 3 },
+            reviewScope: {
+                kind: "elements",
+                pageId: "01_page",
+                elementIds: ["title"],
+                pageRevision: 7,
+                pageSha256: shaA,
+                commentId: "review-1",
+                commentRevision: 3,
+            },
         });
         assert.equal(single?.length, 1);
         assert.match(turnTextWithReviewScope("Apply the review", single), /Server-verified scope for comment/);
@@ -1578,29 +1702,89 @@ describe("editor Agent batch review scope", () => {
         assert.throws(() => editorReviewScopesFromEdit(batchEdit({
             reviewScope: {
                 items: [
-                    { kind: "elements", pageId: "01_page", elementIds: ["title"], pageRevision: 5, pageSha256: shaA, commentId: "c1", commentRevision: 1 },
-                    { kind: "page", pageId: "02_page", elementIds: [], pageRevision: 5, pageSha256: shaB, commentId: "c2", commentRevision: 2 },
+                    {
+                        kind: "elements",
+                        pageId: "01_page",
+                        elementIds: ["title"],
+                        pageRevision: 5,
+                        pageSha256: shaA,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
+                    {
+                        kind: "page",
+                        pageId: "02_page",
+                        elementIds: [],
+                        pageRevision: 5,
+                        pageSha256: shaB,
+                        commentId: "c2",
+                        commentRevision: 2,
+                    },
                 ],
             },
         })), /pageRevision must match/);
         assert.throws(() => editorReviewScopesFromEdit(batchEdit({
             reviewScope: {
                 items: [
-                    { kind: "elements", pageId: "01_page", elementIds: ["title"], pageRevision: 3, pageSha256: shaB, commentId: "c1", commentRevision: 1 },
-                    { kind: "page", pageId: "02_page", elementIds: [], pageRevision: 5, pageSha256: shaB, commentId: "c2", commentRevision: 2 },
+                    {
+                        kind: "elements",
+                        pageId: "01_page",
+                        elementIds: ["title"],
+                        pageRevision: 3,
+                        pageSha256: shaB,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
+                    {
+                        kind: "page",
+                        pageId: "02_page",
+                        elementIds: [],
+                        pageRevision: 5,
+                        pageSha256: shaB,
+                        commentId: "c2",
+                        commentRevision: 2,
+                    },
                 ],
             },
         })), /pageSha256 must match/);
     });
     it("refuses missing page coverage, duplicate page authorizations, or duplicate comments", () => {
         assert.throws(() => editorReviewScopesFromEdit(batchEdit({
-            reviewScope: { items: [{ kind: "page", pageId: "01_page", elementIds: [], pageRevision: 3, pageSha256: shaA, commentId: "c1", commentRevision: 1 }] },
+            reviewScope: {
+                items: [
+                    {
+                        kind: "page",
+                        pageId: "01_page",
+                        elementIds: [],
+                        pageRevision: 3,
+                        pageSha256: shaA,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
+                ],
+            },
         })), /must cover every authorized page/);
         assert.throws(() => editorReviewScopesFromEdit(batchEdit({
             reviewScope: {
                 items: [
-                    { kind: "page", pageId: "01_page", elementIds: [], pageRevision: 3, pageSha256: shaA, commentId: "c1", commentRevision: 1 },
-                    { kind: "page", pageId: "02_page", elementIds: [], pageRevision: 5, pageSha256: shaB, commentId: "c1", commentRevision: 1 },
+                    {
+                        kind: "page",
+                        pageId: "01_page",
+                        elementIds: [],
+                        pageRevision: 3,
+                        pageSha256: shaA,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
+                    {
+                        kind: "page",
+                        pageId: "02_page",
+                        elementIds: [],
+                        pageRevision: 5,
+                        pageSha256: shaB,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
                 ],
             },
         })), /duplicate comment/);
@@ -1612,281 +1796,27 @@ describe("editor Agent batch review scope", () => {
             ],
             reviewScope: {
                 items: [
-                    { kind: "page", pageId: "01_page", elementIds: [], pageRevision: 3, pageSha256: shaA, commentId: "c1", commentRevision: 1 },
-                    { kind: "page", pageId: "01_page", elementIds: [], pageRevision: 3, pageSha256: shaA, commentId: "c2", commentRevision: 1 },
+                    {
+                        kind: "page",
+                        pageId: "01_page",
+                        elementIds: [],
+                        pageRevision: 3,
+                        pageSha256: shaA,
+                        commentId: "c1",
+                        commentRevision: 1,
+                    },
+                    {
+                        kind: "page",
+                        pageId: "01_page",
+                        elementIds: [],
+                        pageRevision: 3,
+                        pageSha256: shaA,
+                        commentId: "c2",
+                        commentRevision: 1,
+                    },
                 ],
             },
         }), /must not claim the same page twice/);
-    });
-});
-describe("editor Agent attachments", () => {
-    it("keeps a server-verified multi-element review scope in the model turn", () => {
-        const pageSha256 = "a".repeat(64);
-        const scope = editorReviewScopeFromEdit({
-            authorizationId: "comment:review-1",
-            pageId: "01_page",
-            revision: 7,
-            pageSha256,
-            reviewScope: {
-                kind: "elements",
-                pageId: "01_page",
-                elementIds: ["title", "subtitle", "title"],
-                pageRevision: 7,
-                pageSha256,
-                commentId: "review-1",
-                commentRevision: 3,
-            },
-        });
-        assert.deepEqual(scope?.elementIds, ["title", "subtitle"]);
-        const turn = turnTextWithReviewScope("Apply the review", scope);
-        assert.match(turn, /Server-verified scope/);
-        assert.match(turn, /\["title","subtitle"\]/);
-        assert.match(turn, /Do not modify page metadata, element order, or any other element/);
-    });
-    it("rejects a review scope whose page revision does not match its authorized edit", () => {
-        const pageSha256 = "b".repeat(64);
-        assert.throws(() => editorReviewScopeFromEdit({
-            authorizationId: "comment:review-2",
-            pageId: "01_page",
-            revision: 8,
-            pageSha256,
-            reviewScope: {
-                kind: "elements",
-                pageId: "01_page",
-                elementIds: ["title"],
-                pageRevision: 7,
-                pageSha256,
-                commentId: "review-2",
-                commentRevision: 1,
-            },
-        }), /pageRevision must match/);
-    });
-    it("passes the exact review scope through the real turn route before marking busy", async () => {
-        const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "review-scope-turn-"));
-        const store = new SliceSessionStore(workspace);
-        const sessionId = "review-scope-session";
-        const opened = store.openProject({
-            dshSessionId: sessionId,
-            title: "Scoped review",
-            design: { kind: "self-directed" },
-            provider: { providerId: "minimax-cn", modelId: "MiniMax-M3" },
-        });
-        const root = store.resolveRoot(opened.binding);
-        writeSliceRuntime(root, {
-            brief: "Scoped review",
-            design: { kind: "self-directed" },
-            editorBaseUrl: "http://127.0.0.1:55200",
-            strictExecution: true,
-        });
-        initializeRunLedger(root);
-        const page = { id: "01_page", pageType: "content", elements: [coverPage.elements[0]] };
-        const pageSha256 = stableSha256(page);
-        const ledgerFile = path.join(root, "_agent", "run-ledger.v1.json");
-        const ledger = JSON.parse(fs.readFileSync(ledgerFile, "utf8"));
-        ledger.facts.push({
-            type: "page.revision-committed",
-            factId: "page.revision-committed:review-scope-seed",
-            at: new Date().toISOString(),
-            contextEpochId: "review-scope-test",
-            pageId: page.id,
-            revision: 1,
-            pageSha256,
-        });
-        fs.writeFileSync(ledgerFile, `${JSON.stringify(ledger, null, 2)}\n`);
-        fs.writeFileSync(path.join(root, "_agent", "comment-submissions.v1.json"), JSON.stringify({
-            version: 1,
-            submissions: [{ id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", status: "preparing", items: [] }],
-        }));
-        const revision = { revision: 1, pageSha256 };
-        let followedUp = "";
-        let busy = false;
-        const runtime = {
-            workspaceRoot: REPO_ROOT,
-            dshHome: fs.mkdtempSync(path.join(os.tmpdir(), "review-scope-home-")),
-            store,
-            presentation: {},
-            agentBusy: () => false,
-            markBusy: () => { busy = true; },
-            cancelRateLimitWait: () => undefined,
-            operatorStop: async () => undefined,
-            getAgent: () => ({ followup: (message) => { followedUp = JSON.stringify(message); } }),
-            createAgent: async () => ({ sessionId: "unused" }),
-            resumeAgent: async () => undefined,
-            switchModel: async () => undefined,
-        };
-        const response = await invokeSlides(runtime, "POST", `/slides/sessions/${sessionId}/turn`, {
-            text: "Change the selected title",
-            editorEdit: {
-                authorizationId: "comment-batch:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-                pageId: page.id,
-                revision: revision.revision,
-                pageSha256: revision.pageSha256,
-                reviewScope: {
-                    kind: "elements",
-                    pageId: page.id,
-                    elementIds: ["title"],
-                    pageRevision: revision.revision,
-                    pageSha256: revision.pageSha256,
-                    commentId: "review-route",
-                    commentRevision: 2,
-                },
-            },
-        });
-        assert.equal(response.status, 200, JSON.stringify(response.json));
-        assert.equal(response.json.reviewScopeAccepted, true);
-        const ack = response.json.userMessage;
-        assert.equal(ack?.reviewSubmissionId, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-        const persisted = JSON.parse(fs.readFileSync(path.join(root, "_agent", "assistant-conversation.v1.json"), "utf8"));
-        assert.deepEqual(persisted.messages.at(-1), ack);
-        assert.equal(busy, true);
-        assert.match(followedUp, /editor_review_scope/);
-        assert.match(followedUp, /\[\\\"title\\\"\]/);
-    });
-    it("accepts two same-page comments through the real turn route before marking busy", async () => {
-        const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "review-scope-turn-"));
-        const store = new SliceSessionStore(workspace);
-        const sessionId = "review-scope-session";
-        const opened = store.openProject({
-            dshSessionId: sessionId,
-            title: "Scoped review",
-            design: { kind: "self-directed" },
-            provider: { providerId: "minimax-cn", modelId: "MiniMax-M3" },
-        });
-        const root = store.resolveRoot(opened.binding);
-        writeSliceRuntime(root, {
-            brief: "Scoped review",
-            design: { kind: "self-directed" },
-            editorBaseUrl: "http://127.0.0.1:55200",
-            strictExecution: true,
-        });
-        initializeRunLedger(root);
-        const page = { id: "01_page", pageType: "content", elements: [coverPage.elements[0]] };
-        const pageSha256 = stableSha256(page);
-        const ledgerFile = path.join(root, "_agent", "run-ledger.v1.json");
-        const ledger = JSON.parse(fs.readFileSync(ledgerFile, "utf8"));
-        ledger.facts.push({
-            type: "page.revision-committed",
-            factId: "page.revision-committed:review-scope-seed",
-            at: new Date().toISOString(),
-            contextEpochId: "review-scope-test",
-            pageId: page.id,
-            revision: 1,
-            pageSha256,
-        });
-        fs.writeFileSync(ledgerFile, `${JSON.stringify(ledger, null, 2)}\n`);
-        const revision = { revision: 1, pageSha256 };
-        let followedUp = "";
-        let busy = false;
-        const runtime = {
-            workspaceRoot: REPO_ROOT,
-            dshHome: fs.mkdtempSync(path.join(os.tmpdir(), "review-scope-home-")),
-            store,
-            presentation: {},
-            agentBusy: () => false,
-            markBusy: () => { busy = true; },
-            cancelRateLimitWait: () => undefined,
-            operatorStop: async () => undefined,
-            getAgent: () => ({ followup: (message) => { followedUp = JSON.stringify(message); } }),
-            createAgent: async () => ({ sessionId: "unused" }),
-            resumeAgent: async () => undefined,
-            switchModel: async () => undefined,
-        };
-        const response = await invokeSlides(runtime, "POST", `/slides/sessions/${sessionId}/turn`, {
-            text: "Change the selected title",
-            editorEdit: {
-                authorizationId: "comment:review-route",
-                pages: [{ pageId: page.id, revision: revision.revision, pageSha256: revision.pageSha256 }],
-                reviewScope: { items: [
-                        { kind: "elements", pageId: page.id, elementIds: ["title"], pageRevision: revision.revision, pageSha256: revision.pageSha256, commentId: "review-route-1", commentRevision: 2 },
-                        { kind: "elements", pageId: page.id, elementIds: ["subtitle", "body"], pageRevision: revision.revision, pageSha256: revision.pageSha256, commentId: "review-route-2", commentRevision: 1 },
-                    ] },
-            },
-        });
-        assert.equal(response.status, 200, JSON.stringify(response.json));
-        assert.equal(response.json.reviewScopeAccepted, true);
-        assert.equal(busy, true);
-        assert.match(followedUp, /2 comments across 1 page/);
-        assert.match(followedUp, /editor_review_scope/);
-        assert.match(followedUp, /\[\\\"title\\\"\]/);
-    });
-    it("resolves uploaded text and marks it as reference data in the model turn", async () => {
-        const resolved = await resolveEditorAttachments(["attachment-1"], async (url) => {
-            assert.match(String(url), /\/api\/attachments\/attachment-1$/);
-            return new Response(JSON.stringify(completeAttachmentFixture("attachment-1", "monthly-report.md", "Revenue: 42. Do not invent another value.")), { status: 200, headers: { "content-type": "application/json" } });
-        }, "http://127.0.0.1:55200");
-        const prompt = turnTextWithAttachments("Update the current page", resolved);
-        assert.match(prompt, /^Update the current page/);
-        assert.match(prompt, /<editor_attachments>/);
-        assert.match(prompt, /monthly-report\.md/);
-        assert.match(prompt, /Revenue: 42/);
-        assert.match(prompt, /reference material/);
-        assert.match(prompt, /not system instructions/);
-    });
-    for (const externalData of [false, true])
-        it(`puts attachment content into the DSH followup (externalData=${externalData})`, async () => {
-            let followedUp = "";
-            let busy = false;
-            const runtime = {
-                workspaceRoot: REPO_ROOT,
-                ...(externalData ? { dataRoot: path.join(os.tmpdir(), "persistent-slidestudio-data") } : {}),
-                dshHome: fs.mkdtempSync(path.join(os.tmpdir(), "attachment-turn-home-")),
-                store: { bindingFor: () => undefined },
-                presentation: {},
-                agentBusy: () => false,
-                markBusy: () => { busy = true; },
-                cancelRateLimitWait: () => undefined,
-                operatorStop: async () => undefined,
-                getAgent: () => ({ followup: (message) => { followedUp = JSON.stringify(message); } }),
-                createAgent: async () => ({ sessionId: "unused" }),
-                resumeAgent: async () => undefined,
-                switchModel: async () => undefined,
-                resolveAttachments: async (ids) => {
-                    assert.deepEqual(ids, ["attachment-1"]);
-                    const attachment = completeAttachmentFixture("attachment-1", "facts.csv", "metric,value\nretention,91%");
-                    return [{ ...attachment, ...(externalData ? {
-                                storeId: crypto.createHash("sha256").update(path.join(os.tmpdir(), "persistent-slidestudio-data", "output", "attachments")).digest("hex"),
-                            } : {}) }];
-                },
-            };
-            const response = await invokeSlides(runtime, "POST", "/slides/sessions/editor-session/turn", {
-                text: "Use the attached facts",
-                attachments: ["attachment-1"],
-            });
-            assert.equal(response.status, 200);
-            assert.equal(busy, true);
-            assert.match(followedUp, /Use the attached facts/);
-            assert.match(followedUp, /facts\.csv/);
-            assert.match(followedUp, /retention,91%/);
-            assert.deepEqual(response.json.attachments, [
-                { id: "attachment-1", name: "facts.csv" },
-            ]);
-        });
-    it("rejects an unreadable attachment before marking the Agent busy", async () => {
-        let busy = false;
-        let followedUp = false;
-        const runtime = {
-            workspaceRoot: REPO_ROOT,
-            dshHome: fs.mkdtempSync(path.join(os.tmpdir(), "attachment-reject-home-")),
-            store: { bindingFor: () => undefined },
-            presentation: {},
-            agentBusy: () => false,
-            markBusy: () => { busy = true; },
-            cancelRateLimitWait: () => undefined,
-            operatorStop: async () => undefined,
-            getAgent: () => ({ followup: () => { followedUp = true; } }),
-            createAgent: async () => ({ sessionId: "unused" }),
-            resumeAgent: async () => undefined,
-            switchModel: async () => undefined,
-            resolveAttachments: async () => { throw new Error("image attachment is not readable by this Agent route"); },
-        };
-        const response = await invokeSlides(runtime, "POST", "/slides/sessions/editor-session/turn", {
-            text: "Use this image",
-            attachments: ["attachment-image"],
-        });
-        assert.equal(response.status, 400);
-        assert.equal(response.json.code, "invalid_attachment");
-        assert.equal(busy, false);
-        assert.equal(followedUp, false);
     });
 });
 describe("same-session turn and model mutex", () => {
@@ -1913,7 +1843,8 @@ describe("same-session turn and model mutex", () => {
         assert.equal(turn.status, 409);
         assert.equal(turn.json.code, "session_busy");
         const model = await invokeSlides(host, "POST", "/slides/sessions/busy/model", {
-            provider: "pi-xai", model: "grok-4.6",
+            provider: "pi-xai",
+            model: "grok-4.6",
         });
         assert.equal(model.status, 409);
         assert.equal(model.json.code, "session_busy");
@@ -1947,7 +1878,11 @@ describe("same-session turn and model mutex", () => {
                 resolveRoot: () => root,
                 inspect: () => undefined,
             },
-            getAgent: () => ({ steer: () => { steered = true; } }),
+            getAgent: () => ({
+                steer: () => {
+                    steered = true;
+                },
+            }),
         });
         const turn = await invokeSlides(host, "POST", "/slides/sessions/busy/turn", {
             text: "把标题改大",
@@ -1992,8 +1927,14 @@ describe("same-session turn and model mutex", () => {
         let switched = false;
         let followed = false;
         const host = runtime({
-            switchModel: async () => { switched = true; },
-            getAgent: () => ({ followup: () => { followed = true; } }),
+            switchModel: async () => {
+                switched = true;
+            },
+            getAgent: () => ({
+                followup: () => {
+                    followed = true;
+                },
+            }),
         });
         const response = await invokeSlides(host, "POST", "/slides/sessions/idle/turn", {
             text: "continue",
@@ -2125,7 +2066,8 @@ describe("self-directed kids brief", () => {
         const root = store.resolveRoot(opened.binding);
         // Neutral folder: the deck's title lives in the PPTD metadata, never in a
         // path or the editor URL (the model used to hand that path to the user).
-        assert.match(opened.binding.projectRoot, /output\/dsh-slices\/deck-[A-Za-z0-9_-]+$/);
+        assert.equal(path.basename(path.dirname(opened.binding.projectRoot)), "dsh-slices");
+        assert.match(path.basename(opened.binding.projectRoot), /^deck-[A-Za-z0-9_-]+$/);
         assert.doesNotMatch(opened.binding.projectRoot, /勾股定理/);
         assert.doesNotMatch(opened.binding.projectRoot, /paper-white|courseware|a-b-c/);
         writeSliceRuntime(root, {
@@ -2233,7 +2175,11 @@ describe("rate-limit wait and same-session resume", () => {
             schedule: (ms, fn) => {
                 const rec = { ms, fn, cancelled: false };
                 scheduled.push(rec);
-                return { cancel: () => { rec.cancelled = true; } };
+                return {
+                    cancel: () => {
+                        rec.cancelled = true;
+                    },
+                };
             },
             resume: () => {
                 calls += 1;
@@ -2314,7 +2260,11 @@ describe("rate-limit wait and same-session resume", () => {
             now: () => 1_000,
             schedule: (ms, fn) => {
                 scheduled.push({ ms, fn });
-                return { cancel: () => { scheduled.at(-1).cancelled = true; } };
+                return {
+                    cancel: () => {
+                        scheduled.at(-1).cancelled = true;
+                    },
+                };
             },
             resume: () => undefined,
             notePaused: () => undefined,
@@ -2821,52 +2771,38 @@ function staleRuntime(workspaceRoot, parkedSessionId) {
         switchModel: async () => undefined,
     };
 }
-function invokeSlides(runtime, method, url, body) {
-    return new Promise((resolve, reject) => {
-        const payload = body ? Buffer.from(JSON.stringify(body)) : Buffer.alloc(0);
-        const req = Readable.from([payload]);
-        req.method = method;
-        req.url = url;
-        req.headers = {
-            host: "127.0.0.1:55200",
-            ...(body ? { "content-type": "application/json" } : {}),
-        };
-        const res = {
-            statusCode: 0,
-            headersSent: false,
-            chunks: "",
-            writeHead(status) {
-                this.statusCode = status;
-                this.headersSent = true;
-            },
-            end(chunk) {
-                this.chunks = chunk == null ? "" : String(chunk);
-                try {
-                    resolve({
-                        status: this.statusCode,
-                        json: this.chunks ? JSON.parse(this.chunks) : null,
-                    });
-                }
-                catch (error) {
-                    reject(error);
-                }
-            },
-        };
-        handleSlidesRequest(runtime, req, res);
-    });
-}
 describe("hosted runtime model roster", () => {
     const catalog = new Map([
-        ["minimax-local", new Map([["minimax-code-m3.1", {
-                        name: "MiniMax M3.1 Preview", inputModalities: ["text"], efforts: ["high"],
-                    }]])],
-        ["devin-local", new Map([["devin/swe-2", {
-                        name: "SWE-2", inputModalities: ["text"], efforts: ["max"],
-                    }]])],
+        [
+            "minimax-local",
+            new Map([
+                [
+                    "minimax-code-m3.1",
+                    {
+                        name: "MiniMax M3.1 Preview",
+                        inputModalities: ["text"],
+                        efforts: ["high"],
+                    },
+                ],
+            ]),
+        ],
+        [
+            "devin-local",
+            new Map([
+                [
+                    "devin/swe-2",
+                    {
+                        name: "SWE-2",
+                        inputModalities: ["text"],
+                        efforts: ["max"],
+                    },
+                ],
+            ]),
+        ],
     ]);
     it("advertises native custom adapters without an exported catalog or copied credentials", () => {
         const providers = hostedProviders(catalog);
-        assert.deepEqual(providers.map(p => p.id), ["minimax-local", "devin-local"]);
+        assert.deepEqual(providers.map((p) => p.id), ["minimax-local", "devin-local"]);
         assert.equal(providers[0]?.ready, true);
         assert.deepEqual(providers[0]?.models, ["minimax-code-m3.1"]);
         assert.deepEqual(providers[0]?.modelEfforts?.["minimax-code-m3.1"], ["high"]);
@@ -2881,13 +2817,18 @@ describe("hosted runtime model roster", () => {
     it("serves the live picker and health selection from the same hosted roster", async () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "hosted-roster-"));
         try {
-            const runtime = { ...staleRuntime(home, "unused-session"), workspaceRoot: REPO_ROOT,
-                dshHome: home, managedModels: true, listModelCatalog: async () => catalog,
-                providerHealth: () => ({ kind: "broken", reason: "temporary adapter error" }) };
+            const runtime = {
+                ...staleRuntime(home, "unused-session"),
+                workspaceRoot: REPO_ROOT,
+                dshHome: home,
+                managedModels: true,
+                listModelCatalog: async () => catalog,
+                providerHealth: () => ({ kind: "broken", reason: "temporary adapter error" }),
+            };
             const models = await invokeSlides(runtime, "GET", "/slides/models");
             assert.equal(models.status, 200);
             const groups = models.json;
-            assert.deepEqual(groups.map(group => group.providerId), ["minimax-local", "devin-local"]);
+            assert.deepEqual(groups.map((group) => group.providerId), ["minimax-local", "devin-local"]);
             assert.equal(groups[0]?.models[0]?.name, "MiniMax M3.1 Preview");
             const health = await invokeSlides(runtime, "GET", "/slides/health");
             const body = health.json;
@@ -2899,21 +2840,38 @@ describe("hosted runtime model roster", () => {
         }
     });
     it("shows every registered hosted provider while retaining existing generation restrictions", () => {
-        const all = new Map([...catalog, ["antigravity", new Map([["custom-model", {
-                            name: "Custom", inputModalities: ["text"],
-                        }]])]]);
+        const all = new Map([
+            ...catalog,
+            [
+                "antigravity",
+                new Map([
+                    [
+                        "custom-model",
+                        {
+                            name: "Custom",
+                            inputModalities: ["text"],
+                        },
+                    ],
+                ]),
+            ],
+        ]);
         assert.equal(hostedProviders(all).length, 3);
         assert.throws(() => assertSlidesGenerateReady({}, { provider: "antigravity", model: "custom-model", managedCatalog: all }), /Antigravity generate is rejected/);
     });
     it("rejects missing hosted models and preserves isolated-home credential checks", () => {
         assert.throws(() => assertSlidesGenerateReady({}, {
-            provider: "minimax-local", model: "missing", managedCatalog: catalog,
+            provider: "minimax-local",
+            model: "missing",
+            managedCatalog: catalog,
         }), /current provider roster/);
         assert.throws(() => assertSlidesGenerateReady({}, {
-            provider: "minimax-local", model: "minimax-code-m3.1", managedCatalog: new Map(),
+            provider: "minimax-local",
+            model: "minimax-code-m3.1",
+            managedCatalog: new Map(),
         }), /current provider roster/);
         assert.throws(() => assertSlidesGenerateReady({}, {
-            provider: "minimax-local", model: "minimax-code-m3.1",
+            provider: "minimax-local",
+            model: "minimax-code-m3.1",
         }), /no credential/);
     });
 });

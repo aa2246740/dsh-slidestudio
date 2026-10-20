@@ -87,10 +87,7 @@ async function persistSkillStack(dir: string, title: string): Promise<void> {
   if (!compose.ok) throw new Error(compose.detail);
 }
 
-function stackRpcEvents(
-  at = "2026-08-18T16:00:00.000Z",
-  renders = 0,
-): Record<string, unknown>[] {
+function stackRpcEvents(at = "2026-08-18T16:00:00.000Z", renders = 0): Record<string, unknown>[] {
   const names = [
     "write_todo",
     "write_page",
@@ -157,7 +154,7 @@ rl.on("line", (line) => {
 describe("pi env mapping", () => {
   it("prefers the repository-pinned Pi binary", () => {
     const cfg = piConfigFromEnv({});
-    assert.match(cfg.bin, /@earendil-works\/pi-coding-agent\/dist\/cli\.js$/);
+    assert.ok(cfg.bin.endsWith(path.join("@earendil-works", "pi-coding-agent", "dist", "cli.js")));
   });
 
   it("does not map SLIDESTUDIO_LLM_API_KEY onto Gemini", () => {
@@ -195,10 +192,7 @@ describe("pi env mapping", () => {
 
   it("infers google from a native GEMINI_API_KEY", () => {
     const empty = path.join(os.tmpdir(), `pi-empty-${Date.now()}.json`);
-    assert.equal(
-      inferPiProvider({ SLIDESTUDIO_PI_AUTH_PATH: empty, GEMINI_API_KEY: "dev-key" }),
-      "google",
-    );
+    assert.equal(inferPiProvider({ SLIDESTUDIO_PI_AUTH_PATH: empty, GEMINI_API_KEY: "dev-key" }), "google");
   });
 
   it("does not invent a provider for a local OpenAI-compat URL", () => {
@@ -273,10 +267,7 @@ rl.on("line", (line) => {
     await session.getState();
     try {
       const events = await session.promptAndWait("write six pages", 500);
-      assert.equal(
-        events.filter((event) => event.type === "tool_execution_end").length,
-        6,
-      );
+      assert.equal(events.filter((event) => event.type === "tool_execution_end").length, 6);
       assert.ok(events.some((event) => event.type === "agent_end"));
     } finally {
       await session.stop();
@@ -442,9 +433,7 @@ rl.on("line", (line) => {
     assert.equal(isIdleEvent({ type: "agent_end" }), false);
     assert.equal(isIdleEvent({ type: "agent_settled" }), true);
     assert.equal(isIdleEvent({ type: "turn_end" }), false);
-    assert.deepEqual(summarizeEvents([{ type: "tool_execution_start", toolName: "write" }]), [
-      "tool:write",
-    ]);
+    assert.deepEqual(summarizeEvents([{ type: "tool_execution_start", toolName: "write" }]), ["tool:write"]);
   });
 
   it("keeps the receive clock on each summarized event", () => {
@@ -467,9 +456,7 @@ rl.on("line", (line) => {
     assert.equal(clocks.agentStart, "2026-08-18T14:20:00.000Z");
     assert.equal(clocks.agentEnd, "2026-08-18T14:20:12.000Z");
     assert.equal(clocks.wallMs, 12_000);
-    assert.deepEqual(clocks.toolWrites, [
-      { at: "2026-08-18T14:20:07.400Z", event: "tool:write:skill-deck.json" },
-    ]);
+    assert.deepEqual(clocks.toolWrites, [{ at: "2026-08-18T14:20:07.400Z", event: "tool:write:skill-deck.json" }]);
   });
 
   it("clocks the last agent_start, not a prior 429 session", () => {
@@ -634,9 +621,7 @@ describe("pi brain", () => {
       exportPptx: false,
     });
     assert.equal(result.status, "ready");
-    const trace = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8"),
-    ) as {
+    const trace = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8")) as {
       agentStart: string;
       agentEnd: string;
       wallMs: number;
@@ -653,9 +638,10 @@ describe("pi brain", () => {
     assert.ok(trace.timedEvents.some((e) => e.event === "tool:compose_deck"));
     assert.ok(skillStackEvidence(trace.timedEvents).ok);
     assert.ok(trace.timedEvents.some((e) => e.event === "agent_start" && e.at === trace.agentStart));
-    const visual = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "visual-review.json"), "utf8"),
-    ) as { note: string; kind: string };
+    const visual = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "visual-review.json"), "utf8")) as {
+      note: string;
+      kind: string;
+    };
     assert.equal(visual.kind, "pi-tools");
     assert.match(visual.note, /Host did not raster after agent_end/);
     assert.doesNotMatch(visual.note, /Host raster after Pi/);
@@ -690,9 +676,10 @@ describe("pi brain", () => {
       exportPptx: false,
     });
     assert.equal(result.status, "ready");
-    const runtime = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "runtime.json"), "utf8"),
-    ) as { categoryId: string; designSystemId: string };
+    const runtime = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "runtime.json"), "utf8")) as {
+      categoryId: string;
+      designSystemId: string;
+    };
     assert.equal(runtime.categoryId, "education-training");
     assert.equal(runtime.designSystemId, "academic/paper-white-courseware");
     const playbook = fs.readFileSync(path.join(dir, "_agent", "playbook.md"), "utf8");
@@ -720,11 +707,7 @@ describe("pi brain", () => {
           dir,
         );
         for (let i = 1; i <= 4; i++) {
-          await runPiHand(
-            "write_page",
-            textPage(`page-0${i}`, `第${i}页`, `种子怎么发芽 ${i}`),
-            dir,
-          );
+          await runPiHand("write_page", textPage(`page-0${i}`, `第${i}页`, `种子怎么发芽 ${i}`), dir);
         }
         return [
           { type: "agent_start", _receivedAt: "2026-08-18T16:20:00.000Z" },
@@ -759,9 +742,11 @@ describe("pi brain", () => {
     });
     assert.equal(result.status, "failed");
     assert.equal(brain.usedPi, false);
-    const trace = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8"),
-    ) as { skillStack?: { ok?: boolean }; produce?: string; error?: string };
+    const trace = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8")) as {
+      skillStack?: { ok?: boolean };
+      produce?: string;
+      error?: string;
+    };
     assert.notEqual(trace.produce, "pi-tools-salvage");
     assert.equal(trace.skillStack?.ok ?? false, false);
   });
@@ -794,8 +779,7 @@ describe("pi brain", () => {
               role: "assistant",
               content: [],
               stopReason: "error",
-              errorMessage:
-                "Codex error: Your input exceeds the context window of this model.",
+              errorMessage: "Codex error: Your input exceeds the context window of this model.",
             },
             _receivedAt: "2026-08-19T03:23:14.000Z",
           },
@@ -824,9 +808,9 @@ describe("pi brain", () => {
     assert.match(playbook, /# Runtime routing promotion\/travel-green-handbook/);
     assert.match(playbook, /not an OpenKimi source/);
     assert.doesNotMatch(playbook, /paper-white-courseware \+ education-training/);
-    const trace = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8"),
-    ) as { produce?: string };
+    const trace = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "pi-trace.json"), "utf8")) as {
+      produce?: string;
+    };
     assert.notEqual(trace.produce, "pi-tools-salvage");
   });
 
@@ -1071,7 +1055,7 @@ describe("pi brain", () => {
                     content: [],
                     stopReason: "error",
                     errorMessage:
-                      'GenerateRequestsPerDayPerProjectPerModel-FreeTier model: gemini-3.5-flash RESOURCE_EXHAUSTED 429',
+                      "GenerateRequestsPerDayPerProjectPerModel-FreeTier model: gemini-3.5-flash RESOURCE_EXHAUSTED 429",
                   },
                 },
                 { type: "agent_end" },

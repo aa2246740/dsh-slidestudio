@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { handleSlidesRequest } from "./routes.js";
-const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 function invokeSlides(runtime, url, body) {
     return new Promise((resolve, reject) => {
         const req = Readable.from([Buffer.from(JSON.stringify(body))]);
@@ -57,7 +58,7 @@ it("accepts only one of two concurrent generation recovery turns", async () => {
         workspaceRoot: repoRoot,
         dshHome: fs.mkdtempSync(path.join(os.tmpdir(), "routes-resume-home-")),
         store: {
-            bindingFor: (requested) => requested === sessionId ? binding : undefined,
+            bindingFor: (requested) => (requested === sessionId ? binding : undefined),
             resolveRoot: () => projectRoot,
             inspect: () => ({
                 binding,
@@ -97,13 +98,27 @@ it("resumes idle page-ready work using the same execution projection as the UI",
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     fs.cpSync(path.join(repoRoot, "fixtures/okp-yu7-ppt"), root, { recursive: true });
     const sessionId = "ready-page-session";
-    const binding = { dshSessionId: sessionId, projectRoot: root, provider: { providerId: "local", modelId: "local" }, design: { kind: "self-directed" } };
+    const binding = {
+        dshSessionId: sessionId,
+        projectRoot: root,
+        provider: { providerId: "local", modelId: "local" },
+        design: { kind: "self-directed" },
+    };
     let busy = false, followups = 0;
     const runtime = {
-        workspaceRoot: repoRoot, dshHome: root,
+        workspaceRoot: repoRoot,
+        dshHome: root,
         store: { bindingFor: () => binding, resolveRoot: () => root, inspect: () => ({ phase: { kind: "page-ready" } }) },
-        agentBusy: () => busy, markBusy: () => { busy = true; }, cancelRateLimitWait: () => undefined,
-        getAgent: () => ({ followup: () => { followups++; } }),
+        agentBusy: () => busy,
+        markBusy: () => {
+            busy = true;
+        },
+        cancelRateLimitWait: () => undefined,
+        getAgent: () => ({
+            followup: () => {
+                followups++;
+            },
+        }),
     };
     const body = { text: "保持两页并继续收尾", resumeGeneration: true };
     const result = await invokeSlides(runtime, `/slides/sessions/${sessionId}/turn`, body);
@@ -122,9 +137,13 @@ it("continues discussion in the same session without edit authorization, then ex
     let busy = false;
     const messages = [];
     const runtime = {
-        workspaceRoot: repoRoot, dshHome: root,
+        workspaceRoot: repoRoot,
+        dshHome: root,
         store: { bindingFor: () => binding, resolveRoot: () => root },
-        agentBusy: () => busy, markBusy: () => { busy = true; },
+        agentBusy: () => busy,
+        markBusy: () => {
+            busy = true;
+        },
         cancelRateLimitWait: () => undefined,
         getAgent: () => ({ followup: (message) => messages.push(message) }),
     };
@@ -157,7 +176,11 @@ it("plans a conversation turn without starting an Agent or authorizing a write",
     let calls = 0;
     let busy = false;
     const runtime = {
-        store: { bindingFor: (id) => id === "s" ? { projectRoot: root } : undefined, resolveRoot: () => root, inspect: () => ({ project: { pageCount: 2 } }) },
+        store: {
+            bindingFor: (id) => (id === "s" ? { projectRoot: root } : undefined),
+            resolveRoot: () => root,
+            inspect: () => ({ project: { pageCount: 2 } }),
+        },
         agentBusy: () => busy,
         resolveAssistantIntent: async (input) => {
             calls++;
@@ -166,9 +189,17 @@ it("plans a conversation turn without starting an Agent or authorizing a write",
             assert.deepEqual(input.modelSelection, { provider: "local", model: "cheap" });
             return { intent: "edit", scope: "pages", pages: [2] };
         },
-        markBusy: () => { throw new Error("planning must not start an Agent"); },
+        markBusy: () => {
+            throw new Error("planning must not start an Agent");
+        },
     };
-    const body = { text: "第二个方案", sessionId: "s", currentPage: 1, selectedCount: 0, modelSelection: { provider: "local", model: "cheap" } };
+    const body = {
+        text: "第二个方案",
+        sessionId: "s",
+        currentPage: 1,
+        selectedCount: 0,
+        modelSelection: { provider: "local", model: "cheap" },
+    };
     const response = await invokeSlides(runtime, "/slides/assistant-intent", body);
     assert.equal(response.status, 200);
     assert.equal(response.json.intent, "edit");

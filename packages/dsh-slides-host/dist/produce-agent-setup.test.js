@@ -8,10 +8,11 @@ import { AgentFaults } from "./agent-fault.js";
 import { SliceSessionStore } from "./slice-session.js";
 import { attachProduceAssemblePatch, bindToolProviderToModelSelection, createSlidesProduceSetup, hostedProduceToolDefinitions, registerHostedProduceTools, } from "./produce-agent-setup.js";
 import { sessionProduceCapabilities } from "./tools.js";
-import { NATIVE_WEB_FORBID_SENTENCE, serializeProduceRequestHeader, } from "./produce-request-header.js";
+import { NATIVE_WEB_FORBID_SENTENCE, serializeProduceRequestHeader } from "./produce-request-header.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { addPlaywrightRuntimeLayout } from "./runtime-test-fixture.js";
 function stubPresentation() {
     return {
         execute: async () => {
@@ -198,9 +199,7 @@ describe("produce agent setup", () => {
             providerId: selected.provider,
             modelId: selected.model,
             ready: true,
-            modelInputModalities: selected.model.includes("Vision")
-                ? ["text", "image"]
-                : ["text"],
+            modelInputModalities: selected.model.includes("Vision") ? ["text", "image"] : ["text"],
         }));
         const fakeTools = {
             register() {
@@ -225,6 +224,7 @@ describe("produce agent setup", () => {
         const hostCtx = { get: () => undefined };
         const runtime = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "produce-assembly-pw-")), "runtime.mjs");
         fs.writeFileSync(runtime, "export function verifyPinnedRuntime() { return true; }\nexport async function launchPinnedChromium() {}\n");
+        addPlaywrightRuntimeLayout(runtime);
         const previousEditor = process.env.SLIDESTUDIO_EDITOR_URL;
         const previousRuntime = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
         process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";
@@ -297,6 +297,7 @@ describe("produce agent setup", () => {
         }));
         const runtime = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "produce-live-pw-")), "runtime.mjs");
         fs.writeFileSync(runtime, "export function verifyPinnedRuntime() { return true; }\nexport async function launchPinnedChromium() {}\n");
+        addPlaywrightRuntimeLayout(runtime);
         const previousEditor = process.env.SLIDESTUDIO_EDITOR_URL;
         const previousRuntime = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
         process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";

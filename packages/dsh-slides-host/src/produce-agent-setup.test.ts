@@ -16,14 +16,12 @@ import {
 } from "./produce-agent-setup.js";
 import { sessionProduceCapabilities, type SliceToolDeps } from "./tools.js";
 import type { PresentationRun } from "@open-slidestudio/presentation-run";
-import {
-  NATIVE_WEB_FORBID_SENTENCE,
-  serializeProduceRequestHeader,
-} from "./produce-request-header.js";
+import { NATIVE_WEB_FORBID_SENTENCE, serializeProduceRequestHeader } from "./produce-request-header.js";
 import type { ToolSchema } from "@deepseek-ai/dsh-llm";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { addPlaywrightRuntimeLayout } from "./runtime-test-fixture.js";
 
 function stubPresentation(): PresentationRun {
   return {
@@ -101,7 +99,10 @@ describe("produce agent setup", () => {
     assert.equal(registered.includes("generate_image"), true);
     assert.equal(assembleAttached.includes("user-questions/request"), true);
     assert.equal(assembleAttached.includes("system-prompt/assemble"), true);
-    assert.equal(assembleOptions.some((options) => options.global === true), false);
+    assert.equal(
+      assembleOptions.some((options) => options.global === true),
+      false,
+    );
     assert.deepEqual(assembleOptions, [{ prepend: true }]);
   });
 
@@ -211,18 +212,12 @@ describe("produce agent setup", () => {
       current: { provider: "amd", model: "DeepSeek-Vision-Exp" },
       assembled: undefined,
     };
-    const deps = bindToolProviderToModelSelection(
-      stubDeps(),
-      selection,
-      (selected) => ({
-        providerId: selected.provider,
-        modelId: selected.model,
-        ready: true,
-        modelInputModalities: selected.model.includes("Vision")
-          ? (["text", "image"] as const)
-          : (["text"] as const),
-      }),
-    );
+    const deps = bindToolProviderToModelSelection(stubDeps(), selection, (selected) => ({
+      providerId: selected.provider,
+      modelId: selected.model,
+      ready: true,
+      modelInputModalities: selected.model.includes("Vision") ? (["text", "image"] as const) : (["text"] as const),
+    }));
     const fakeTools = {
       register() {
         return () => undefined;
@@ -248,6 +243,7 @@ describe("produce agent setup", () => {
       runtime,
       "export function verifyPinnedRuntime() { return true; }\nexport async function launchPinnedChromium() {}\n",
     );
+    addPlaywrightRuntimeLayout(runtime);
     const previousEditor = process.env.SLIDESTUDIO_EDITOR_URL;
     const previousRuntime = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
     process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";
@@ -270,7 +266,10 @@ describe("produce agent setup", () => {
       };
       const assemble = () => filter(base, {}, async () => base);
       const vision = await assemble();
-      assert.equal(vision.tools.some((tool: ToolSchema) => tool.name === "review_page"), true);
+      assert.equal(
+        vision.tools.some((tool: ToolSchema) => tool.name === "review_page"),
+        true,
+      );
 
       selection.current = { provider: "amd", model: "Qwen3.8" };
       const text = await assemble();
@@ -312,21 +311,18 @@ describe("produce agent setup", () => {
       current: { provider: "amd", model: "DeepSeek-Vision-Exp" },
       assembled: undefined,
     };
-    const deps = bindToolProviderToModelSelection(
-      { ...stubDeps(), store },
-      selection,
-      (selected) => ({
-        providerId: selected.provider,
-        modelId: selected.model,
-        ready: true,
-        modelInputModalities: ["text", "image"],
-      }),
-    );
+    const deps = bindToolProviderToModelSelection({ ...stubDeps(), store }, selection, (selected) => ({
+      providerId: selected.provider,
+      modelId: selected.model,
+      ready: true,
+      modelInputModalities: ["text", "image"],
+    }));
     const runtime = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "produce-live-pw-")), "runtime.mjs");
     fs.writeFileSync(
       runtime,
       "export function verifyPinnedRuntime() { return true; }\nexport async function launchPinnedChromium() {}\n",
     );
+    addPlaywrightRuntimeLayout(runtime);
     const previousEditor = process.env.SLIDESTUDIO_EDITOR_URL;
     const previousRuntime = process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME;
     process.env.SLIDESTUDIO_EDITOR_URL = "http://127.0.0.1:55200";
@@ -348,9 +344,9 @@ describe("produce agent setup", () => {
         },
       };
       assert.equal(sessionProduceCapabilities(bootDeps, "session").vision.mode, "main-model");
-      const persisted = JSON.parse(
-        fs.readFileSync(path.join(root, "_agent", "presentation-run.v1.json"), "utf8"),
-      ) as { provider: { modelId: string; ready: boolean; modelInputModalities: string[] } };
+      const persisted = JSON.parse(fs.readFileSync(path.join(root, "_agent", "presentation-run.v1.json"), "utf8")) as {
+        provider: { modelId: string; ready: boolean; modelInputModalities: string[] };
+      };
       assert.equal(persisted.provider.modelId, "Qwen3.8");
       assert.equal(persisted.provider.ready, true);
       assert.deepEqual(persisted.provider.modelInputModalities, ["text", "image"]);
@@ -462,7 +458,10 @@ describe("produce agent setup", () => {
       provider: "pi-xai",
       model: "grok-4.6",
     });
-    assert.equal(header.tools?.some((tool) => tool.name === "web_search"), false);
+    assert.equal(
+      header.tools?.some((tool) => tool.name === "web_search"),
+      false,
+    );
     assert.equal(system.includes(NATIVE_WEB_FORBID_SENTENCE), true);
   });
 });

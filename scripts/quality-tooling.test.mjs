@@ -5,6 +5,16 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import * as prettier from "prettier";
+import { parseTypeDiagnostics } from "./quality/type-diagnostics.mjs";
+
+test("type diagnostics preserve the same findings on Windows and Unix", () => {
+  const unix = "apps/server/src/index.mjs(10,2): error TS7006: Parameter 'req' implicitly has an 'any' type.\n";
+  const windows = unix.replaceAll("/", "\\").replaceAll("\n", "\r\n");
+  assert.deepEqual(parseTypeDiagnostics(windows), parseTypeDiagnostics(unix));
+  assert.deepEqual(parseTypeDiagnostics(windows), [
+    "apps/server/src/index.mjs TS7006: Parameter 'req' implicitly has an 'any' type.",
+  ]);
+});
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const eslint = new ESLint({ cwd: ROOT, overrideConfigFile: path.join(ROOT, "eslint.config.mjs") });
@@ -113,4 +123,14 @@ test("documented root commands and bootstrap stages refer to real scripts", () =
     }
   }
   assert.equal(scripts["setup:dev"], "npm ci && npm run build:native && npm run setup:browser && npm start");
+});
+
+test("readiness quality builds native packages and pins Playwright before coverage", () => {
+  const yaml = readFileSync(path.join(ROOT, ".github/workflows/quality.yml"), "utf8");
+  const coverageIdx = yaml.indexOf("npm run test:coverage");
+  const nativeIdx = yaml.indexOf("npm run build:native");
+  const browserIdx = yaml.indexOf("npm run setup:browser");
+  assert.notEqual(coverageIdx, -1, "quality.yml must run test:coverage");
+  assert.ok(nativeIdx >= 0 && nativeIdx < coverageIdx, "quality.yml must build native packages before coverage");
+  assert.ok(browserIdx >= 0 && browserIdx < coverageIdx, "quality.yml must pin Playwright before coverage");
 });

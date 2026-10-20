@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { nativeCapability, hasNativeModelKey } from "./native-health.mjs";
+import { rasterRuntimeReady } from "@open-slidestudio/presentation-run";
 /**
  * Offline native PPTD shell server.
  * Production path: no Kimi hosts. Serves static UI + local project API.
@@ -10,6 +12,21 @@
 import crypto from "node:crypto";
 import { assistantVersionArtifacts } from "./assistant-artifacts.mjs";
 import { createCommentSubmission, finishCommentSubmission, readCommentSubmissions } from "./comment-submissions.mjs";
+import {
+  acquireReviewAiLock as acquireReviewAiLockFromModule,
+  activeReviewAiLock,
+  readReviewAiGuardFile,
+  releaseReviewAiLock,
+  removeReviewAiGuard,
+  renewReviewAiLock,
+  reviewAiLockByToken,
+  writeReviewAiGuard,
+} from "./review-ai-lock.mjs";
+import {
+  handleReviewAiLockStatus as handleReviewAiLockStatusRoute,
+  reconcileOrphanedAiReviews as reconcileOrphanedAiReviewsFromModule,
+  reviewAiLockStatus,
+} from "./review-ai-lock-recovery.mjs";
 import { parse as parseYaml } from "yaml";
 import fs from "node:fs";
 import http from "node:http";
@@ -23,10 +40,12 @@ import { buildPdfFromPngs } from "./png-pdf.mjs";
 import { AttachmentStore, parseAttachmentBuffer, attachmentPublic, decodeAttachmentUpload as decodeDataUrl } from "./attachments.mjs";
 import { diagnostics } from "./logger.mjs";
 import { loadRootEnv } from "../../../scripts/lib/root-env.mjs";
+import { loadFeatureFlags } from "../../../scripts/lib/feature-flags.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../../..");
 loadRootEnv(ROOT);
+const FLAGS = loadFeatureFlags(ROOT);
 const DATA_ROOT = path.resolve(process.env.SLIDESTUDIO_DATA_DIR || ROOT);
 
 // Runtime packages must resolve to ONE copy each: bare `@open-slidestudio/*`
@@ -53,59 +72,6 @@ const DEFAULT_PROJECT = process.env.OPEN_SLIDESTUDIO_PROJECT
   ? path.resolve(process.env.OPEN_SLIDESTUDIO_PROJECT)
   : path.join(ROOT, "fixtures/okp-yu7-ppt");
 
-// One native server owns every browser tab for its live project. AI review
-// turns use this short-lived server lock so a second tab cannot replace the
-// same page while the DSH agent is performing a whole-page write.
-const reviewAiLocks = new Map();
-// A review turn waits for the model to settle before it can safely verify or
-// restore a snapshot. Keep enough lease headroom for that stop/restore window;
-// the browser renews this lease while the turn remains in flight.
-const REVIEW_AI_LOCK_TTL_MS = 15 * 60 * 1000;
-const REVIEW_AI_LOCK_REL = path.join("_agent", "ai-review-lock.v1.json");
-
-function writeReviewAiGuard(root, lock) {
-  const file = path.join(root, REVIEW_AI_LOCK_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, `${JSON.stringify({
-    version: 1,
-    token: lock.token,
-    pagePath: lock.pagePath,
-    commentId: lock.commentId,
-    scope: lock.scope,
-    commentRevision: lock.commentRevision,
-    pageSha256: lock.pageSha256,
-    // Immutable element-scope baseline for the Host's prospective write gate.
-    // It allows repeated fixes to selected elements while every proposal is
-    // still compared with the exact page the human originally annotated.
-    pageBody: lock.pageBody,
-    // Cross-page batch: every comment anchor this turn owns. Absent for the
-    // single-comment contract, which keeps the legacy shape byte-identical.
-    ...(Array.isArray(lock.items) && lock.items.length ? { items: lock.items } : {}),
-    // Structural edits need the page-set baseline so sequential writes keep
-    // landing after the pages this same turn already inserted.
-    ...(Array.isArray(lock.projectPages) && lock.projectPages.length ? { projectPages: lock.projectPages } : {}),
-    createdAt: lock.createdAt,
-    expiresAt: lock.expiresAt,
-  }, null, 2)}\n`, "utf8");
-  fs.renameSync(temp, file);
-}
-
-function removeReviewAiGuard(root) {
-  fs.rmSync(path.join(root, REVIEW_AI_LOCK_REL), { force: true });
-}
-
-function readReviewAiGuardFile(root) {
-  try {
-    const file = path.join(root, REVIEW_AI_LOCK_REL);
-    if (!fs.existsSync(file)) return undefined;
-    const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && typeof value === "object" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * `aiStatus: "running"` and `preparing` submissions are only legal while a
  * live lock owns the project — this process's in-memory lease or another
@@ -115,146 +81,16 @@ function readReviewAiGuardFile(root) {
  * version snapshot already preserves restore semantics.
  */
 function reconcileOrphanedAiReviews(native, root) {
-  const key = path.resolve(root);
-  if (activeReviewAiLock(key)) return false;
-  const guard = readReviewAiGuardFile(key);
-  if (guard && Number(guard.expiresAt) > Date.now()) return false;
-  try {
-    return native.pptd.withProjectWriteLock(root, () => {
-      // Re-check inside the write lock: a new batch may have acquired the
-      // lease between the cheap early-out above and now.
-      if (activeReviewAiLock(key)) return false;
-      const record = readReviewThreads(root);
-      const submissions = readCommentSubmissions(root);
-      const preparing = new Set(
-        submissions.filter((entry) => entry?.status === "preparing").map((entry) => entry.id),
-      );
-      const orphanedSubmissionIds = new Set();
-      const pages = { ...record.pages };
-      let touched = false;
-      for (const [pagePath, threads] of Object.entries(pages)) {
-        if (!Array.isArray(threads)) continue;
-        const next = threads.map((thread) => {
-          if (thread?.aiStatus !== "running") return thread;
-          const submissionId = nonEmptyString(thread.aiSubmissionId);
-          // A running comment with no live lock is orphaned unless its
-          // submission already reached a terminal state without it.
-          if (submissionId && !preparing.has(submissionId)) return thread;
-          if (submissionId) orphanedSubmissionIds.add(submissionId);
-          touched = true;
-          return {
-            ...thread,
-            revision: (Number.isInteger(thread.revision) ? thread.revision : 0) + 1,
-            aiStatus: "failed",
-            aiError: "AI 修改中断（会话或服务已重启），请重新提交",
-          };
-        });
-        pages[pagePath] = next;
-      }
-      if (touched) {
-        const file = path.join(root, REVIEW_THREADS_REL);
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-        fs.writeFileSync(temp, `${JSON.stringify({
-          ...record,
-          revision: record.revision + 1,
-          updatedAt: new Date().toISOString(),
-          pages,
-        }, null, 2)}\n`, "utf8");
-        fs.renameSync(temp, file);
-        for (const submissionId of orphanedSubmissionIds) {
-          finishCommentSubmission(root, submissionId, "failed", "interrupted before the batch finished");
-        }
-      }
-      // A stale expired guard must not keep blocking the Host-side write gate.
-      if (guard || touched) removeReviewAiGuard(key);
-      return touched;
-    });
-  } catch {
-    return false;
-  }
-}
-
-function activeReviewAiLock(root) {
-  const key = path.resolve(root);
-  const lock = reviewAiLocks.get(key);
-  if (!lock) return undefined;
-  if (lock.expiresAt <= Date.now()) {
-    reviewAiLocks.delete(key);
-    removeReviewAiGuard(key);
-    return undefined;
-  }
-  return lock;
-}
-
-function reviewAiLockByToken(token) {
-  const expected = nonEmptyString(token);
-  if (!expected) return undefined;
-  for (const root of reviewAiLocks.keys()) {
-    const lock = activeReviewAiLock(root);
-    if (lock?.token === expected) return lock;
-  }
-  return undefined;
-}
-
-/**
- * Extend a live, root-bound AI-review lease and durably mirror the new expiry
- * into the cross-process guard. The guard write is atomic (`renameSync` in
- * writeReviewAiGuard), so a DSH writer cannot observe a partially-written
- * lease while the browser is waiting for the AI turn to stop.
- */
-function renewReviewAiLock(token, { writeGuard = writeReviewAiGuard } = {}) {
-  const lock = reviewAiLockByToken(token);
-  if (!lock) return undefined;
-  // Commit the durable guard before mutating the in-memory lease. If the
-  // atomic write fails (for example a full/read-only project volume), keeping
-  // the old in-memory expiry avoids claiming a renewal other processes cannot
-  // observe on disk.
-  const next = { ...lock, expiresAt: Date.now() + REVIEW_AI_LOCK_TTL_MS };
-  writeGuard(lock.root, next);
-  lock.expiresAt = next.expiresAt;
-  return lock;
-}
-
-function acquireReviewAiLock(
-  root,
-  { pagePath, commentId, commentRevision, scope, pageSha256, pageBody, deckState, projectPages, items } = {},
-) {
-  const key = path.resolve(root);
-  const current = activeReviewAiLock(key);
-  if (current) return { conflict: true, lock: current };
-  const lock = {
-    token: crypto.randomUUID(),
-    // Bind the entire review transaction to the project that was current when
-    // the lock was acquired. Live sessions are per project and can otherwise
-    // be advanced by another browser tab before verify/restore.
-    root: key,
-    pagePath: reviewPageKey(pagePath),
-    commentId: nonEmptyString(commentId) || undefined,
-    commentRevision: Number.isSafeInteger(commentRevision) ? commentRevision : undefined,
-    scope: scope && typeof scope === "object" ? structuredClone(scope) : undefined,
-    pageSha256: nonEmptyString(pageSha256) || undefined,
-    pageBody: pageBody && typeof pageBody === "object" ? structuredClone(pageBody) : undefined,
-    items: Array.isArray(items) && items.length ? structuredClone(items) : undefined,
-    deckState: deckState && typeof deckState === "object" ? structuredClone(deckState) : undefined,
-    projectPages: Array.isArray(projectPages) ? structuredClone(projectPages) : undefined,
-    snapshotVersionId: undefined,
-    createdAt: new Date().toISOString(),
-    expiresAt: Date.now() + REVIEW_AI_LOCK_TTL_MS,
-  };
-  writeReviewAiGuard(key, lock);
-  reviewAiLocks.set(key, lock);
-  return { conflict: false, lock };
-}
-
-function releaseReviewAiLock(root, token) {
-  const key = path.resolve(root);
-  const current = activeReviewAiLock(key);
-  if (!current) return { released: true };
-  if (!token || token !== current.token) return { released: false, lock: current };
-  reviewAiLocks.delete(key);
-  removeReviewAiGuard(key);
-  return { released: true };
+  return reconcileOrphanedAiReviewsFromModule(native, root, {
+    activeReviewAiLock,
+    readReviewAiGuardFile,
+    readReviewThreads,
+    readCommentSubmissions,
+    removeReviewAiGuard,
+    finishCommentSubmission,
+    nonEmptyString,
+    reviewThreadsRelativePath: REVIEW_THREADS_REL,
+  });
 }
 
 const FONTS_CSS = path.join(PUBLIC, "fonts.css");
@@ -527,7 +363,6 @@ function liveEntryFor(root, tabId = "default") {
 function projectKey(p = lastProjectPath) {
   return path.resolve(p);
 }
-
 /**
  * Resolve the project a request acts on. Explicit `?project=` / body.project
  * wins; otherwise fall back to the most recently resolved project so older
@@ -630,7 +465,7 @@ function projectDiskRevision(root) {
 }
 
 function openLiveSession(native, dest, pageHint, tabId = "default") {
-  return native.pptd.withProjectWriteLock(dest, () => {
+  const session = native.pptd.withProjectWriteLock(dest, () => {
     const s = native.canvas.openSession(dest, {
       allowedControlIds: ORACLE_CONTROLS,
       pageIndex: pageHint ?? rememberedPage(dest),
@@ -643,6 +478,8 @@ function openLiveSession(native, dest, pageHint, tabId = "default") {
     rememberPage(s, dest);
     return s;
   });
+  reconcileOrphanedAiReviews(native, dest);
+  return session;
 }
 
 function spinWaitMs(ms) {
@@ -1440,6 +1277,14 @@ async function projectVerificationSnapshot(native, root, pagePath, { allowMissin
   });
 }
 
+/**
+ * @param {string} root
+ * @param {Parameters<typeof acquireReviewAiLockFromModule>[1]} options
+ * @param {(value: unknown) => string} [normalizePagePath]
+ */
+function acquireReviewAiLock(root, options, normalizePagePath = reviewPageKey) {
+  return acquireReviewAiLockFromModule(root, options, normalizePagePath);
+}
 async function acquireCurrentCommentReviewLock(native, root, pagePath, comment, expectedPageSha256) {
   const presentation = await import(
     runtimeImport("@open-slidestudio/presentation-run")
@@ -1497,7 +1342,7 @@ async function acquireCurrentCommentReviewLock(native, root, pagePath, comment, 
       pageSha256: currentPage.pageSha256,
       pageBody: currentPage.pageBody,
       deckState: currentPage.deckState,
-    });
+    }, reviewPageKey);
     return { currentPage: { ...currentPage, pageRevision }, lockScope, acquired };
   });
 }
@@ -1858,7 +1703,7 @@ async function acquireCurrentWorkspaceReviewLock(native, root, pagePath, rawWork
       pageBody: lockedCurrent.snapshot.pageBody,
       deckState: lockedCurrent.snapshot.deckState,
       projectPages,
-    });
+    }, reviewPageKey);
     return { currentPage: lockedCurrent.snapshot, lockScope, acquired };
   });
 }
@@ -2271,9 +2116,12 @@ const RETENTION_DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** Days to keep generated projects without modification. 0 disables. Default 0: keep user work until explicitly removed. */
-function retentionDaysFromEnv(env = process.env) {
-  const raw = String(env.SLIDESTUDIO_RETENTION_DAYS ?? "0").trim();
-  if (raw === "") return 0;
+function retentionDaysFromEnv(env = process.env, flags = FLAGS) {
+  const raw = String(env.SLIDESTUDIO_RETENTION_DAYS ?? "").trim();
+  if (raw === "") {
+    const flagged = Number(flags.get("project_retention_days"));
+    return Number.isFinite(flagged) && flagged > 0 ? flagged : 0;
+  }
   const days = Number(raw);
   if (!Number.isFinite(days) || days < 0) {
     throw new Error("SLIDESTUDIO_RETENTION_DAYS must be a non-negative number of days");
@@ -2368,7 +2216,7 @@ function ensureSession(native, projectRoot, pageHint, tabId = "default") {
   const entry = liveEntryFor(root, tabId);
   if (!entry.session) {
     openLiveSession(native, root, pageHint, tabId);
-  } else if (entry.diskRevision !== native.pptd.withProjectWriteLock(root, () => projectDiskRevision(root))) {
+  } else if (entry.diskRevision !== projectDiskRevision(root)) {
     openLiveSession(native, root, pageHint ?? entry.session.pageIndex, tabId);
   } else if (pageHint != null && pageHint !== entry.session.pageIndex) {
     native.canvas.goToPage(entry.session, pageHint);
@@ -2377,13 +2225,17 @@ function ensureSession(native, projectRoot, pageHint, tabId = "default") {
   return entry.session;
 }
 
-/** Sidecar proxy: forward only what the kernel needs — cookies, ambient auth
- * and browser hop-by-hop headers never cross to the upstream listener. */
+/** Sidecar proxy: forward only what the kernel needs — ambient auth and
+ * browser hop-by-hop headers never cross to the upstream listener. The
+ * browser session cookie must pass: its host-scoped name/port ignores the
+ * sidecar port, and without it every kernel route answers 401 — which is
+ * exactly the dead-editor shape users reported. */
 const PROXY_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
   "content-type",
   "content-length",
+  "cookie",
   "x-requested-with",
 ]);
 function proxyHeaders(req, kernelPort) {
@@ -2470,6 +2322,7 @@ function harnessResearchConfig() {
 
 /** Image generate is optional. LLM chat URL alone is not a generate API. */
 function harnessImageConfigured() {
+  if (FLAGS.get("image_generate") === false) return false;
   if (process.env.SLIDESTUDIO_IMAGE === "0") return false;
   if (process.env.SLIDESTUDIO_IMAGE_BASE_URL?.trim()) return true;
   return process.env.SLIDESTUDIO_IMAGE === "1" && Boolean(process.env.SLIDESTUDIO_LLM_BASE_URL?.trim());
@@ -2578,6 +2431,25 @@ function requestContentTypeAllowed(req) {
   return type.includes("application/json");
 }
 
+/**
+ * @param {import("node:http").ServerResponse} res
+ * @param {Awaited<ReturnType<typeof loadNative>>} native
+ * @param {string} projectRoot
+ * @param {string} tabId
+ * @param {unknown} error
+ */
+function sendCommandPermissionError(res, native, projectRoot, tabId, error) {
+  const live = liveEntryFor(projectRoot, tabId);
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  if (!live.session || (code !== "EACCES" && code !== "EPERM")) return false;
+  json(res, 400, {
+    error: error instanceof Error ? error.message : String(error),
+    revision: live.diskRevision,
+    model: liveModel(native, live.session),
+  });
+  return true;
+}
+
 const server = http.createServer(diagnostics.wrap(async (req, res) => {
   try {
     const native = await nativePromise;
@@ -2629,20 +2501,7 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
       const imageGenerateOn = harnessImageConfigured();
       const imageSearchOn = Boolean(process.env.SLIDESTUDIO_IMAGE_SEARCH_URL?.trim());
       const visionOn = Boolean(llmCfg) && process.env.SLIDESTUDIO_LLM_IMAGE !== "0";
-      const capability = {
-        research: researchCfg
-          ? { mode: "http", configured: true }
-          : { mode: "attachments-gap", configured: false },
-        imageSearch: { configured: imageSearchOn, via: imageSearchOn ? "http" : "none" },
-        imageGenerate: { configured: imageGenerateOn, via: imageGenerateOn ? "http" : "none" },
-        vision: visionOn
-          ? { mode: "main-model", note: "Main chat may accept image_url parts. If it cannot, admit you did not see the slide." }
-          : { mode: "none", note: "No vision. Structural QA only. Do not pretend you saw the page." },
-        pageRaster: { mode: "native-slide", note: "render_page screenshots native #slide." },
-        render: true,
-        runtime: { kind: "dsh", piAvailable: false, piNote: "Pi is not the product kernel. Use MiniMax China via DSH." },
-        mediaPolicy: "optional",
-      };
+      const capability = nativeCapability({researchOn: Boolean(researchCfg), imageSearchOn, imageGenerateOn, visionOn, renderReady: rasterRuntimeReady()});
       return json(res, 200, {
         ok: true,
         product: "DSH SlideStudio",
@@ -2663,12 +2522,7 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         piAvailable: false,
         piNote: "Pi is not the product kernel. Use MiniMax China via DSH.",
         piModel: "",
-        minimaxReady: Boolean(
-          process.env.MINIMAX_CN_API_KEY?.trim() ||
-            process.env.MINIMAXCN_API_KEY?.trim() ||
-            process.env.MINIMAX_API_KEY?.trim() ||
-            process.env.OPENROUTER_ONLYUSE_FREEMODEL_API_KEY?.trim(),
-        ),
+        minimaxReady: hasNativeModelKey(process.env),
         capability,
         lastRebuildMode,
       });
@@ -2685,6 +2539,18 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         });
       }
     }
+
+    if (
+      handleReviewAiLockStatusRoute(req, res, url, {
+        native,
+        json,
+        reviewProjectPath,
+        nonEmptyString,
+        reconcile: reconcileOrphanedAiReviews,
+        status: (root, token) => reviewAiLockStatus(root, token, { activeReviewAiLock, readReviewAiGuardFile }),
+        requestOriginAllowed,
+      })
+    ) return;
 
     if (req.method === "GET" && url.pathname === "/api/reviews") {
       try {
@@ -2823,10 +2689,10 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           return json(res, 409, {
             error: "another AI review is already editing this project",
             code: "AI_REVIEW_LOCKED",
-            lock: {
+            ...(acquired.lock ? { lock: {
               pagePath: acquired.lock.pagePath,
               createdAt: acquired.lock.createdAt,
-            },
+            } } : {}),
           });
         }
         let running;
@@ -2889,10 +2755,10 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           return json(res, 409, {
             error: "another AI review is already editing this project",
             code: "AI_REVIEW_LOCKED",
-            lock: {
+            ...(started.lock ? { lock: {
               pagePath: started.lock.pagePath,
               createdAt: started.lock.createdAt,
-            },
+            } } : {}),
           });
         }
         return json(res, 200, {
@@ -2991,15 +2857,17 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           current.deckState,
           page.deckState,
         );
-        const baselineProjectPages = Array.isArray(current.projectPages)
-          ? current.projectPages
-          : [{
-              pageId: current.scope?.pageId,
-              pagePath: current.pagePath,
-              pageSha256: current.pageSha256,
-            }];
+        const baselineProjectPages = /** @type {Array<{pageId: string, pagePath?: string, pageSha256?: string}>} */ (
+          Array.isArray(current.projectPages)
+            ? current.projectPages
+            : [{
+                pageId: current.scope?.pageId || "",
+                pagePath: current.pagePath,
+                pageSha256: current.pageSha256,
+              }]
+        );
         const beforeById = new Map(baselineProjectPages.map((entry) => [entry.pageId, entry]));
-        const afterById = new Map(verification.pages.map((entry) => [entry.pageId, entry]));
+        const afterById = new Map(verification.pages.map((entry) => [entry.pageId || "", entry]));
         const isWorkspaceEdit = !current.commentId;
         const structural = isWorkspaceEdit && current.scope?.kind === "deck" && current.scope?.structureOnly === true;
         // A rewrite lock inverts the contract: the baseline is disposable and
@@ -3020,16 +2888,22 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         // Structural edits are judged on the page list itself: new pages must
         // land contiguously at insertIndex, every baseline page must keep its
         // hash and relative order, and nothing may be removed.
+        /** @type {string[]} */
         let addedPageIds = [];
+        /** @type {string[]} */
         let removedPageIds = [];
+        /** @type {string[]} */
         let modifiedBaselinePageIds = [];
+        /** @type {string[]} */
         let allowedModifiedPageIds = [];
         let orderViolation = false;
         let positionViolation = false;
         let countViolation = false;
         let removalViolation = false;
         let reorderApplied = false;
+        /** @type {string[]} */
         let reorderScopeIds = [];
+        /** @type {string[] | undefined} */
         let rewritePlanPageIds;
         let rewriteMismatch = false;
         if (rewrite) {
@@ -3043,10 +2917,11 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           // The contract: the final manifest equals this turn's committed plan
           // exactly — same ids, same order, no leftovers.
           rewritePlanPageIds = latestCommittedPlanPageIds(current.root, current.createdAt);
-          const manifestOrder = verification.pages.map((entry) => entry.pageId);
+          const manifestOrder = verification.pages.map((entry) => entry.pageId || "");
+          const expectedRewrite = rewritePlanPageIds || [];
           rewriteMismatch = !rewritePlanPageIds || !manifestOrder.length ||
             manifestOrder.length !== rewritePlanPageIds.length ||
-            manifestOrder.some((pageId, index) => pageId !== rewritePlanPageIds[index]);
+            manifestOrder.some((pageId, index) => pageId !== expectedRewrite[index]);
         } else if (structural) {
           // Baseline pages listed in editablePageIds may change content; every
           // other baseline page must keep its semantic hash.
@@ -3080,7 +2955,7 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
             orderViolation = page.stableSha256(beforeSurvivors) !== page.stableSha256(afterSurvivors);
           }
           const hasInsert = Number.isSafeInteger(Number(current.scope?.insertIndex));
-          const insertIndex = hasInsert ? Number(current.scope.insertIndex) : beforeSurvivors.length;
+          const insertIndex = hasInsert ? Number(current.scope?.insertIndex) : beforeSurvivors.length;
           const afterOrder = verification.pages.map((entry) => entry.pageId);
           positionViolation = addedPageIds.length > 0 &&
             (!hasInsert ||
@@ -3713,7 +3588,13 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
       }
       const projectRoot = projectForRequest(url, body, { strict: true });
       const tabId = tabIdFor(url, body);
-      const baseSession = await ensureSession(native, projectRoot, undefined, tabId);
+      let baseSession;
+      try {
+        baseSession = await ensureSession(native, projectRoot, undefined, tabId);
+      } catch (e) {
+        if (!sendCommandPermissionError(res, native, projectRoot, tabId, e)) throw e;
+        return;
+      }
       let s = baseSession;
       const cmd = body && typeof body === "object" ? body.cmd : undefined;
       const mutatesProject = PROJECT_MUTATING_COMMANDS.has(cmd);

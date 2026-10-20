@@ -1,0 +1,56 @@
+.browser-runtime-panel {
+  width: min(100%, 760px);
+  box-sizing: border-box;
+  margin: 0 auto 18px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+}
+.browser-runtime-panel p {
+  margin: 4px 0 0;
+}
+.browser-runtime-panel strong {
+  font-size: 14px;
+}
+.browser-runtime-panel button {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.browser-runtime-panel button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.browser-runtime-panel details {
+  margin-top: 8px;
+}
+.browser-runtime-panel summary {
+  cursor: pointer;
+}
+.browser-runtime-panel code {
+  display: block;
+  margin-top: 8px;
+  user-select: all;
+}
+.browser-runtime-panel .browser-runtime-error {
+  overflow-wrap: anywhere;
+  color: rgb(var(--danger-rgb));
+}
+.browser-runtime-panel summary:focus-visible {
+  outline: 2px solid var(--a-300);
+  outline-offset: 2px;
+}
+.browser-runtime-panel[hidden],
+.browser-runtime-panel [hidden] {
+  display: none;
+}

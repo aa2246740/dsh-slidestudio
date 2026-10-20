@@ -1,3 +1,4 @@
+import { type EndpointTemplate } from "@open-slidestudio/presentation-run";
 export type ToolEndpoint = {
     readonly kind: "off";
 } | {
@@ -5,6 +6,10 @@ export type ToolEndpoint = {
     readonly url: string;
     readonly apiKey: string;
     readonly model: string;
+    /** Vendor wire format; empty = the endpoint's default preset. */
+    readonly preset?: string;
+    /** {{var}} request template; only used when preset === "template". */
+    readonly template?: EndpointTemplate;
 };
 export type ToolSettings = {
     readonly research: ToolEndpoint;
@@ -18,6 +23,8 @@ export type ToolEndpointView = {
     readonly url: string;
     readonly apiKeySet: boolean;
     readonly model: string;
+    readonly preset?: string;
+    readonly template?: EndpointTemplate;
 };
 export type ToolSettingsView = {
     readonly research: ToolEndpointView;

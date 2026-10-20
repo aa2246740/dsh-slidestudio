@@ -4,8 +4,17 @@ import path from "node:path";
 import { ROOT } from "./source-files.mjs";
 
 const result = spawnSync(
-  path.join(ROOT, "node_modules/.bin/knip"),
-  ["--config", path.join(ROOT, "knip.json"), "--dependencies", "--reporter", "json", "--no-progress", "--no-exit-code"],
+  process.execPath,
+  [
+    path.join(ROOT, "node_modules/knip/bin/knip.js"),
+    "--config",
+    path.join(ROOT, "knip.json"),
+    "--dependencies",
+    "--reporter",
+    "json",
+    "--no-progress",
+    "--no-exit-code",
+  ],
   { cwd: ROOT, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
 );
 if (result.error || result.status !== 0) throw result.error ?? new Error(result.stderr || "Knip failed");

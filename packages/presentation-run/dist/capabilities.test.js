@@ -13,12 +13,23 @@ function stubPlaywrightRuntime() {
     fs.writeFileSync(file, `export function verifyPinnedRuntime() { return true; }
 export async function launchPinnedChromium() { throw new Error("stub runtime"); }
 `);
+    fs.mkdirSync(path.join(dir, "node_modules", "playwright"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "node_modules", "playwright", "package.json"), JSON.stringify({ version: "1.61.1" }));
+    const browserDir = path.join(dir, "browsers", "chromium_headless_shell-1228");
+    fs.mkdirSync(browserDir, { recursive: true });
+    fs.writeFileSync(path.join(browserDir, "chrome-headless-shell.exe"), "");
     return file;
 }
 const missingRuntime = path.join(os.tmpdir(), "no-such-playwright-runtime-oss.mjs");
 describe("inspectCapabilities SSOT", () => {
     it("distinguishes missing rasters, disabled vision, and a text-only route", () => {
-        const base = { env: {}, providerId: "deepseek-account", modelId: "deepseek-flash", ready: true, modelInputModalities: ["text", "image"] };
+        const base = {
+            env: {},
+            providerId: "deepseek-account",
+            modelId: "deepseek-flash",
+            ready: true,
+            modelInputModalities: ["text", "image"],
+        };
         const noRaster = inspectCapabilities({ ...base, rasterReady: false });
         assert.equal(noRaster.vision.modelAcceptsImages, true);
         assert.equal(noRaster.vision.unavailableReason, "raster-unavailable");
@@ -159,8 +170,7 @@ describe("inspectCapabilities SSOT", () => {
             SLIDESTUDIO_IMAGE_BASE_URL: "http://127.0.0.1:9/images",
         };
         assert.equal(inspectCapabilities(base).imageGenerate.configured, false);
-        assert.equal(inspectCapabilities({ ...base, SLIDESTUDIO_IMAGE_API_KEY: "test-key" })
-            .imageGenerate.configured, true);
+        assert.equal(inspectCapabilities({ ...base, SLIDESTUDIO_IMAGE_API_KEY: "test-key" }).imageGenerate.configured, true);
         assert.equal(inspectCapabilities({
             ...base,
             SLIDESTUDIO_IMAGE_API_KEY: "test-key",
@@ -285,7 +295,10 @@ describe("inspectCapabilities SSOT", () => {
             assert.equal(payload.imageSearch.configured, true);
             assert.equal(payload.imageGenerate.configured, true);
             assert.equal(payload.vision.mode, "main-model");
-            assert.deepEqual(hostedProduceToolNames(inspectProjectCapabilities(root, env)), ["search_image", "generate_image"]);
+            assert.deepEqual(hostedProduceToolNames(inspectProjectCapabilities(root, env)), [
+                "search_image",
+                "generate_image",
+            ]);
         }
         finally {
             if (prevEditor === undefined)

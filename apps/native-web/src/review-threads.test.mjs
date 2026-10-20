@@ -2,72 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, afterEach, describe, it } from "node:test";
-
-const httpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openkimi-review-http-"));
-function writeProject(root, { title = "Review deck", pageText = "Before", theme = {}, elements } = {}) {
-  fs.mkdirSync(path.join(root, "pages"), { recursive: true });
-  fs.writeFileSync(path.join(root, "deck.pptd"), `${JSON.stringify({
-    version: "v2",
-    title,
-    size: [960, 540],
-    theme,
-    pages: ["pages/01_page.page"],
-  })}\n`);
-  fs.writeFileSync(path.join(root, "pages", "01_page.page"), `${JSON.stringify({
-    pageType: "content",
-    elements: elements ?? [{
-      elementId: "title",
-      elementType: "text",
-      bounds: [80, 80, 800, 60],
-      content: { text: pageText, fontSize: 32 },
-    }],
-  })}\n`);
-}
-
-function writeTwoPageProject(root, firstText, secondText) {
-  fs.mkdirSync(path.join(root, "pages"), { recursive: true });
-  fs.writeFileSync(path.join(root, "deck.pptd"), `${JSON.stringify({
-    version: "v2",
-    title: "Two-page review deck",
-    size: [960, 540],
-    theme: {},
-    pages: ["pages/01_page.page", "pages/02_page.page"],
-  })}\n`);
-  for (const [name, text] of [["01_page", firstText], ["02_page", secondText]]) {
-    fs.writeFileSync(path.join(root, "pages", `${name}.page`), `${JSON.stringify({
-      pageType: "content",
-      elements: [textElement(`${name}-title`, text)],
-    })}\n`);
-  }
-}
-
-function writeThreePageProject(root, firstText, secondText, thirdText) {
-  fs.mkdirSync(path.join(root, "pages"), { recursive: true });
-  const entries = [
-    ["01_page", firstText],
-    ["02_page", secondText],
-    ["03_page", thirdText],
-  ];
-  fs.writeFileSync(path.join(root, "deck.pptd"), `${JSON.stringify({
-    version: "v2",
-    title: "Three-page review deck",
-    size: [960, 540],
-    theme: {},
-    pages: entries.map(([name]) => `pages/${name}.page`),
-  })}\n`);
-  for (const [name, text] of entries) {
-    fs.writeFileSync(path.join(root, "pages", `${name}.page`), `${JSON.stringify({
-      pageType: "content",
-      elements: [textElement(`${name}-title`, text)],
-    })}\n`);
-  }
-}
-writeProject(httpRoot);
-// Must be set before the dynamic import: server.mjs reads it to choose the
-// project that its HTTP handler owns.
-process.env.OPEN_SLIDESTUDIO_PROJECT = httpRoot;
-const {
+import { describe, it } from "node:test";
+import {
+  httpRoot,
+  writeProject,
+  writeTwoPageProject,
+  writeThreePageProject,
   acquireReviewAiLock,
   captureWorkspaceEditScope,
   readReviewThreads,
@@ -77,156 +17,25 @@ const {
   reviewDeckDelta,
   reviewPageDelta,
   sanitizeReviewThread,
-  server,
   upsertReviewThread,
-} = await import("./server.mjs");
-const { createEmptyProject, loadProject } = await import("../../../packages/pptd-v2/dist/index.js");
-const { currentPageRevision, inspectRunLedger, stableSha256 } = await import("../../../packages/presentation-run/dist/index.js");
-const { editorReviewScopeFromEdit } = await import("../../../packages/dsh-slides-host/dist/routes.js");
-
-const roots = [];
-const native = {
-  pptd: {
-    withProjectWriteLock(_root, fn) {
-      return fn();
-    },
-  },
-};
-
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "openkimi-review-cas-"));
-  roots.push(root);
-  return root;
-}
-
-async function httpEndpoint() {
-  if (!server.listening) await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  return `http://127.0.0.1:${address.port}`;
-}
-
-async function openHttpRoot(base) {
-  const response = await fetch(`${base}/api/open`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: httpRoot, page: 0 }),
-  });
-  assert.equal(response.status, 200);
-}
-
-async function createHttpReview(base, {
-  id,
-  text = "review",
-  kind = "elements",
-  elementIds = ["title"],
-} = {}) {
-  const response = await fetch(`${base}/api/reviews`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      project: httpRoot,
-      pagePath: "pages/01_page.page",
-      comment: { id, text, scope: { kind, elementIds } },
-    }),
-  });
-  const body = await response.json();
-  assert.equal(response.status, 200, JSON.stringify(body));
-  return body.comment;
-}
-
-function textElement(elementId, text) {
-  return {
-    elementId,
-    elementType: "text",
-    bounds: [80, 80, 800, 60],
-    content: { text, fontSize: 32 },
-  };
-}
-
-function writeReviewLedger(root, pageSha256, revision = 6) {
-  const at = "2026-09-06T00:00:00.000Z";
-  fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-  fs.writeFileSync(path.join(root, "_agent", "run-ledger.v1.json"), `${JSON.stringify({
-    schemaVersion: 1,
-    runId: "review-human-edit-session",
-    createdAt: at,
-    updatedAt: at,
-    sourcePack: {
-      manifestSha256: "a".repeat(64),
-      requirementsId: "b".repeat(64),
-      requirements: [],
-    },
-    facts: [
-      {
-        type: "page.revision-committed",
-        factId: "page-before-human-edit",
-        at,
-        contextEpochId: "review-human-edit-epoch",
-        pageId: "01_page",
-        revision,
-        pageSha256,
-      },
-      {
-        type: "page.raster-committed",
-        factId: "raster-before-human-edit",
-        at,
-        pageId: "01_page",
-        revision,
-        pageSha256,
-        rasterSha256: "c".repeat(64),
-        src: "_agent/rasters/01_page.png",
-        width: 960,
-        height: 540,
-        layoutGateVersion: "rendered-layout-gate-v8",
-        layoutStatus: "pass",
-        layoutIssues: [],
-      },
-    ],
-  }, null, 2)}\n`);
-}
-
-function writeWorkspaceReviewLedger(root, revision = 6) {
-  const at = "2026-09-06T00:00:00.000Z";
-  const project = loadProject(root);
-  fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-  fs.writeFileSync(path.join(root, "_agent", "run-ledger.v1.json"), `${JSON.stringify({
-    schemaVersion: 1,
-    runId: "workspace-review-session",
-    createdAt: at,
-    updatedAt: at,
-    sourcePack: {
-      manifestSha256: "a".repeat(64),
-      requirementsId: "b".repeat(64),
-      requirements: [],
-    },
-    facts: project.pages.map((entry) => {
-      const pageId = path.basename(entry.path, ".page");
-      return {
-        type: "page.revision-committed",
-        factId: `workspace-${pageId}`,
-        at,
-        contextEpochId: "workspace-review-epoch",
-        pageId,
-        revision,
-        pageSha256: stableSha256({ id: pageId, ...entry.page }),
-      };
-    }),
-  }, null, 2)}\n`);
-}
-
-function findReviewStatus(root, commentId) {
-  const record = readReviewThreads(root);
-  return record.pages["pages/01_page.page"]?.find((comment) => comment.id === commentId)?.aiStatus;
-}
-
-afterEach(() => {
-  while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true });
-});
-
-after(async () => {
-  if (server.listening) await new Promise((resolve) => server.close(resolve));
-  fs.rmSync(httpRoot, { recursive: true, force: true });
-});
+  createEmptyProject,
+  loadProject,
+  currentPageRevision,
+  inspectRunLedger,
+  stableSha256,
+  editorReviewScopeFromEdit,
+  createCommentSubmission,
+  readCommentSubmissions,
+  native,
+  fixture,
+  httpEndpoint,
+  openHttpRoot,
+  createHttpReview,
+  textElement,
+  writeReviewLedger,
+  writeWorkspaceReviewLedger,
+  findReviewStatus,
+} from "./review-test-fixtures.mjs";
 
 describe("project-owned review thread revisions", () => {
   it("creates at revision 1, accepts the expected revision, and rejects stale edits", () => {
@@ -263,11 +72,14 @@ describe("project-owned review thread revisions", () => {
     const pagePath = "page-01";
     const file = path.join(root, "_agent", "review-threads.v1.json");
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({
-      version: 1,
-      revision: 4,
-      pages: { [pagePath]: [{ id: "legacy", text: "old" }] },
-    }));
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        revision: 4,
+        pages: { [pagePath]: [{ id: "legacy", text: "old" }] },
+      }),
+    );
 
     const stored = readReviewThreads(root).pages[pagePath][0];
     assert.equal(sanitizeReviewThread(stored, pagePath).revision, 1);
@@ -289,14 +101,17 @@ describe("project-owned review thread revisions", () => {
     assert.equal(conflict.comment.revision, 1);
   });
 
-  it("serializes AI review turns across browser tabs", () => {
+  it("serializes AI review turns across browser tabs", async () => {
     const root = fixture();
+    writeProject(root);
+    const base = await httpEndpoint();
     const first = acquireReviewAiLock(root, {
       pagePath: "page-01",
       commentId: "review-1",
       scope: { kind: "elements", pageId: "page-01", elementIds: ["title"] },
     });
     assert.equal(first.conflict, false);
+    assert.ok(first.lock);
     assert.equal(first.lock.root, path.resolve(root));
     assert.equal(reviewAiLockByToken(first.lock.token)?.root, path.resolve(root));
     const guardFile = path.join(root, "_agent", "ai-review-lock.v1.json");
@@ -314,9 +129,16 @@ describe("project-owned review thread revisions", () => {
     assert.equal(fs.existsSync(path.join(root, "_agent", "ai-review-lock.v1.json")), false);
     const third = acquireReviewAiLock(root, { pagePath: "page-01", commentId: "review-2" });
     assert.equal(third.conflict, false);
+    assert.ok(third.lock);
     third.lock.expiresAt = Date.now() - 1;
     assert.equal(releaseReviewAiLock(root, "wrong-token").released, true);
-    assert.equal(fs.existsSync(path.join(root, "_agent", "ai-review-lock.v1.json")), false);
+    const staleGuard = JSON.parse(fs.readFileSync(guardFile, "utf8"));
+    assert.equal(staleGuard.token, third.lock.token);
+    staleGuard.expiresAt = Date.now() - 1;
+    fs.writeFileSync(guardFile, `${JSON.stringify(staleGuard)}\n`, "utf8");
+    const reconciled = await fetch(`${base}/api/reviews?project=${encodeURIComponent(root)}&all=1`);
+    assert.equal(reconciled.status, 200);
+    assert.equal(fs.existsSync(guardFile), false);
   });
 
   it("renews an active AI review lease atomically and rejects an unknown token", async () => {
@@ -335,6 +157,7 @@ describe("project-owned review thread revisions", () => {
     });
     assert.equal(acquiredResponse.status, 200);
     const acquired = await acquiredResponse.json();
+    assert.ok(acquired.lock);
     const token = acquired.lock.token;
     const expiresBefore = acquired.lock.expiresAt;
     const guardFile = path.join(httpRoot, "_agent", "ai-review-lock.v1.json");
@@ -369,6 +192,12 @@ describe("project-owned review thread revisions", () => {
     });
     assert.equal(expired.status, 409);
     assert.equal((await expired.json()).code, "AI_REVIEW_LOCK_MISMATCH");
+    assert.equal(fs.existsSync(guardFile), true);
+    const staleGuard = JSON.parse(fs.readFileSync(guardFile, "utf8"));
+    staleGuard.expiresAt = Date.now() - 1;
+    fs.writeFileSync(guardFile, `${JSON.stringify(staleGuard)}\n`, "utf8");
+    const reconciled = await fetch(`${base}/api/reviews?project=${encodeURIComponent(httpRoot)}&all=1`);
+    assert.equal(reconciled.status, 200);
     assert.equal(fs.existsSync(guardFile), false);
   });
 
@@ -376,14 +205,18 @@ describe("project-owned review thread revisions", () => {
     const root = fixture();
     const acquired = acquireReviewAiLock(root, { pagePath: "page-01", commentId: "write-failure" });
     assert.equal(acquired.conflict, false);
+    assert.ok(acquired.lock);
     const expiresBefore = acquired.lock.expiresAt;
     const guardFile = path.join(root, "_agent", "ai-review-lock.v1.json");
     const guardBefore = JSON.parse(fs.readFileSync(guardFile, "utf8"));
 
     assert.throws(
-      () => renewReviewAiLock(acquired.lock.token, {
-        writeGuard() { throw new Error("simulated guard write failure"); },
-      }),
+      () =>
+        renewReviewAiLock(acquired.lock.token, {
+          writeGuard() {
+            throw new Error("simulated guard write failure");
+          },
+        }),
       /simulated guard write failure/,
     );
     assert.equal(reviewAiLockByToken(acquired.lock.token)?.expiresAt, expiresBefore);
@@ -402,10 +235,7 @@ describe("project-owned review thread revisions", () => {
     };
     const safe = {
       ...before,
-      elements: [
-        { elementId: "title", content: { text: "after" } },
-        before.elements[1],
-      ],
+      elements: [{ elementId: "title", content: { text: "after" } }, before.elements[1]],
     };
     assert.equal(reviewPageDelta(stable, before, safe, "title").scopeViolation, false);
     const unsafe = {
@@ -434,15 +264,16 @@ describe("project-owned review thread revisions", () => {
   it("returns HTTP 409 with the current comment for a stale PATCH", async () => {
     const base = await httpEndpoint();
     const endpoint = `${base}/api/reviews`;
-    const patch = async (comment) => fetch(endpoint, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        project: httpRoot,
-        pagePath: "pages/01_page.page",
-        comment: comment.scope ? comment : { ...comment, scope: { kind: "page", elementIds: [] } },
-      }),
-    });
+    const patch = async (comment) =>
+      fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: httpRoot,
+          pagePath: "pages/01_page.page",
+          comment: comment.scope ? comment : { ...comment, scope: { kind: "page", elementIds: [] } },
+        }),
+      });
 
     const created = await patch({ id: "http-review", text: "first" });
     const first = await created.json();
@@ -606,12 +437,18 @@ describe("project-owned review thread revisions", () => {
         commentRevision: lockBody.comment.revision,
       },
     });
-    assert.equal(hostScope?.pageRevision, 7,
-      "the synchronized lock payload must pass the unchanged Host review-scope guard");
+    assert.equal(
+      hostScope?.pageRevision,
+      7,
+      "the synchronized lock payload must pass the unchanged Host review-scope guard",
+    );
     assert.equal(currentPageRevision(httpRoot, "01_page")?.pageSha256, currentSha);
     const inspection = inspectRunLedger(httpRoot);
-    assert.equal(inspection.pages.find((page) => page.pageId === "01_page")?.raster, false,
-      "the prior revision's raster must not be reused for the human-edited revision");
+    assert.equal(
+      inspection.pages.find((page) => page.pageId === "01_page")?.raster,
+      false,
+      "the prior revision's raster must not be reused for the human-edited revision",
+    );
     assert.equal(releaseReviewAiLock(httpRoot, lockBody.lock.token).released, true);
 
     // A comment captured before another page write remains stale. The lock
@@ -631,8 +468,11 @@ describe("project-owned review thread revisions", () => {
     const staleBody = await staleResponse.json();
     assert.equal(staleResponse.status, 409, JSON.stringify(staleBody));
     assert.equal(staleBody.code, "REVIEW_SCOPE_STALE");
-    assert.equal(currentPageRevision(httpRoot, "01_page")?.revision, 7,
-      "rejecting a stale comment must not record the changed page as authorized");
+    assert.equal(
+      currentPageRevision(httpRoot, "01_page")?.revision,
+      7,
+      "rejecting a stale comment must not record the changed page as authorized",
+    );
     fs.rmSync(path.join(httpRoot, "_agent", "run-ledger.v1.json"), { force: true });
   });
 
@@ -653,13 +493,17 @@ describe("project-owned review thread revisions", () => {
     });
     assert.deepEqual(scope.elementIds, ["title"]);
     assert.deepEqual(scope.targetPageIds, ["01_page"]);
-    assert.throws(() => captureWorkspaceEditScope(snapshot, {
-      authorizationId: "agent-chat-2",
-      kind: "elements",
-      pageId: "01_page",
-      elementIds: ["deleted"],
-      targetPages: [{ pageId: "01_page", revision: 4, pageSha256 }],
-    }), /no longer exist/);
+    assert.throws(
+      () =>
+        captureWorkspaceEditScope(snapshot, {
+          authorizationId: "agent-chat-2",
+          kind: "elements",
+          pageId: "01_page",
+          elementIds: ["deleted"],
+          targetPages: [{ pageId: "01_page", revision: 4, pageSha256 }],
+        }),
+      /no longer exist/,
+    );
   });
 
   it("returns authoritative human-edited revisions for a new direct workspace lock", async () => {
@@ -693,11 +537,13 @@ describe("project-owned review thread revisions", () => {
     assert.equal(lockResponse.status, 200, JSON.stringify(lockBody));
     const currentPage = loadProject(httpRoot).pages[0].page;
     const currentSha = stableSha256({ id: "01_page", ...currentPage });
-    assert.deepEqual(lockBody.lock.scope.targetPages, [{
-      pageId: "01_page",
-      revision: 7,
-      pageSha256: currentSha,
-    }]);
+    assert.deepEqual(lockBody.lock.scope.targetPages, [
+      {
+        pageId: "01_page",
+        revision: 7,
+        pageSha256: currentSha,
+      },
+    ]);
     assert.equal(currentPageRevision(httpRoot, "01_page")?.revision, 7);
     assert.equal(inspectRunLedger(httpRoot).pages[0]?.raster, false);
     assert.equal(releaseReviewAiLock(httpRoot, lockBody.lock.token).released, true);
@@ -800,7 +646,10 @@ describe("project-owned review thread revisions", () => {
     const wholeDeckBody = await wholeDeckAsPages.json();
     assert.equal(wholeDeckAsPages.status, 200, JSON.stringify(wholeDeckBody));
     assert.equal(wholeDeckBody.lock.scope.kind, "pages");
-    assert.deepEqual(wholeDeckBody.lock.scope.targetPages.map(page => page.pageId), ["01_page", "02_page", "03_page"]);
+    assert.deepEqual(
+      wholeDeckBody.lock.scope.targetPages.map((page) => page.pageId),
+      ["01_page", "02_page", "03_page"],
+    );
     assert.equal(releaseReviewAiLock(httpRoot, wholeDeckBody.lock.token).released, true);
 
     const subsetResponse = await fetch(`${base}/api/reviews/ai-lock`, {
@@ -934,11 +783,17 @@ describe("project-owned review thread revisions", () => {
     });
     assert.equal(noChange.status, 409);
     assert.equal((await noChange.json()).code, "AI_REVIEW_NO_TARGET_CHANGE");
-    let stored = await fetch(`${base}/api/reviews?project=${encodeURIComponent(httpRoot)}&pagePath=${encodeURIComponent("pages/01_page.page")}`).then((r) => r.json());
+    let stored = await fetch(
+      `${base}/api/reviews?project=${encodeURIComponent(httpRoot)}&pagePath=${encodeURIComponent("pages/01_page.page")}`,
+    ).then((r) => r.json());
     assert.equal(stored.comments.find((entry) => entry.id === comment.id).aiStatus, "running");
 
     writeProject(httpRoot, {
-      elements: [textElement("title", "Changed"), textElement("subtitle", "Detail"), textElement("outside", "Also changed")],
+      elements: [
+        textElement("title", "Changed"),
+        textElement("subtitle", "Detail"),
+        textElement("outside", "Also changed"),
+      ],
     });
     const outside = await fetch(`${base}/api/reviews/ai-lock/verify`, {
       method: "POST",
@@ -1020,10 +875,13 @@ describe("project-owned review thread revisions", () => {
     assert.equal(fs.existsSync(path.join(otherRoot, "_agent", "review-threads.v1.json")), false);
 
     const imageSource = path.join(otherRoot, "source.png");
-    fs.writeFileSync(imageSource, Buffer.from(
-      "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
-      "hex",
-    ));
+    fs.writeFileSync(
+      imageSource,
+      Buffer.from(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+        "hex",
+      ),
+    );
     const imageProject = await fetch(`${base}/api/load-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1066,20 +924,27 @@ describe("project-owned review thread revisions", () => {
       }),
     });
     assert.equal(lateComment.status, 200);
-    const latestReviewBytes = fs.readFileSync(
-      path.join(httpRoot, "_agent", "review-threads.v1.json"),
-    );
-    const conversationFile = path.join(httpRoot,"_agent","assistant-conversation.v1.json");
-    const conversationBytes = JSON.stringify({version:1,mode:"edit",messages:[{id:"later",text:"keep this conversation",mode:"edit"}]});
+    const latestReviewBytes = fs.readFileSync(path.join(httpRoot, "_agent", "review-threads.v1.json"));
+    const conversationFile = path.join(httpRoot, "_agent", "assistant-conversation.v1.json");
+    const conversationBytes = JSON.stringify({
+      version: 1,
+      mode: "edit",
+      messages: [{ id: "later", text: "keep this conversation", mode: "edit" }],
+    });
     fs.writeFileSync(conversationFile, conversationBytes);
-    const questionsFile = path.join(httpRoot,"_agent","assistant-questions.v1.json");
-    const questionsBytes = JSON.stringify([{id:"selected",status:"answered",answer:{answers:[{id:"theme",selected:["深紫"]}]}}]);
+    const questionsFile = path.join(httpRoot, "_agent", "assistant-questions.v1.json");
+    const questionsBytes = JSON.stringify([
+      { id: "selected", status: "answered", answer: { answers: [{ id: "theme", selected: ["深紫"] }] } },
+    ]);
     fs.writeFileSync(questionsFile, questionsBytes);
     const submissionsFile = path.join(httpRoot, "_agent", "comment-submissions.v1.json");
-    const submissionBytes = JSON.stringify({version:1,submissions:[{id:"later-accepted-request",status:"preparing"}]});
+    const submissionBytes = JSON.stringify({
+      version: 1,
+      submissions: [{ id: "later-accepted-request", status: "preparing" }],
+    });
     fs.writeFileSync(submissionsFile, submissionBytes);
-    const attemptFile = path.join(httpRoot,"_agent","attempt.v1.json");
-    fs.writeFileSync(attemptFile, JSON.stringify({attemptId:"latest-turn",startedAt:"2026-09-20T00:00:00Z"}));
+    const attemptFile = path.join(httpRoot, "_agent", "attempt.v1.json");
+    fs.writeFileSync(attemptFile, JSON.stringify({ attemptId: "latest-turn", startedAt: "2026-09-20T00:00:00Z" }));
 
     writeProject(httpRoot, {
       title: "AI changed title",
@@ -1120,20 +985,31 @@ describe("project-owned review thread revisions", () => {
     assert.equal(restoreResponse.status, 200);
     const restored = await restoreResponse.json();
     assert.equal(restored.reviewsPreserved, true);
-    assert.equal(fs.readFileSync(conversationFile,"utf8"), conversationBytes, "document rollback keeps later chat messages");
-    assert.equal(fs.readFileSync(questionsFile,"utf8"), questionsBytes, "document rollback keeps later native question answers");
-    assert.equal(JSON.parse(fs.readFileSync(attemptFile,"utf8")).attemptId,"latest-turn");
-    assert.equal(fs.readFileSync(submissionsFile,"utf8"),submissionBytes,"rollback preserves the later submission receipt");
+    assert.equal(
+      fs.readFileSync(conversationFile, "utf8"),
+      conversationBytes,
+      "document rollback keeps later chat messages",
+    );
+    assert.equal(
+      fs.readFileSync(questionsFile, "utf8"),
+      questionsBytes,
+      "document rollback keeps later native question answers",
+    );
+    assert.equal(JSON.parse(fs.readFileSync(attemptFile, "utf8")).attemptId, "latest-turn");
+    assert.equal(
+      fs.readFileSync(submissionsFile, "utf8"),
+      submissionBytes,
+      "rollback preserves the later submission receipt",
+    );
     assert.equal(loadProject(httpRoot).presentation.title, "Before AI");
     const reviews = readReviewThreads(httpRoot);
     assert.equal(
-      reviews.pages["pages/01_page.page"].some((comment) => comment.id === "collaborator" && comment.text === "keep me"),
+      reviews.pages["pages/01_page.page"].some(
+        (comment) => comment.id === "collaborator" && comment.text === "keep me",
+      ),
       true,
     );
-    assert.deepEqual(
-      fs.readFileSync(path.join(httpRoot, "_agent", "review-threads.v1.json")),
-      latestReviewBytes,
-    );
+    assert.deepEqual(fs.readFileSync(path.join(httpRoot, "_agent", "review-threads.v1.json")), latestReviewBytes);
     assert.equal(fs.existsSync(path.join(httpRoot, "_agent", "ai-review-lock.v1.json")), true);
 
     const released = await fetch(`${base}/api/reviews/ai-lock`, {
@@ -1199,17 +1075,19 @@ describe("project-owned review thread revisions", () => {
 
   it("routes editor chat through the DSH Agent instead of the removed rule fallback", () => {
     const client = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+    const instruction = fs.readFileSync(new URL("../public/workspace-edit-instruction.js", import.meta.url), "utf8");
     const submitStart = client.indexOf('$("work-form")?.addEventListener("submit"');
     const openStart = client.indexOf('api("/api/open"', submitStart);
     assert.ok(submitStart > 0 && openStart > submitStart);
     const submitFlow = client.slice(submitStart, openStart);
     assert.doesNotMatch(submitFlow, /\/api\/refine/);
     assert.match(client, /\/slides\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/turn/);
-    assert.match(client, /用户原话是修改意图，不是要写进幻灯片的文案/);
+    assert.match(instruction, /用户原话是修改意图，不是要写进幻灯片的文案/);
   });
 
   it("honors explicit whole-deck intent and refreshes changed pages on the right canvas", () => {
     const client = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+    const instruction = fs.readFileSync(new URL("../public/workspace-edit-instruction.js", import.meta.url), "utf8");
     const scopeHelper = fs.readFileSync(new URL("../public/work-agent-scope.js", import.meta.url), "utf8");
     const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
     const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
@@ -1217,14 +1095,14 @@ describe("project-owned review thread revisions", () => {
     assert.match(scopeHelper, /function targetFromAssistantIntent/);
 
     assert.match(client, /pages: targetPages/);
-    assert.match(client, /整份文稿的授权页面依次为/);
-    assert.match(client, /只修改用户要求涉及且确实需要变化的内容/);
-    assert.match(client, /已经符合要求的页面可以保持不变/);
-    assert.match(client, /逐页检查/);
-    assert.match(client, /不能改动无关内容来凑写入页数/);
+    assert.match(instruction, /整份文稿的授权页面依次为/);
+    assert.match(instruction, /只修改用户要求涉及且确实需要变化的内容/);
+    assert.match(instruction, /已经符合要求的页面可以保持不变/);
+    assert.match(instruction, /逐页检查/);
+    assert.match(instruction, /不能改动无关内容来凑写入页数/);
     assert.match(client, /requiresEveryTargetPage/);
-    assert.doesNotMatch(client, /必须修改整份文稿的全部/);
-    assert.doesNotMatch(client, /不得因页面看起来接近目标而跳过/);
+    assert.doesNotMatch(instruction, /必须修改整份文稿的全部/);
+    assert.doesNotMatch(instruction, /不得因页面看起来接近目标而跳过/);
     assert.match(client, /async function refreshAiReviewCanvas/);
     assert.match(client, /body: JSON\.stringify\(\{ path: project, page: pageIndex \}\)/);
     assert.doesNotMatch(html, /id="agent-live-preview"/);
@@ -1265,7 +1143,10 @@ describe("project-owned review thread revisions", () => {
     const launch = fs.readFileSync(new URL("../public/launch-flow.js", import.meta.url), "utf8");
     assert.match(hub, /location\.replace\(launchHref\(launchId\)\)/);
     assert.match(launch, /function handoffToLiveEditor/);
-    assert.match(launch, /history\.replaceState\(null, "", editorHref\(projectPath, \{ workspace: true, sessionId, live: true \}\)\)/);
+    assert.match(
+      launch,
+      /history\.replaceState\(null, "", editorHref\(projectPath, \{ workspace: true, sessionId, live: true \}\)\)/,
+    );
     assert.match(client, /function generationInteractionLocked/);
     assert.match(client, /"awaiting-project"/);
     assert.match(client, /generationPlaceholder/);
@@ -1331,12 +1212,15 @@ describe("page-targeted notes persistence", () => {
   it("writes a debounced note to its captured page after navigation changes the current page", async () => {
     const root = fixture();
     fs.mkdirSync(path.join(root, "pages"), { recursive: true });
-    fs.writeFileSync(path.join(root, "deck.pptd"), `${JSON.stringify({
-      version: "v2",
-      title: "Notes target",
-      size: [960, 540],
-      pages: ["pages/01.page", "pages/02.page"],
-    })}\n`);
+    fs.writeFileSync(
+      path.join(root, "deck.pptd"),
+      `${JSON.stringify({
+        version: "v2",
+        title: "Notes target",
+        size: [960, 540],
+        pages: ["pages/01.page", "pages/02.page"],
+      })}\n`,
+    );
     for (const name of ["01.page", "02.page"]) {
       fs.writeFileSync(path.join(root, "pages", name), `${JSON.stringify({ pageType: "content", elements: [] })}\n`);
     }
@@ -1435,6 +1319,12 @@ describe("cross-page AI review batch lock", () => {
     assert.equal(response.status, 200, await response.text());
   }
 
+  /**
+   * @param {string} base
+   * @param {string} pagePath
+   * @param {number} index
+   * @returns {Promise<{id: string, revision: number, scope: {pageRevision: number | null}}>}
+   */
   async function createBatchReview(base, pagePath, index) {
     const response = await fetch(`${base}/api/reviews`, {
       method: "PATCH",
@@ -1451,14 +1341,18 @@ describe("cross-page AI review batch lock", () => {
     });
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
-    return body.comment;
+    return /** @type {{id: string, revision: number, scope: {pageRevision: number | null}}} */ (
+      /** @type {unknown} */ (body.comment)
+    );
   }
 
-  const batchItems = (comments) => comments.map((comment, index) => ({
-    pagePath: pages[index],
-    commentId: comment.id,
-    commentRevision: comment.revision,
-  }));
+  /** @param {Array<{id: string, revision: number}>} comments */
+  const batchItems = (comments) =>
+    comments.map((comment, index) => ({
+      pagePath: pages[index],
+      commentId: comment.id,
+      commentRevision: comment.revision,
+    }));
 
   const lockGuard = path.join(batchRoot, "_agent", "ai-review-lock.v1.json");
 
@@ -1466,10 +1360,7 @@ describe("cross-page AI review batch lock", () => {
     resetBatchRoot();
     const base = await httpEndpoint();
     await openBatchRoot(base);
-    const comments = [
-      await createBatchReview(base, pages[0], 1),
-      await createBatchReview(base, pages[1], 2),
-    ];
+    const comments = [await createBatchReview(base, pages[0], 1), await createBatchReview(base, pages[1], 2)];
     const response = await fetch(`${base}/api/reviews/ai-lock/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1478,7 +1369,10 @@ describe("cross-page AI review batch lock", () => {
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.items.length, 2);
-    assert.deepEqual(body.items.map((item) => item.pagePath), pages);
+    assert.deepEqual(
+      body.items.map((item) => item.pagePath),
+      pages,
+    );
     const guard = JSON.parse(fs.readFileSync(lockGuard, "utf8"));
     assert.equal(guard.items.length, 2, "guard file must record every batched comment");
     for (const pagePath of pages) {
@@ -1502,15 +1396,17 @@ describe("cross-page AI review batch lock", () => {
     const comments = [await createBatchReview(base, pages[0], 1), await createBatchReview(base, pages[1], 2)];
     assert.equal(comments[1].scope.pageRevision, null);
     const response = await fetch(`${base}/api/reviews/ai-lock/batch`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project: batchRoot, items: batchItems(comments) }),
     });
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
-    assert.ok(body.items.every(item => Number.isInteger(item.pageRevision) && item.pageRevision > 0));
+    assert.ok(body.items.every((item) => Number.isInteger(item.pageRevision) && item.pageRevision > 0));
     assert.equal(body.items[1].pageSha256, currentPageRevision(batchRoot, "02_page").pageSha256);
     await fetch(`${base}/api/reviews/ai-lock/batch/cancel`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project: batchRoot, token: body.token }),
     });
   });
@@ -1542,11 +1438,13 @@ describe("cross-page AI review batch lock", () => {
     const body = await response.json();
     assert.equal(response.status, 409, JSON.stringify(body));
     assert.equal(body.code, "REVIEW_BATCH_CONFLICT");
-    assert.deepEqual(body.stale, [{
-      pagePath: pages[1],
-      commentId: second.id,
-      reason: "REVIEW_COMMENT_CONFLICT",
-    }]);
+    assert.deepEqual(body.stale, [
+      {
+        pagePath: pages[1],
+        commentId: second.id,
+        reason: "REVIEW_COMMENT_CONFLICT",
+      },
+    ]);
     // All-or-nothing: the healthy comment must not have been marked running and
     // no lock may be left behind.
     for (const pagePath of pages) {
@@ -1556,14 +1454,77 @@ describe("cross-page AI review batch lock", () => {
     assert.equal(fs.existsSync(lockGuard), false);
   });
 
+  it("fails a preparing submission that has no running comment", async () => {
+    const root = fixture();
+    writeProject(root);
+    const submission = createCommentSubmission(root, [], "review brief");
+    const base = await httpEndpoint();
+
+    const response = await fetch(`${base}/api/reviews?project=${encodeURIComponent(root)}&all=1`);
+    assert.equal(response.status, 200);
+    const receipts = readCommentSubmissions(root);
+    assert.equal(receipts.find((entry) => entry.id === submission.id)?.status, "failed");
+  });
+
+  it("reports review lock status without exposing its token", async () => {
+    const root = fixture();
+    writeProject(root);
+    const base = await httpEndpoint();
+    const acquired = acquireReviewAiLock(root, { pagePath: "page-01" });
+    assert.ok(acquired.lock);
+    const token = acquired.lock.token;
+    const statusUrl = (value) => {
+      const query = new URLSearchParams({ project: root, token: value });
+      return `${base}/api/reviews/ai-lock/status?${query}`;
+    };
+
+    const ownResponse = await fetch(statusUrl(token));
+    const own = await ownResponse.json();
+    assert.equal(ownResponse.status, 200);
+    assert.deepEqual(Object.keys(own).sort(), ["active", "expiresAt", "recoverable"]);
+    assert.deepEqual({ active: own.active, recoverable: own.recoverable }, { active: true, recoverable: true });
+    assert.equal(JSON.stringify(own).includes(token), false);
+
+    const otherResponse = await fetch(statusUrl("another-token"));
+    const other = await otherResponse.json();
+    assert.equal(otherResponse.status, 200);
+    assert.deepEqual({ active: other.active, recoverable: other.recoverable }, { active: true, recoverable: false });
+
+    const escapedUrl = new URL(statusUrl("token"));
+    escapedUrl.searchParams.set("project", path.resolve(root, "..", "outside-project"));
+    const escaped = await fetch(escapedUrl);
+    assert.notEqual(escaped.status, 200);
+
+    const released = await fetch(`${base}/api/reviews/ai-lock`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: root, token }),
+    });
+    assert.equal(released.status, 200);
+    const inactiveResponse = await fetch(statusUrl(token));
+    const inactive = await inactiveResponse.json();
+    assert.equal(inactiveResponse.status, 200);
+    assert.deepEqual(inactive, { active: false, recoverable: false });
+  });
+
+  it("does not delete a durable guard when the in-memory lease expires", () => {
+    const root = fixture();
+    const acquired = acquireReviewAiLock(root, { pagePath: "page-01" });
+    assert.ok(acquired.lock);
+    const guard = path.join(root, "_agent", "ai-review-lock.v1.json");
+    const live = reviewAiLockByToken(acquired.lock.token);
+    assert.ok(live);
+    live.expiresAt = Date.now() - 1;
+
+    assert.equal(reviewAiLockByToken(acquired.lock.token), undefined);
+    assert.equal(fs.existsSync(guard), true);
+  });
+
   it("apply resolves every batched comment and releases the lock", async () => {
     resetBatchRoot();
     const base = await httpEndpoint();
     await openBatchRoot(base);
-    const comments = [
-      await createBatchReview(base, pages[0], 1),
-      await createBatchReview(base, pages[1], 2),
-    ];
+    const comments = [await createBatchReview(base, pages[0], 1), await createBatchReview(base, pages[1], 2)];
     const acquired = await fetch(`${base}/api/reviews/ai-lock/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1572,7 +1533,8 @@ describe("cross-page AI review batch lock", () => {
 
     assert.ok(acquired.submission.id, "HTTP response carries the submission identity");
     assert.equal(acquired.submission.status, "preparing");
-    for (const pagePath of pages) assert.equal(readReviewThreads(batchRoot).pages[pagePath][0].aiSubmissionId, acquired.submission.id);
+    for (const pagePath of pages)
+      assert.equal(readReviewThreads(batchRoot).pages[pagePath][0].aiSubmissionId, acquired.submission.id);
     // A successful turn must actually affect every authorized page.
     for (const pagePath of pages) {
       const file = path.join(batchRoot, pagePath);
@@ -1588,8 +1550,10 @@ describe("cross-page AI review batch lock", () => {
     const appliedBody = await applied.json();
     assert.equal(applied.status, 200, JSON.stringify(appliedBody));
     assert.equal(appliedBody.applied.length, 2);
-    const receipts = JSON.parse(fs.readFileSync(path.join(batchRoot, "_agent", "comment-submissions.v1.json"), "utf8")).submissions;
-    assert.equal(receipts.find(item => item.id === acquired.submission.id).status, "applied");
+    const receipts = JSON.parse(
+      fs.readFileSync(path.join(batchRoot, "_agent", "comment-submissions.v1.json"), "utf8"),
+    ).submissions;
+    assert.equal(receipts.find((item) => item.id === acquired.submission.id).status, "applied");
     for (const pagePath of pages) {
       const stored = readReviewThreads(batchRoot).pages[pagePath][0];
       assert.equal(stored.aiStatus, "applied", `${pagePath} must be auto-resolved`);
@@ -1609,18 +1573,33 @@ describe("cross-page AI review batch lock", () => {
     await openBatchRoot(base);
     const first = await createBatchReview(base, pages[0], 1);
     const second = await fetch(`${base}/api/reviews`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: batchRoot, pagePath: pages[0], comment: { id: "second-target", text: "red", scope: { kind: "elements", elementIds: ["subtitle"] } } }),
-    }).then(response => response.json());
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: batchRoot,
+        pagePath: pages[0],
+        comment: { id: "second-target", text: "red", scope: { kind: "elements", elementIds: ["subtitle"] } },
+      }),
+    }).then((response) => response.json());
     const acquired = await fetch(`${base}/api/reviews/ai-lock/batch`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: batchRoot, items: [first, second.comment].map(comment => ({ pagePath: pages[0], commentId: comment.id, commentRevision: comment.revision })) }),
-    }).then(response => response.json());
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: batchRoot,
+        items: [first, second.comment].map((comment) => ({
+          pagePath: pages[0],
+          commentId: comment.id,
+          commentRevision: comment.revision,
+        })),
+      }),
+    }).then((response) => response.json());
     assert.ok(acquired.token, JSON.stringify(acquired));
-    const apply = () => fetch(`${base}/api/reviews/ai-lock/batch/apply`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: batchRoot, token: acquired.token }),
-    });
+    const apply = () =>
+      fetch(`${base}/api/reviews/ai-lock/batch/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: batchRoot, token: acquired.token }),
+      });
     const partial = structuredClone(before);
     partial.elements[0].content.color = "#B3261E";
     fs.writeFileSync(file, JSON.stringify(partial));
@@ -1630,7 +1609,7 @@ describe("cross-page AI review batch lock", () => {
     assert.equal(incompleteBody.code, "REVIEW_BATCH_INCOMPLETE");
     assert.deepEqual(incompleteBody.verification.missingCommentIds, [second.comment.id]);
     assert.ok(fs.existsSync(lockGuard), "failed acceptance retains protection for rollback");
-    assert.ok(readReviewThreads(batchRoot).pages[pages[0]].every(comment => comment.aiStatus === "running"));
+    assert.ok(readReviewThreads(batchRoot).pages[pages[0]].every((comment) => comment.aiStatus === "running"));
     partial.elements[1].content.color = "#B3261E";
     fs.writeFileSync(file, JSON.stringify(partial));
     const outside = JSON.parse(outsideBytes);
@@ -1644,7 +1623,7 @@ describe("cross-page AI review batch lock", () => {
     const completeBody = await complete.json();
     assert.equal(complete.status, 200, JSON.stringify(completeBody));
     assert.deepEqual(completeBody.verification.pageResults[0].changedElementIds, ["01_page-title", "subtitle"]);
-    assert.ok(readReviewThreads(batchRoot).pages[pages[0]].every(comment => comment.aiStatus === "applied"));
+    assert.ok(readReviewThreads(batchRoot).pages[pages[0]].every((comment) => comment.aiStatus === "applied"));
     assert.equal(fs.existsSync(lockGuard), false);
   });
 
@@ -1652,10 +1631,7 @@ describe("cross-page AI review batch lock", () => {
     resetBatchRoot();
     const base = await httpEndpoint();
     await openBatchRoot(base);
-    const comments = [
-      await createBatchReview(base, pages[0], 1),
-      await createBatchReview(base, pages[1], 2),
-    ];
+    const comments = [await createBatchReview(base, pages[0], 1), await createBatchReview(base, pages[1], 2)];
     const acquired = await fetch(`${base}/api/reviews/ai-lock/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1730,19 +1706,27 @@ describe("cross-page AI review batch lock", () => {
       items: acquired.items,
     };
     fs.writeFileSync(lockGuard, `${JSON.stringify(liveGuard, null, 2)}\n`, "utf8");
-    const untouched = await fetch(`${base}/api/reviews?project=${encodeURIComponent(batchRoot)}&all=1`)
-      .then((response) => response.json());
+    const untouched = await fetch(`${base}/api/reviews?project=${encodeURIComponent(batchRoot)}&all=1`).then(
+      (response) => response.json(),
+    );
     assert.equal(untouched.pages[pages[0]][0].aiStatus, "running", "live guard must be honoured");
 
     // Once the lease is dead too, the next inbox read fails the comment
     // closed so the user can resubmit it.
-    fs.writeFileSync(lockGuard, `${JSON.stringify({ ...liveGuard, expiresAt: Date.now() - 1_000 }, null, 2)}\n`, "utf8");
-    const healed = await fetch(`${base}/api/reviews?project=${encodeURIComponent(batchRoot)}&all=1`)
-      .then((response) => response.json());
+    fs.writeFileSync(
+      lockGuard,
+      `${JSON.stringify({ ...liveGuard, expiresAt: Date.now() - 1_000 }, null, 2)}\n`,
+      "utf8",
+    );
+    const healed = await fetch(`${base}/api/reviews?project=${encodeURIComponent(batchRoot)}&all=1`).then((response) =>
+      response.json(),
+    );
     const healedComment = healed.pages[pages[0]][0];
     assert.equal(healedComment.aiStatus, "failed");
     assert.ok(healedComment.aiError, "orphaned comment must carry a retryable error");
-    const receipts = JSON.parse(fs.readFileSync(path.join(batchRoot, "_agent", "comment-submissions.v1.json"), "utf8")).submissions;
+    const receipts = JSON.parse(
+      fs.readFileSync(path.join(batchRoot, "_agent", "comment-submissions.v1.json"), "utf8"),
+    ).submissions;
     assert.equal(receipts.find((item) => item.id === acquired.submission.id).status, "failed");
     assert.equal(fs.existsSync(lockGuard), false, "stale guard must not keep blocking the write gate");
 

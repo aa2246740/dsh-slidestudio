@@ -1,6 +1,9 @@
+import { FREESTYLE_STYLE, themeAssetUrl, toRgbColor, paintThemeOptions } from "./hub-appearance.js";
 import { clearWaitingRow, paintWaitingRow } from "./step-paint.js";
 import { installTooltips } from "./tooltips.js";
+import { mountBrowserRuntimePanel } from "./browser-runtime-panel.js";
 import { t, lang, onLangChange } from "./i18n.js";
+import { collectEndpoint, fillEndpoint, toggleTplBlock } from "./tool-endpoint-settings.js";
 import { parseCatalog, buildGenerationRequest } from "./hub-input.js";
 import { editorHref, launchHref, readLaunch, saveLaunch } from "./launch-flow.js";
 import { THEMES, applyTheme, currentTheme } from "./theme.js";
@@ -13,41 +16,32 @@ import {
 
 installTooltips();
 
+const runtimePanelRoot = document.getElementById("browser-runtime-panel");
+const runtimePanel = runtimePanelRoot
+  ? mountBrowserRuntimePanel(runtimePanelRoot, {
+      t,
+      onReady: () => {
+        void refreshHealth();
+      },
+    })
+  : null;
+onLangChange(() => runtimePanel?.repaint());
+
 function nativeApi(path) {
   const rest = String(path || "").replace(/^\/api/, "");
   const root = location.pathname.startsWith("/app/") ? "/app/api" : "/api";
   return `${root}${rest.startsWith("/") ? rest : `/${rest}`}`;
 }
 
-function themeAssetUrl(path) {
-  if (!path) return "";
-  if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("/slides/")) {
-    return path;
-  }
-  const root = location.pathname.startsWith("/app/") ? "/app" : "";
-  const clean = path.replace(/^\.\//, "").replace(/^\//, "");
-  return `${root}/${clean}`;
-}
-
 // These are visual-system references only. They select tokens and visual tone;
 // Pi still designs every page structure and composition from the brief.
-const FREESTYLE_STYLE = {
-  id: "freestyle",
-  title: "Freestyle",
-  label: "自由风格",
-  cat: "All",
-  preview: "template-freestyle.jpg",
-  previewUrl: "./templates/template-freestyle.jpg",
-  system: "",
-};
+
 let styleReferences = [FREESTYLE_STYLE];
 let generationCatalog = null;
 let catalogError = null;
 let creationInFlight = false;
 
-let tabsList = [
-  { id: "All", label: "全部" },
-];
+let tabsList = [{ id: "All", label: "全部" }];
 const KIND_LABELS = { Slides: "幻灯片", Docs: "文档", Report: "报告" };
 const LAYOUT_LABELS = { Adaptive: "自适应", "16:9": "16:9", "4:3": "4:3" };
 
@@ -72,8 +66,12 @@ let serverCapability = null;
 let piProductLoggedIn = false;
 const attachments = [];
 function syncCreateButton() {
-  send.disabled = creationInFlight || !generationCatalog || !selectedModelKey() || !brief.value.trim()
-    || attachments.some((attachment) => attachment.status !== "parsed");
+  send.disabled =
+    creationInFlight ||
+    !generationCatalog ||
+    !selectedModelKey() ||
+    !brief.value.trim() ||
+    attachments.some((attachment) => attachment.status !== "parsed");
 }
 let generateSeq = 0;
 let generateAbort = null;
@@ -231,7 +229,10 @@ function paintPiModels() {
       const name = document.createElement("span");
       name.textContent = provider.modelNames?.[modelId] || modelId;
       option.append(name);
-      option.insertAdjacentHTML("beforeend", '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>');
+      option.insertAdjacentHTML(
+        "beforeend",
+        '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>',
+      );
       group.append(option);
       choices.push(option.dataset.modelKey);
     }
@@ -291,48 +292,39 @@ async function refreshPiLogin() {
     groups = [];
   }
   if (sequence !== modelListSequence) return;
-  const providers = groups.filter((row) => row.ready).map((row) => ({
-    ...row,
-    id: row.providerId,
-    name: row.providerName,
-    models: row.models.map((model) => model.id),
-    modelNames: Object.fromEntries(row.models.map((model) => [model.id, model.name])),
-  }));
-  providerEfforts = new Map(
-    providers.filter((row) => Array.isArray(row.efforts)).map((row) => [row.id, row.efforts]),
-  );
+  const providers = groups
+    .filter((row) => row.ready)
+    .map((row) => ({
+      ...row,
+      id: row.providerId,
+      name: row.providerName,
+      models: row.models.map((model) => model.id),
+      modelNames: Object.fromEntries(row.models.map((model) => [model.id, model.name])),
+    }));
+  providerEfforts = new Map(providers.filter((row) => Array.isArray(row.efforts)).map((row) => [row.id, row.efforts]));
   piLoginState = { providers };
   paintPiPanel();
   const note = document.getElementById("pi-provider-note");
-  if (note) note.textContent = failed
-    ? t("模型列表暂时无法加载，请重新打开此面板重试。")
-    : t("还没有可用模型，去右上角「设置」接入。");
+  if (note)
+    note.textContent = failed
+      ? t("模型列表暂时无法加载，请重新打开此面板重试。")
+      : t("还没有可用模型，去右上角「设置」接入。");
   positionModelPanel();
   return groups;
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[c]));
-}
-
-function toRgbColor(value) {
-  const raw = String(value || "").trim();
-  if (!raw || /gradient/i.test(raw)) return "rgb(232, 232, 234)";
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw);
-  if (hex) {
-    let h = hex[1];
-    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-    const n = parseInt(h, 16);
-    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
-  }
-  if (/^rgba?\(/i.test(raw)) return raw;
-  return raw;
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
 }
 
 function showToast(text) {
@@ -467,28 +459,28 @@ function paintChip() {
   const thumb = document.getElementById("style-thumb");
   if (thumb) {
     const sliceInfo = slicesManifest[style.id] || slicesManifest[style.system];
-    thumb.src = (sliceInfo && sliceInfo.cover)
-      ? themeAssetUrl(sliceInfo.cover)
-      : (style.previewUrl || (style.preview ? `./templates/${style.preview}` : "./templates/template-freestyle.jpg"));
+    thumb.src =
+      sliceInfo && sliceInfo.cover
+        ? themeAssetUrl(sliceInfo.cover)
+        : style.previewUrl || (style.preview ? `./templates/${style.preview}` : "./templates/template-freestyle.jpg");
   }
 }
 
 function paintGrid() {
   grid.innerHTML = "";
-  for (const style of styleReferences.filter(
-    (item) => cat === "All" || item.cat === cat || item.cat === "All",
-  )) {
+  for (const style of styleReferences.filter((item) => cat === "All" || item.cat === cat || item.cat === "All")) {
     const b = document.createElement("button");
     b.type = "button";
-    const isSelected = (style.id === selectedStyleId) || (!selectedStyleId && style.id === "freestyle");
+    const isSelected = style.id === selectedStyleId || (!selectedStyleId && style.id === "freestyle");
     b.className = `style-reference-card${isSelected ? " is-selected" : ""}`;
     const displayName = t(getStyleDisplayName(style));
     b.setAttribute("aria-label", t("选择{n}风格参考", { n: displayName }));
 
     const sliceInfo = slicesManifest[style.id] || slicesManifest[style.system];
-    const previewSrc = (sliceInfo && sliceInfo.cover)
-      ? themeAssetUrl(sliceInfo.cover)
-      : (style.previewUrl || (style.preview ? `./templates/${style.preview}` : "./templates/template-freestyle.jpg"));
+    const previewSrc =
+      sliceInfo && sliceInfo.cover
+        ? themeAssetUrl(sliceInfo.cover)
+        : style.previewUrl || (style.preview ? `./templates/${style.preview}` : "./templates/template-freestyle.jpg");
 
     b.innerHTML = `<span class="style-reference-preview">
       <img alt="${escapeHtml(displayName)}" src="${previewSrc}" />
@@ -497,9 +489,10 @@ function paintGrid() {
         <strong>${escapeHtml(displayName)}</strong>
         <span class="placeholder-cat">${escapeHtml(t(CATEGORY_NAMES[style.cat] || style.cat || "风格参考"))}</span>
       </div>
-      ${isSelected
-        ? `<span class="selected-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg>${t("已选风格")}</span>`
-        : ""
+      ${
+        isSelected
+          ? `<span class="selected-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg>${t("已选风格")}</span>`
+          : ""
       }
     </span><span class="style-card-name">${escapeHtml(displayName)}</span>`;
 
@@ -558,7 +551,7 @@ function paintGrid() {
         const setupImage = () => {
           b.disabled = false;
           b.setAttribute("aria-busy", "false");
-          const pageCount = Math.max(1, Math.round(image.naturalHeight / (image.naturalWidth * 9 / 16)));
+          const pageCount = Math.max(1, Math.round(image.naturalHeight / ((image.naturalWidth * 9) / 16)));
           setupHoverAnimation(pageCount, null);
         };
 
@@ -620,15 +613,25 @@ async function loadCatalog() {
     } catch {
       slicesManifest = {};
     }
-    styleReferences = [FREESTYLE_STYLE, ...generationCatalog.styles.map((style) => ({
-      ...style, title: style.id, cat: style.category,
-      preview: style.previews[0].url, previewUrl: style.previews[0].url, system: style.id,
-    }))];
+    styleReferences = [
+      FREESTYLE_STYLE,
+      ...generationCatalog.styles.map((style) => ({
+        ...style,
+        title: style.id,
+        cat: style.category,
+        preview: style.previews[0].url,
+        previewUrl: style.previews[0].url,
+        system: style.id,
+      })),
+    ];
     const categories = ["consulting", "finance", "work", "promotion", "academic", "extra"];
-    tabsList = [{ id: "All", label: "全部" }, ...categories.map((id) => ({
-      id,
-      label: CATEGORY_NAMES[id] || id,
-    }))];
+    tabsList = [
+      { id: "All", label: "全部" },
+      ...categories.map((id) => ({
+        id,
+        label: CATEGORY_NAMES[id] || id,
+      })),
+    ];
     catalogError = null;
     renderCatalogTabs();
     paintChip();
@@ -728,8 +731,12 @@ document.getElementById("pi-model")?.addEventListener("keydown", (ev) => {
   if (!options.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) return;
   ev.preventDefault();
   const index = options.indexOf(document.activeElement);
-  const next = ev.key === "Home" ? 0 : ev.key === "End" ? options.length - 1
-    : (index + (ev.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+  const next =
+    ev.key === "Home"
+      ? 0
+      : ev.key === "End"
+        ? options.length - 1
+        : (index + (ev.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
   for (const [i, option] of options.entries()) option.tabIndex = i === next ? 0 : -1;
   options[next].focus();
 });
@@ -744,8 +751,12 @@ document.getElementById("pi-effort")?.addEventListener("keydown", (ev) => {
   ev.preventDefault();
   const efforts = selectedEfforts();
   const index = efforts.indexOf(currentEffort);
-  const next = ev.key === "Home" ? 0 : ev.key === "End" ? efforts.length - 1
-    : (index + (["ArrowRight", "ArrowDown"].includes(ev.key) ? 1 : -1) + efforts.length) % efforts.length;
+  const next =
+    ev.key === "Home"
+      ? 0
+      : ev.key === "End"
+        ? efforts.length - 1
+        : (index + (["ArrowRight", "ArrowDown"].includes(ev.key) ? 1 : -1) + efforts.length) % efforts.length;
   currentEffort = efforts[next];
   paintEffortControl();
 });
@@ -761,9 +772,10 @@ document.querySelector(".model-picker")?.addEventListener("focusout", (ev) => {
   const picker = ev.currentTarget;
   if (picker.contains(ev.relatedTarget)) return;
   if (ev.relatedTarget) showPiPanel(false);
-  else requestAnimationFrame(() => {
-    if (!picker.contains(document.activeElement)) showPiPanel(false);
-  });
+  else
+    requestAnimationFrame(() => {
+      if (!picker.contains(document.activeElement)) showPiPanel(false);
+    });
 });
 window.addEventListener("resize", positionModelPanel);
 window.addEventListener("scroll", positionModelPanel, { passive: true });
@@ -840,8 +852,16 @@ function removeAttachment(localId) {
   const i = attachments.findIndex((a) => a.localId === localId);
   if (i < 0) return;
   const rec = attachments[i];
-  try { rec.xhr?.abort(); } catch { /* already closed */ }
-  try { rec.reader?.abort(); } catch { /* already closed */ }
+  try {
+    rec.xhr?.abort();
+  } catch {
+    /* already closed */
+  }
+  try {
+    rec.reader?.abort();
+  } catch {
+    /* already closed */
+  }
   attachments.splice(i, 1);
   paintAttachments();
 }
@@ -891,7 +911,9 @@ function postAttachmentXhr(payload, rec, onProgress) {
         let msg = `HTTP ${xhr.status}`;
         try {
           msg = JSON.parse(xhr.responseText).error || msg;
-        } catch { /* keep status */ }
+        } catch {
+          /* keep status */
+        }
         reject(new Error(msg));
       }
     };
@@ -921,15 +943,11 @@ async function uploadAttachment(rec) {
     });
     rec.progress = Math.max(rec.progress, 40);
     paintAttachments();
-    const data = await postAttachmentXhr(
-      { name: file.name, data: dataUrl, size: file.size },
-      rec,
-      (frac) => {
-        rec.status = "uploading";
-        rec.progress = 40 + Math.round(frac * 60);
-        paintAttachmentsSoon();
-      },
-    );
+    const data = await postAttachmentXhr({ name: file.name, data: dataUrl, size: file.size }, rec, (frac) => {
+      rec.status = "uploading";
+      rec.progress = 40 + Math.round(frac * 60);
+      paintAttachmentsSoon();
+    });
     applyServerAttachment(rec, data);
     paintAttachments();
   } catch (e) {
@@ -1078,10 +1096,12 @@ function markProjectViewed(path) {
 }
 
 function humanizeProjectId(id) {
-  return String(id || "")
-    .replace(/-[0-9a-f]{6,}$/i, "")
-    .replace(/-/g, " ")
-    .trim() || String(id || "");
+  return (
+    String(id || "")
+      .replace(/-[0-9a-f]{6,}$/i, "")
+      .replace(/-/g, " ")
+      .trim() || String(id || "")
+  );
 }
 
 function relativeProjectTime(updatedAt) {
@@ -1123,7 +1143,9 @@ function projectRow(p, viewed) {
   const sub = document.createElement("small");
   const when = relativeProjectTime(p.updatedAt);
   const size = isGen ? formatProjectSize(p.sizeBytes) : "";
-  sub.textContent = isGen ? `${p.pageCount ? t("{n} 页", { n: p.pageCount }) : t("讨论中")}${when ? ` · ${when}` : ""}${size ? ` · ${size}` : ""}` : t("示例项目");
+  sub.textContent = isGen
+    ? `${p.pageCount ? t("{n} 页", { n: p.pageCount }) : t("讨论中")}${when ? ` · ${when}` : ""}${size ? ` · ${size}` : ""}`
+    : t("示例项目");
   meta.append(title, sub);
   row.append(dot, meta);
   row.addEventListener("click", () => {
@@ -1173,9 +1195,7 @@ function paintProjectList(projects) {
     .filter((p) => p.group === "generated")
     .filter((p) => !SHOW_ONLY_VIEWED_PROJECTS || viewed.has(String(p.path)))
     .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-  const fixtures = SHOW_FIXTURE_PROJECTS
-    ? (projects || []).filter((p) => p.group !== "generated")
-    : [];
+  const fixtures = SHOW_FIXTURE_PROJECTS ? (projects || []).filter((p) => p.group !== "generated") : [];
   list.innerHTML = "";
   for (const p of [...gen, ...fixtures]) {
     list.append(projectRow(p, viewed));
@@ -1247,7 +1267,9 @@ function resetGenerationShowcase(title) {
   box.hidden = false;
   box.classList.remove("is-complete");
   document.getElementById("generation-showcase-title").textContent = title || t("正在生成演示文稿");
-  document.getElementById("generation-showcase-detail").textContent = t("先搭结构，再逐页写入、渲染和审阅。每个完成页面都会立即出现。");
+  document.getElementById("generation-showcase-detail").textContent = t(
+    "先搭结构，再逐页写入、渲染和审阅。每个完成页面都会立即出现。",
+  );
   const image = document.getElementById("generation-live-image");
   image.hidden = true;
   image.removeAttribute("src");
@@ -1282,9 +1304,10 @@ function paintGenerationShowcase(snap, { sessionId, projectPath, wantPages = 0 }
   const latestRaster = [...pages].reverse().find((page) => page.raster);
   const cover = snap.phase?.cover;
   const pageId = latestRaster?.pageId || cover?.pageId;
-  const rasterUrl = pageId && sessionId
-    ? `/slides/raster/${encodeURIComponent(sessionId)}/${encodeURIComponent(pageId)}`
-    : cover?.rasterUrl;
+  const rasterUrl =
+    pageId && sessionId
+      ? `/slides/raster/${encodeURIComponent(sessionId)}/${encodeURIComponent(pageId)}`
+      : cover?.rasterUrl;
   const image = document.getElementById("generation-live-image");
   if (rasterUrl) {
     const revision = latestRaster?.revision || cover?.revision || pageCount;
@@ -1296,21 +1319,24 @@ function paintGenerationShowcase(snap, { sessionId, projectPath, wantPages = 0 }
     image.hidden = false;
     document.getElementById("generation-empty").hidden = true;
   }
-  document.getElementById("generation-live-badge").textContent = phase === "complete"
-    ? t("{n} 页 · 已完成", { n: pageCount })
-    : phase === "paused"
-      ? (pageCount ? t("{n} 页 · 已暂停", { n: pageCount }) : t("已暂停"))
-      : phase === "failed"
-        ? t("生成失败")
-        : pageCount
-          ? t("{n} 页 · 实时更新", { n: pageCount })
-          : t("搭建结构中");
+  document.getElementById("generation-live-badge").textContent =
+    phase === "complete"
+      ? t("{n} 页 · 已完成", { n: pageCount })
+      : phase === "paused"
+        ? pageCount
+          ? t("{n} 页 · 已暂停", { n: pageCount })
+          : t("已暂停")
+        : phase === "failed"
+          ? t("生成失败")
+          : pageCount
+            ? t("{n} 页 · 实时更新", { n: pageCount })
+            : t("搭建结构中");
   const liveBadge = document.getElementById("generation-live-badge");
   if (liveBadge && phase === "paused") {
     const raw = String(snap.phase?.detail || snap.error?.detail || "");
     liveBadge.title = /2056|Token Plan|用量上限/.test(raw)
       ? t("MiniMax Token Plan 额度已用尽。请换模型或充值后再继续。")
-      : (raw || t("生成已暂停"));
+      : raw || t("生成已暂停");
   }
   const target = Math.max(pageCount, Number(wantPages) || 0, pages.length, 1);
   const filmstrip = document.getElementById("generation-filmstrip");
@@ -1321,21 +1347,26 @@ function paintGenerationShowcase(snap, { sessionId, projectPath, wantPages = 0 }
     tile.textContent = String(index + 1).padStart(2, "0");
     tile.classList.toggle("is-written", index < pageCount || Boolean(page));
     tile.classList.toggle("is-reviewed", page?.visualReview === "pass");
-    tile.title = page?.visualReview === "pass"
-      ? t("第 {index} 页已通过视觉检查", { index: index + 1 })
-      : index < pageCount
-        ? t("第 {index} 页已写入", { index: index + 1 })
-        : t("第 {index} 页待生成", { index: index + 1 });
+    tile.title =
+      page?.visualReview === "pass"
+        ? t("第 {index} 页已通过视觉检查", { index: index + 1 })
+        : index < pageCount
+          ? t("第 {index} 页已写入", { index: index + 1 })
+          : t("第 {index} 页待生成", { index: index + 1 });
     filmstrip.append(tile);
   }
   const detail = document.getElementById("generation-showcase-detail");
-  detail.textContent = phase === "complete"
-    ? t("共 {pages} 页。写入、渲染、视觉检查和封板记录会保留在编辑器的 AI 工作区。", { pages: pageCount })
-    : reviewed
-      ? t("已写入 {pages} 页，{reviewed} 页通过视觉检查。你现在就可以进入编辑器实时观看。", { pages: pageCount, reviewed })
-      : pageCount
-        ? t("已写入 {pages} 页，正在渲染并检查版式。你现在就可以进入编辑器实时观看。", { pages: pageCount })
-        : t("正在读取资料并确定结构，第一张页面写入后会立即出现。");
+  detail.textContent =
+    phase === "complete"
+      ? t("共 {pages} 页。写入、渲染、视觉检查和封板记录会保留在编辑器的 AI 工作区。", { pages: pageCount })
+      : reviewed
+        ? t("已写入 {pages} 页，{reviewed} 页通过视觉检查。你现在就可以进入编辑器实时观看。", {
+            pages: pageCount,
+            reviewed,
+          })
+        : pageCount
+          ? t("已写入 {pages} 页，正在渲染并检查版式。你现在就可以进入编辑器实时观看。", { pages: pageCount })
+          : t("正在读取资料并确定结构，第一张页面写入后会立即出现。");
   const live = document.getElementById("generation-live-open");
   live.hidden = !(projectPath && pageCount > 0);
   if (!live.hidden) {
@@ -1397,7 +1428,11 @@ async function readGenerateStream(res, { paintStep, paintRuntime, card, still, o
     const { value, done } = await reader.read();
     if (done) break;
     if (still && !still()) {
-      try { await reader.cancel(); } catch { /* already aborted */ }
+      try {
+        await reader.cancel();
+      } catch {
+        /* already aborted */
+      }
       return null;
     }
     buf += decoder.decode(value, { stream: true });
@@ -1478,7 +1513,12 @@ function runHubGenerate() {
     const efforts = selectedEfforts();
     const rawEffort = currentEffort;
     request = buildGenerationRequest({
-      catalog: generationCatalog, brief: brief.value, kind, layout, designSystemId, attachments,
+      catalog: generationCatalog,
+      brief: brief.value,
+      kind,
+      layout,
+      designSystemId,
+      attachments,
       provider: selectedPiProvider(),
       model: selectedPiModel(),
       reasoningEffort: efforts?.includes(rawEffort) ? rawEffort : undefined,
@@ -1538,7 +1578,9 @@ async function refreshHealth() {
     if (!res.ok) throw new Error("slides health");
     data = await res.json();
   } catch {
-    data = await fetch(nativeApi("/api/health")).then((r) => r.json()).catch(() => ({}));
+    data = await fetch(nativeApi("/api/health"))
+      .then((r) => r.json())
+      .catch(() => ({}));
     if (!healthRequestGate.isCurrent(request, currentHealthSelection())) return data;
     serverDshReady = data.product === "DSH SlideStudio";
     serverCapability = null;
@@ -1565,9 +1607,7 @@ async function refreshHealth() {
   serverMinimaxReady = selectedReady;
   serverCapability = data.capability || null;
   const chipModel = model || selection.model || offer?.name || data.connection?.model;
-  const piChip = !selectedReady
-    ? `${offer?.name || t("供应商")} · ${t("未接入")}`
-    : `${chipModel} · ${t("已接入")}`;
+  const piChip = !selectedReady ? `${offer?.name || t("供应商")} · ${t("未接入")}` : `${chipModel} · ${t("已接入")}`;
   piProductLoggedIn = selectedReady;
   if (serverCapability) {
     paintCapability(serverCapability, {
@@ -1580,35 +1620,6 @@ async function refreshHealth() {
   }
   setModelChip(offer?.modelNames?.[model] || model || selection.model || data.connection?.model || "AI Agent");
   return data;
-}
-
-function settingsInput(id) {
-  return document.getElementById(id);
-}
-
-function fillEndpoint(prefix, endpoint) {
-  const on = endpoint?.kind === "custom";
-  const url = settingsInput(`${prefix}-url`);
-  const key = settingsInput(`${prefix}-key`);
-  const model = settingsInput(`${prefix}-model`);
-  if (url) url.value = on ? endpoint.url : "";
-  if (key) {
-    key.value = "";
-    key.placeholder = on && endpoint.apiKeySet ? t("已保存，留空则保持") : t("可选");
-  }
-  if (model) model.value = on ? endpoint.model || "" : "";
-}
-
-function collectEndpoint(prefix) {
-  const url = String(settingsInput(`${prefix}-url`)?.value || "").trim();
-  if (!url) return { kind: "off" };
-  const modelEl = settingsInput(`${prefix}-model`);
-  return {
-    kind: "custom",
-    url,
-    apiKey: String(settingsInput(`${prefix}-key`)?.value || ""),
-    model: String(modelEl?.value || "").trim(),
-  };
 }
 
 async function loadToolSettings() {
@@ -2019,33 +2030,6 @@ document.querySelectorAll("[data-settings-pane]").forEach((btn) => {
   btn.addEventListener("click", () => selectSettingsPane(btn.getAttribute("data-settings-pane")));
 });
 
-function paintThemeOptions() {
-  const host = document.getElementById("theme-options");
-  if (!host) return;
-  const active = currentTheme();
-  host.replaceChildren(...THEMES.map((theme) => {
-    const option = document.createElement("button");
-    option.type = "button";
-    option.className = "theme-option";
-    option.dataset.themeId = theme.id;
-    option.setAttribute("role", "radio");
-    option.setAttribute("aria-checked", String(theme.id === active));
-    const swatch = document.createElement("span");
-    swatch.className = "theme-swatch";
-    swatch.dataset.themeSwatch = theme.id;
-    const name = document.createElement("b");
-    name.textContent = t(theme.name);
-    const note = document.createElement("small");
-    note.textContent = t(theme.note);
-    option.append(swatch, name, note);
-    option.addEventListener("click", () => {
-      applyTheme(theme.id);
-      paintThemeOptions();
-      document.querySelector(`[data-theme-id="${theme.id}"]`)?.focus();
-    });
-    return option;
-  }));
-}
 paintThemeOptions();
 
 function unusedPresets() {
@@ -2119,7 +2103,10 @@ document.getElementById("custom-provider-form")?.addEventListener("submit", asyn
       id: document.getElementById("custom-id")?.value,
       name: document.getElementById("custom-name")?.value,
       baseURL: document.getElementById("custom-base")?.value,
-      apiKeyEnv: `${String(document.getElementById("custom-id")?.value || "custom").trim().replace(/-/g, "_").toUpperCase()}_API_KEY`,
+      apiKeyEnv: `${String(document.getElementById("custom-id")?.value || "custom")
+        .trim()
+        .replace(/-/g, "_")
+        .toUpperCase()}_API_KEY`,
       models,
       apiKey: document.getElementById("custom-key")?.value,
     });
@@ -2131,6 +2118,10 @@ document.getElementById("custom-provider-form")?.addEventListener("submit", asyn
     if (status) status.textContent = error instanceof Error ? error.message : t("保存失败");
   }
 });
+
+for (const prefix of ["search", "image"]) {
+  document.getElementById(`${prefix}-preset`)?.addEventListener("change", () => toggleTplBlock(prefix));
+}
 
 document.getElementById("btn-settings-save")?.addEventListener("click", async () => {
   const status = document.getElementById("settings-status");

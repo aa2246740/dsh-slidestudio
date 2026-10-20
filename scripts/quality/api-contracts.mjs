@@ -46,6 +46,10 @@ const diagnostics = object(
   },
   ["app", "version", "counters", "errors"],
 );
+const renderRuntime = object(
+  { phase: { type: "string", enum: ["installing", "ready", "failed", "manual"] }, error: string },
+  ["phase"],
+);
 const model = object(
   { id: string, name: string, inputModalities: array({ type: "string", enum: ["text", "image"] }) },
   ["id", "name"],
@@ -239,8 +243,13 @@ export const apiContracts = {
             ok: boolean,
             generateReady: boolean,
             selection: object({ providerId: string, model: string, ready: boolean }),
+            renderRuntime,
           }),
         ),
+      },
+      "/slides/runtime": {
+        get: operation("hostRenderRuntime", "Read browser rendering runtime readiness", renderRuntime),
+        post: operation("hostProvisionRuntime", "Start or retry managed browser runtime provisioning", renderRuntime),
       },
       "/slides/models": {
         get: operation(
@@ -299,6 +308,24 @@ export const apiContracts = {
             "binding",
             "project",
             "phase",
+          ]),
+        ),
+      },
+    },
+  },
+  web: {
+    title: "Legacy web SPA static surface",
+    port: 5173,
+    source: "apps/web/public/health.json",
+    paths: {
+      "/health.json": {
+        get: operation(
+          "webHealth",
+          "Static health probe served by the vite dev server",
+          object({ status: { type: "string", enum: ["ok"] }, app: string, version: string }, [
+            "status",
+            "app",
+            "version",
           ]),
         ),
       },

@@ -79,8 +79,9 @@ describe("slides client plugin", () => {
         assert.match(html, /添加自定义提供方/);
         assert.match(html, /data-settings-pane="models"/);
         assert.match(html, /id="search-url"/);
-        assert.match(html, /data-settings-pane="tools"[^>]* hidden/);
-        assert.match(html, /自定义工具（搜图\/生图）以后开发/);
+        assert.match(html, /data-settings-pane="tools"/);
+        assert.doesNotMatch(html, /data-settings-pane="tools"[^>]* hidden/);
+        assert.doesNotMatch(html, /自定义工具（搜图\/生图）以后开发/);
         assert.doesNotMatch(html, /id="btn-pi-settings"/);
         assert.match(html, /class="capability-row"/);
         assert.match(html, /id="pi-model"[^>]*role="listbox"/);

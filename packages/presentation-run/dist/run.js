@@ -6,21 +6,33 @@ import { filterCatalog, loadReferenceCatalog, resolveRepoRoot } from "./catalog.
 import { inspectProjectCapabilities } from "./capabilities.js";
 import { assertChartEvidence } from "./chart-gate.js";
 import { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";
-import { listSourceReceipts, recordSourceReceipt, requireConsultAdoptBeforeWrite, } from "./receipts.js";
+import { listSourceReceipts, recordSourceReceipt, requireConsultAdoptBeforeWrite } from "./receipts.js";
 import { runDomainHand } from "./domain/domain-hands.js";
-import { writeJsonAtomic } from "./domain/atomic-file.js";
+import { writeFileAtomic } from "./domain/atomic-file.js";
 import { parseCanonicalPagePlan } from "./domain/page-plan.js";
 import { currentVisualReviewsMissing, ensureRunLedgerExecutionPolicy, inspectRunLedger, readRunLedger, } from "./domain/run-ledger.js";
 import { inspectGenerationActivity } from "./generation-activity.js";
 import { inspectProjectExecution } from "./execution-observation.js";
 import { kindThemePackIssue, sourceIdList } from "./domain/theme-pack.js";
-import { resolveOpenKimiPresetDesignSourceId, verifyOpenKimiPack, } from "./domain/openkimi-source-pack.js";
+import { resolveOpenKimiPresetDesignSourceId, verifyOpenKimiPack } from "./domain/openkimi-source-pack.js";
 const BINDING_REL = path.join("_agent", "presentation-run.v1.json");
 function bindingPath(projectRoot) {
     return path.join(projectRoot, BINDING_REL);
 }
 function writeBinding(input) {
-    writeJsonAtomic(bindingPath(input.projectRoot), input);
+    const file = bindingPath(input.projectRoot);
+    // Skip the rewrite when the persisted content already matches: hydrate()
+    // re-persists the unchanged binding on every /slides/state poll, which turns
+    // the editor's heartbeat into a constant disk write for every open project.
+    const content = `${JSON.stringify(input, null, 2)}\n`;
+    try {
+        if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content)
+            return;
+    }
+    catch {
+        // Unreadable binding file — fall through and overwrite it.
+    }
+    writeFileAtomic(file, content);
 }
 function readBinding(projectRoot) {
     const file = bindingPath(projectRoot);
@@ -138,14 +150,14 @@ function composeGateFailure(name, projectRoot) {
     const ledger = readRunLedger(projectRoot);
     const currentPageHashes = Object.fromEntries(status.pages.map((page) => [page.pageId, page.pageSha256]));
     const structuralFailure = ledger
-        ? [...ledger.facts].reverse().find((fact) => fact.type === "deck.structural-review-recorded" &&
+        ? [...ledger.facts]
+            .reverse()
+            .find((fact) => fact.type === "deck.structural-review-recorded" &&
             fact.ok === false &&
             Object.keys(currentPageHashes).length === Object.keys(fact.pageRevisions).length &&
             Object.entries(currentPageHashes).every(([pageId, sha]) => fact.pageRevisions[pageId] === sha))
         : undefined;
-    const structuralIssues = structuralFailure?.type === "deck.structural-review-recorded"
-        ? [...structuralFailure.issues]
-        : [];
+    const structuralIssues = structuralFailure?.type === "deck.structural-review-recorded" ? [...structuralFailure.issues] : [];
     const structuralFailedPageIds = status.pages
         .filter((page) => structuralIssues.some((issue) => issue.includes(page.pageId)))
         .map((page) => page.pageId);
@@ -280,8 +292,7 @@ export function createPresentationRun(deps = {}) {
                     tag: typeof args.tag === "string" ? args.tag : undefined,
                 });
                 const ledger = inspectRunLedger(context.projectRoot, epochFor(context.sessionId));
-                const requiredReferenceChunks = readRunLedger(context.projectRoot)?.sourcePack.requirements
-                    .flatMap((requirement) => requirement.chunkIndexes.map((chunkIndex) => ({
+                const requiredReferenceChunks = readRunLedger(context.projectRoot)?.sourcePack.requirements.flatMap((requirement) => requirement.chunkIndexes.map((chunkIndex) => ({
                     sourceId: requirement.sourceId,
                     chunkIndex,
                     reason: requirement.reason,
@@ -321,9 +332,11 @@ export function createPresentationRun(deps = {}) {
             if (name === "commit_design" || name === "write_todo") {
                 const binding = readBinding(context.projectRoot);
                 const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
-                const adopted = requestedSources.length ? requestedSources : sourceIdList(listSourceReceipts(context.projectRoot)
-                    .filter((row) => row.state === "adopted" || row.state === "executed")
-                    .map((row) => row.sourceId));
+                const adopted = requestedSources.length
+                    ? requestedSources
+                    : sourceIdList(listSourceReceipts(context.projectRoot)
+                        .filter((row) => row.state === "adopted" || row.state === "executed")
+                        .map((row) => row.sourceId));
                 const preflight = planningReferencePreflight(repoRoot, context.projectRoot, name, adopted);
                 if (preflight)
                     return preflight;
@@ -379,7 +392,8 @@ export function createPresentationRun(deps = {}) {
                 }
                 return ok(name, "design plan adopted", {
                     outcome: "committed",
-                    items, plannedPageIds: items.map((page) => page.pageId),
+                    items,
+                    plannedPageIds: items.map((page) => page.pageId),
                     adoptedSourceIds: adopted.length ? adopted : ["agent-self-directed-plan"],
                 });
             }
@@ -518,9 +532,7 @@ export function createPresentationRun(deps = {}) {
                 ledger,
                 // inspection.pages tracks pages that exist now: a structurally deleted
                 // page keeps its historical revision facts but must not look alive.
-                pages: pageOrder.length
-                    ? ledger.pages.filter((page) => pageOrder.includes(page.pageId))
-                    : ledger.pages,
+                pages: pageOrder.length ? ledger.pages.filter((page) => pageOrder.includes(page.pageId)) : ledger.pages,
                 pageOrder,
                 structuralReview: ledger.structuralReview,
                 composeReady: ledger.composeReady,

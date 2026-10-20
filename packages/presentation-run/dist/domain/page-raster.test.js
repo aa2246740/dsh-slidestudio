@@ -5,6 +5,20 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assessRenderedLayout, pinnedPlaywrightRuntimePath, projectHasPptd, rasterRuntimeReady, readPageRaster, readRenderedLayout, normalizeRasterPageToNativeSlideSize, savePageRaster, } from "./page-raster.js";
+import { playwrightRuntimeSource } from "./playwright-runtime.js";
+function writeUsableRuntimeFixture(runtimeFile) {
+    const dir = path.dirname(runtimeFile);
+    const version = "1.61.1";
+    const browserDirName = "chromium_headless_shell-1228";
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(runtimeFile, playwrightRuntimeSource({ version, revision: "1228", browserDirName }));
+    const playwrightDir = path.join(dir, "node_modules", "playwright");
+    fs.mkdirSync(playwrightDir, { recursive: true });
+    fs.writeFileSync(path.join(playwrightDir, "package.json"), JSON.stringify({ name: "playwright", version }));
+    const browser = path.join(dir, "browsers", browserDirName, "chrome-headless-shell");
+    fs.mkdirSync(path.dirname(browser), { recursive: true });
+    fs.writeFileSync(browser, "#!/bin/sh\n");
+}
 describe("page raster project manifest", () => {
     it("accepts any root PPTD manifest name, not only deck.pptd", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "page-raster-manifest-"));
@@ -34,14 +48,22 @@ describe("page raster project manifest", () => {
         const repo = fs.mkdtempSync(path.join(os.tmpdir(), "pw-repo-ready-"));
         const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "pw-home-empty-"));
         const file = path.join(repo, ".runtime", "playwright", "runtime.mjs");
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(file, `export function verifyPinnedRuntime() { return true; }
-export async function launchPinnedChromium() { throw new Error("stub"); }
-`);
+        writeUsableRuntimeFixture(file);
         const env = { OPEN_SLIDESTUDIO_ROOT: repo };
         const resolved = pinnedPlaywrightRuntimePath(env, { repoRoot: repo, homeDir: emptyHome });
         assert.equal(resolved, file);
         assert.equal(rasterRuntimeReady(env, resolved), true);
+    });
+    it("requires a browser executable for render readiness", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-repo-missing-browser-"));
+        const file = path.join(dir, ".runtime", "playwright", "runtime.mjs");
+        writeUsableRuntimeFixture(file);
+        const browser = path.join(path.dirname(file), "browsers", "chromium_headless_shell-1228", "chrome-headless-shell");
+        fs.rmSync(browser);
+        const env = { OPEN_SLIDESTUDIO_ROOT: dir };
+        assert.equal(rasterRuntimeReady(env, file), false);
+        fs.writeFileSync(browser, "#!/bin/sh\n");
+        assert.equal(rasterRuntimeReady(env, file), true);
     });
     it("refuses to claim render ready when the runtime file exists but has no launch API", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-empty-"));
@@ -69,7 +91,8 @@ function snapshot(contrastRatio, requiredContrast) {
         slideWidth: 960,
         slideHeight: 540,
         fontsReady: true,
-        nodes: [{
+        nodes: [
+            {
                 id: "cover-title",
                 type: "text",
                 layoutRole: "content",
@@ -86,7 +109,8 @@ function snapshot(contrastRatio, requiredContrast) {
                 backgroundSource: "path:fill",
                 contrastRatio,
                 requiredContrast,
-            }],
+            },
+        ],
     };
 }
 describe("rendered text contrast", () => {
@@ -263,14 +287,12 @@ describe("rendered text contrast DOM sampler", () => {
       <div class="el shape" data-id="section-rule" style="left:72px;top:310px;width:816px;height:1px;background:#D9D2C5"></div>
       <div class="el text" data-id="section-label" style="left:72px;top:322px;width:816px;height:16px;color:#706960;font-size:10px">H1 累計（合併口徑）</div>
     `, "#F7F2EA");
-        assert.ok(report.hardIssues.some((issue) => String(issue.kind) === "line-text-clearance" &&
-            issue.elementId === "section-rule,section-label"), JSON.stringify(report.hardIssues));
+        assert.ok(report.hardIssues.some((issue) => String(issue.kind) === "line-text-clearance" && issue.elementId === "section-rule,section-label"), JSON.stringify(report.hardIssues));
         const crossing = await sample(`
       <div class="el shape" data-id="crossing-rule" style="left:72px;top:328px;width:816px;height:1px;background:#D9D2C5"></div>
       <div class="el text" data-id="crossed-label" style="left:72px;top:322px;width:816px;height:16px;color:#706960;font-size:10px">判斷</div>
     `, "#F7F2EA");
-        assert.ok(crossing.hardIssues.some((issue) => String(issue.kind) === "line-text-intersection" &&
-            issue.elementId === "crossing-rule,crossed-label"), JSON.stringify(crossing.hardIssues));
+        assert.ok(crossing.hardIssues.some((issue) => String(issue.kind) === "line-text-intersection" && issue.elementId === "crossing-rule,crossed-label"), JSON.stringify(crossing.hardIssues));
     });
 });
 //# sourceMappingURL=page-raster.test.js.map

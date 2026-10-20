@@ -1,5 +1,15 @@
 version: 1
 rows:
+  - id: chrome.createhub.runtime.retry
+    path: rows/chrome/createhub/runtime/retry
+    status: implemented
+    testId: EO-RUNTIME-001
+    surface: chrome.global
+  - id: chrome.createhub.runtime.help
+    path: rows/chrome/createhub/runtime/help
+    status: implemented
+    testId: EO-RUNTIME-002
+    surface: chrome.global
   - id: element.text.content.set
     path: rows/element/text/content/set
     status: verified

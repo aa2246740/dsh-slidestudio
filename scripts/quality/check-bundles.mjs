@@ -9,7 +9,7 @@ function files(dir, recurse) {
       ? recurse
         ? files(path.join(dir, entry.name), true)
         : []
-      : /\.(?:js|css)$/.test(entry.name)
+      : /\.(?:m?js|css)$/.test(entry.name)
         ? [path.join(dir, entry.name)]
         : [],
   );

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   createOpenKimiVisualManifest,
   openKimiVisualSourceId,
@@ -12,7 +13,7 @@ import {
   verifyOpenKimiVisualPack,
 } from "./openkimi-visual-pack.js";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 describe("OpenKimi visual pack", () => {
   it("covers every pinned theme preview and returns exact JPEG bytes", () => {

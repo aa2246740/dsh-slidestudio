@@ -39,13 +39,7 @@ export type PlaywrightRuntimeRoots = {
   readonly stateDir?: string;
 };
 
-export type PlaywrightRuntimeSource =
-  | "env"
-  | "repo"
-  | "managed"
-  | "codex"
-  | "machine"
-  | "pending";
+export type PlaywrightRuntimeSource = "env" | "repo" | "managed" | "codex" | "machine" | "pending";
 
 export type PlaywrightRuntimeResolution = {
   /** runtime.mjs path that should be launched (or provisioned). */
@@ -63,10 +57,7 @@ export function codexPlaywrightRuntimeFile(homeDir = os.homedir()): string {
   return path.join(homeDir, ".codex", "playwright-runtime", "runtime.mjs");
 }
 
-export function defaultSlidesStateDir(
-  env: NodeJS.ProcessEnv = process.env,
-  homeDir = os.homedir(),
-): string {
+export function defaultSlidesStateDir(env: NodeJS.ProcessEnv = process.env, homeDir = os.homedir()): string {
   const home = env.DSH_HOME?.trim() || path.join(homeDir, ".dsh");
   return path.join(home, "data", "dsh-slidestudio");
 }
@@ -130,6 +121,9 @@ function readRuntimeStamp(runtimeFile: string): RuntimeStamp {
 
 export const RUNTIME_EXECUTABLE_NAMES = [
   "chrome-headless-shell",
+  // Windows: the headless-shell binary is chrome-headless-shell.exe — without
+  // it a perfectly installed runtime reads as unusable on Windows.
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",
@@ -157,10 +151,7 @@ export function findBrowserExecutable(directory: string): string {
  * runtime file's stamped playwright package and browser must actually exist.
  * Mirrors verifyPinnedRuntime() without importing the module.
  */
-export function runtimeLayoutUsable(
-  runtimeFile: string,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function runtimeLayoutUsable(runtimeFile: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!runtimeFileReady(runtimeFile)) return false;
   const stamp = readRuntimeStamp(runtimeFile);
   const dir = path.dirname(runtimeFile);
@@ -178,14 +169,10 @@ export function runtimeLayoutUsable(
   }
   const browserDirName =
     stamp.browserDirName ?? `chromium_headless_shell-${stamp.revision ?? PINNED_CHROMIUM_REVISION}`;
-  const browsersDirs = [
-    env.PLAYWRIGHT_BROWSERS_PATH?.trim(),
-    stamp.browsersDir,
-    path.join(dir, "browsers"),
-  ].filter((d): d is string => Boolean(d));
-  return browsersDirs.some(
-    (base) => findBrowserExecutable(path.join(base, browserDirName)) !== "",
+  const browsersDirs = [env.PLAYWRIGHT_BROWSERS_PATH?.trim(), stamp.browsersDir, path.join(dir, "browsers")].filter(
+    (d): d is string => Boolean(d),
   );
+  return browsersDirs.some((base) => findBrowserExecutable(path.join(base, browserDirName)) !== "");
 }
 
 /**
@@ -214,7 +201,8 @@ export function defaultPlaywrightBrowsersDirs(
   const configured = env.PLAYWRIGHT_BROWSERS_PATH?.trim();
   if (configured) dirs.push(configured);
   if (platform === "darwin") dirs.push(path.join(homeDir, "Library", "Caches", "ms-playwright"));
-  else if (platform === "win32") dirs.push(path.join(env.LOCALAPPDATA ?? path.join(homeDir, "AppData", "Local"), "ms-playwright"));
+  else if (platform === "win32")
+    dirs.push(path.join(env.LOCALAPPDATA ?? path.join(homeDir, "AppData", "Local"), "ms-playwright"));
   else dirs.push(path.join(homeDir, ".cache", "ms-playwright"));
   return dirs;
 }
@@ -245,10 +233,7 @@ function globalNodeModulesDir(): string {
 }
 
 /** Every place an existing playwright package might already live. */
-export function playwrightModuleSearchDirs(
-  env: NodeJS.ProcessEnv,
-  roots: PlaywrightRuntimeRoots,
-): string[] {
+export function playwrightModuleSearchDirs(env: NodeJS.ProcessEnv, roots: PlaywrightRuntimeRoots): string[] {
   const dirs: string[] = [];
   const repo = env.OPEN_SLIDESTUDIO_ROOT?.trim() || roots.repoRoot;
   const push = (d: string | undefined) => {
@@ -270,8 +255,7 @@ function expectedBrowserDirs(moduleDir: string): { headlessShell?: string; chrom
     const data = JSON.parse(fs.readFileSync(browsersJson, "utf8")) as {
       browsers?: Array<{ name?: string; revision?: string }>;
     };
-    const find = (name: string) =>
-      data.browsers?.find((b) => b.name === name)?.revision;
+    const find = (name: string) => data.browsers?.find((b) => b.name === name)?.revision;
     return {
       headlessShell: find("chromium-headless-shell"),
       chromium: find("chromium"),
@@ -310,7 +294,9 @@ function scanBrowsersDir(
     return shellBias(a) - shellBias(b) || Number(b.revision) - Number(a.revision);
   });
   const top = usable[0];
-  return top ? { browserDirName: top.browserDirName, revision: top.revision, executablePath: top.executablePath } : undefined;
+  return top
+    ? { browserDirName: top.browserDirName, revision: top.revision, executablePath: top.executablePath }
+    : undefined;
 }
 
 /**
@@ -358,9 +344,7 @@ export function discoverMachinePlaywright(opts: {
     expected.headlessShell
       ? { dirName: `chromium_headless_shell-${expected.headlessShell}`, revision: expected.headlessShell }
       : undefined,
-    expected.chromium
-      ? { dirName: `chromium-${expected.chromium}`, revision: expected.chromium }
-      : undefined,
+    expected.chromium ? { dirName: `chromium-${expected.chromium}`, revision: expected.chromium } : undefined,
   ].filter((d): d is { dirName: string; revision: string } => Boolean(d));
 
   for (const browsersDir of browsersDirs) {
@@ -411,9 +395,7 @@ export function machineRuntimeReuse(
     expected.headlessShell
       ? { dirName: `chromium_headless_shell-${expected.headlessShell}`, revision: expected.headlessShell }
       : undefined,
-    expected.chromium
-      ? { dirName: `chromium-${expected.chromium}`, revision: expected.chromium }
-      : undefined,
+    expected.chromium ? { dirName: `chromium-${expected.chromium}`, revision: expected.chromium } : undefined,
   ].filter((d): d is { dirName: string; revision: string } => Boolean(d));
   for (const browsersDir of defaultPlaywrightBrowsersDirs(env, roots.homeDir)) {
     const found = scanBrowsersDir(browsersDir, preferred);
@@ -442,12 +424,8 @@ export type RuntimeSourceOptions = {
  * scripts/setup-browser-runtime.mjs — keep the generated code aligned.
  */
 export function playwrightRuntimeSource(opts: RuntimeSourceOptions): string {
-  const moduleDirExpr = opts.moduleDir
-    ? JSON.stringify(path.resolve(opts.moduleDir))
-    : `join(root, "node_modules")`;
-  const browsersDirExpr = opts.browsersDir
-    ? JSON.stringify(path.resolve(opts.browsersDir))
-    : `join(root, "browsers")`;
+  const moduleDirExpr = opts.moduleDir ? JSON.stringify(path.resolve(opts.moduleDir)) : `join(root, "node_modules")`;
+  const browsersDirExpr = opts.browsersDir ? JSON.stringify(path.resolve(opts.browsersDir)) : `join(root, "browsers")`;
   return `import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -464,6 +442,7 @@ const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");
 const EXECUTABLE_NAMES = new Set([
   "chrome-headless-shell",
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",
@@ -532,10 +511,7 @@ export async function loadPinnedPlaywright() {
 }
 
 /** Write a runtime.mjs into the managed dir that delegates to a discovered install. */
-export function materializeManagedRuntime(
-  stateDir: string,
-  discovered: DiscoveredPlaywright,
-): string {
+export function materializeManagedRuntime(stateDir: string, discovered: DiscoveredPlaywright): string {
   const dir = managedPlaywrightRuntimeDir(stateDir);
   fs.mkdirSync(dir, { recursive: true });
   const file = managedPlaywrightRuntimeFile(stateDir);
@@ -560,11 +536,11 @@ export function resolvePlaywrightRuntime(
 ): PlaywrightRuntimeResolution {
   const configured = env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME?.trim();
   if (configured) {
-    return { path: configured, ready: runtimeFileReady(configured), source: "env" };
+    return { path: configured, ready: runtimeLayoutUsable(configured, env), source: "env" };
   }
   const repo = env.OPEN_SLIDESTUDIO_ROOT?.trim() || roots.repoRoot || process.cwd();
   const local = repoPlaywrightRuntimeFile(repo);
-  if (runtimeFileReady(local)) return { path: local, ready: true, source: "repo" };
+  if (runtimeLayoutUsable(local, env)) return { path: local, ready: true, source: "repo" };
 
   const stateDir = roots.stateDir ?? defaultSlidesStateDir(env, roots.homeDir);
   const managed = managedPlaywrightRuntimeFile(stateDir);
@@ -591,15 +567,9 @@ export function resolvePlaywrightRuntime(
   return { path: managed, ready: false, source: "pending" };
 }
 
-const NPM_REGISTRIES = [
-  "https://registry.npmjs.org",
-  "https://registry.npmmirror.com",
-] as const;
+const NPM_REGISTRIES = ["https://registry.npmjs.org", "https://registry.npmmirror.com"] as const;
 
-const PLAYWRIGHT_DOWNLOAD_HOSTS = [
-  undefined,
-  "https://registry.npmmirror.com/-/binary/playwright",
-] as const;
+const PLAYWRIGHT_DOWNLOAD_HOSTS = [undefined, "https://registry.npmmirror.com/-/binary/playwright"] as const;
 
 export type ProvisionResult = {
   readonly path: string;
@@ -617,12 +587,7 @@ export type ProvisionOptions = {
   readonly execFileImpl?: typeof execFileAsync;
 };
 
-async function fetchTarball(
-  registry: string,
-  name: string,
-  version: string,
-  fetchImpl: typeof fetch,
-): Promise<Buffer> {
+async function fetchTarball(registry: string, name: string, version: string, fetchImpl: typeof fetch): Promise<Buffer> {
   const url = `${registry}/${name}/-/${name}-${version}.tgz`;
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(180_000) });
   if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
@@ -635,7 +600,10 @@ async function extractTarball(tgz: Buffer, name: string, nodeModulesDir: string)
   const unpackDir = path.join(nodeModulesDir, `.unpack-${name}-${process.pid}`);
   fs.mkdirSync(unpackDir, { recursive: true });
   try {
-    await execFileAsync("tar", ["-xzf", tmp, "-C", unpackDir], { maxBuffer: 16 * 1024 * 1024 });
+    await execFileAsync("tar", ["-xzf", path.basename(tmp), "-C", path.relative(nodeModulesDir, unpackDir)], {
+      cwd: nodeModulesDir,
+      maxBuffer: 16 * 1024 * 1024,
+    });
     const top = fs.readdirSync(unpackDir).filter((e) => e !== "package");
     const src = fs.existsSync(path.join(unpackDir, "package"))
       ? path.join(unpackDir, "package")
@@ -665,9 +633,9 @@ async function installPlaywrightPackages(
       log(`[slides] downloading playwright@${version} from ${registry}`);
       const playwrightTgz = await fetchTarball(registry, "playwright", version, fetchImpl);
       await extractTarball(playwrightTgz, "playwright", nodeModules);
-      const pkg = JSON.parse(
-        fs.readFileSync(path.join(nodeModules, "playwright", "package.json"), "utf8"),
-      ) as { dependencies?: Record<string, string> };
+      const pkg = JSON.parse(fs.readFileSync(path.join(nodeModules, "playwright", "package.json"), "utf8")) as {
+        dependencies?: Record<string, string>;
+      };
       const coreVersion = (pkg.dependencies?.["playwright-core"] ?? version).replace(/^[\^~]/, "");
       log(`[slides] downloading playwright-core@${coreVersion} from ${registry}`);
       const coreTgz = await fetchTarball(registry, "playwright-core", coreVersion, fetchImpl);
@@ -694,30 +662,31 @@ async function installHeadlessShell(
   for (const host of hosts) {
     try {
       opts.log(`[slides] downloading Chromium Headless Shell${host ? ` via ${host}` : ""}`);
-      await execFileImpl(
-        process.execPath,
-        [cli, "install", "chromium-headless-shell"],
-        {
-          env: {
-            ...process.env,
-            PLAYWRIGHT_BROWSERS_PATH: browsersDir,
-            ...(host ? { PLAYWRIGHT_DOWNLOAD_HOST: host } : {}),
-          },
-          maxBuffer: 16 * 1024 * 1024,
-          timeout: 10 * 60 * 1000,
+      await execFileImpl(process.execPath, [cli, "install", "chromium-headless-shell"], {
+        env: {
+          ...process.env,
+          PLAYWRIGHT_BROWSERS_PATH: browsersDir,
+          ...(host ? { PLAYWRIGHT_DOWNLOAD_HOST: host } : {}),
         },
-      );
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 10 * 60 * 1000,
+      });
       const expected = expectedBrowserDirs(moduleDir);
-      const found = scanBrowsersDir(browsersDir, [
-        expected.headlessShell
-          ? { dirName: `chromium_headless_shell-${expected.headlessShell}`, revision: expected.headlessShell }
-          : undefined,
-      ].filter((d): d is { dirName: string; revision: string } => Boolean(d)));
+      const found = scanBrowsersDir(
+        browsersDir,
+        [
+          expected.headlessShell
+            ? { dirName: `chromium_headless_shell-${expected.headlessShell}`, revision: expected.headlessShell }
+            : undefined,
+        ].filter((d): d is { dirName: string; revision: string } => Boolean(d)),
+      );
       if (!found) throw new Error("chromium-headless-shell download produced no executable");
       return { browserDirName: found.browserDirName, revision: found.revision };
     } catch (error) {
       lastError = error;
-      opts.log(`[slides] browser download failed${host ? ` via ${host}` : ""}: ${error instanceof Error ? error.message : String(error)}`);
+      opts.log(
+        `[slides] browser download failed${host ? ` via ${host}` : ""}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -746,7 +715,13 @@ export async function provisionManagedRuntime(
     let moduleDir = opts.reuse?.moduleDir;
     const provisionedModule = !moduleDir;
     if (!moduleDir) {
-      await installPlaywrightPackages(stageDir, version, opts.registries ?? NPM_REGISTRIES, opts.fetchImpl ?? fetch, log);
+      await installPlaywrightPackages(
+        stageDir,
+        version,
+        opts.registries ?? NPM_REGISTRIES,
+        opts.fetchImpl ?? fetch,
+        log,
+      );
       moduleDir = path.join(stageDir, "node_modules");
     }
     let browser: { browserDirName: string; revision: string; browsersDir: string };
@@ -762,9 +737,11 @@ export async function provisionManagedRuntime(
     }
     const moduleVersion = provisionedModule
       ? version
-      : (JSON.parse(
-          fs.readFileSync(path.join(moduleDir, "playwright", "package.json"), "utf8"),
-        ) as { version?: string }).version ?? version;
+      : ((
+          JSON.parse(fs.readFileSync(path.join(moduleDir, "playwright", "package.json"), "utf8")) as {
+            version?: string;
+          }
+        ).version ?? version);
 
     fs.writeFileSync(
       path.join(stageDir, "runtime.mjs"),

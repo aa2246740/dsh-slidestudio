@@ -6,7 +6,7 @@ Build a real product, not a pixel-clone of Kimi branding. Reuse **interaction pa
 
 ## Setup and development
 
-Run commands from the repository root with Node.js `^22.19.0 || >=24.0.0` and npm.
+Run commands from the repository root with Node.js `^22.19.0 || >=24.11.0` and npm.
 
 ```sh
 npm run setup:dev
@@ -76,7 +76,10 @@ build (needed for legacy declarations), type checking, and offline workspace
 tests. Failures block the commit. Reinstall the hook with `npm run prepare` if
 needed; check any existing custom Git hooks before changing `core.hooksPath`.
 The hook also enforces quality baselines, generated-doc freshness, secret
-scanning and the critical-interface coverage gate described above.
+scanning and the critical-interface coverage gate described above. The two
+`.mjs` apps have real `checkJs` type checking via `npm run quality:types`
+(`--record-baseline` only after a justified toolchain change); new type errors
+fail while existing adoption debt in `config/type-baseline.json` stays visible.
 
 Use camelCase for functions/variables, PascalCase for types/React components,
 and UPPER_SNAKE_CASE for module constants. Preserve established public names.
@@ -129,6 +132,17 @@ For plugin packaging or a real Harness integration, read `INSTALL-DSH.md`.
 ## Design workflow
 
 Use Ultimate Design **Pro mode** for product chrome and slide theme systems: freeze Decision Snapshot → contract → artifact → critique → verify. Persist contracts in repo.
+
+## Feature flags
+
+Flags live in `config/feature-flags.json` and resolve through
+`scripts/lib/feature-flags.mjs` (`loadFeatureFlags`). Add a flag with a default
+and owner when shipping a toggleable behavior; override per checkout with
+`SLIDESTUDIO_FLAG_<FLAG_NAME>` (`1/true/on`, `0/false/off`, or a literal value).
+Explicit `SLIDESTUDIO_*` env vars keep precedence over their matching flag.
+The ops sentinel (`node scripts/quality/ops-sentinel.mjs`, scheduled by
+`.github/workflows/ops-sentinel.yml`) reads `config/alert-rules.json` and opens
+a GitHub issue when a wired check fails.
 
 ## Agent skills
 

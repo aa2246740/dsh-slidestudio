@@ -6,11 +6,7 @@ import { filterCatalog, loadReferenceCatalog, resolveRepoRoot } from "./catalog.
 import { inspectProjectCapabilities } from "./capabilities.js";
 import { assertChartEvidence } from "./chart-gate.js";
 import { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";
-import {
-  listSourceReceipts,
-  recordSourceReceipt,
-  requireConsultAdoptBeforeWrite,
-} from "./receipts.js";
+import { listSourceReceipts, recordSourceReceipt, requireConsultAdoptBeforeWrite } from "./receipts.js";
 import type {
   CommandContext,
   CommandReceipt,
@@ -22,7 +18,7 @@ import type {
   RunInspection,
 } from "./types.js";
 import { runDomainHand } from "./domain/domain-hands.js";
-import { writeJsonAtomic } from "./domain/atomic-file.js";
+import { writeFileAtomic } from "./domain/atomic-file.js";
 import { parseCanonicalPagePlan, type CanonicalPlanPage } from "./domain/page-plan.js";
 import {
   currentVisualReviewsMissing,
@@ -33,10 +29,7 @@ import {
 import { inspectGenerationActivity } from "./generation-activity.js";
 import { inspectProjectExecution } from "./execution-observation.js";
 import { kindThemePackIssue, sourceIdList } from "./domain/theme-pack.js";
-import {
-  resolveOpenKimiPresetDesignSourceId,
-  verifyOpenKimiPack,
-} from "./domain/openkimi-source-pack.js";
+import { resolveOpenKimiPresetDesignSourceId, verifyOpenKimiPack } from "./domain/openkimi-source-pack.js";
 
 const BINDING_REL = path.join("_agent", "presentation-run.v1.json");
 
@@ -47,7 +40,17 @@ function bindingPath(projectRoot: string): string {
 }
 
 function writeBinding(input: BindingFile): void {
-  writeJsonAtomic(bindingPath(input.projectRoot), input);
+  const file = bindingPath(input.projectRoot);
+  // Skip the rewrite when the persisted content already matches: hydrate()
+  // re-persists the unchanged binding on every /slides/state poll, which turns
+  // the editor's heartbeat into a constant disk write for every open project.
+  const content = `${JSON.stringify(input, null, 2)}\n`;
+  try {
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content) return;
+  } catch {
+    // Unreadable binding file — fall through and overwrite it.
+  }
+  writeFileAtomic(file, content);
 }
 
 function readBinding(projectRoot: string): BindingFile | undefined {
@@ -161,44 +164,32 @@ function composeGateFailure(name: string, projectRoot: string): CommandReceipt |
     .filter((page) => page.layout === "fail" && hasBlocker(`${page.pageId}: rendered layout`))
     .map((page) => page.pageId);
   const missingRasterPageIds = status.pages
-    .filter(
-      (page) =>
-        page.layout !== "fail" && hasBlocker(`${page.pageId}: rendered layout`),
-    )
+    .filter((page) => page.layout !== "fail" && hasBlocker(`${page.pageId}: rendered layout`))
     .map((page) => page.pageId);
   const missingImagePageIds = status.pages
     .filter((page) => hasBlocker(`${page.pageId}: image content not emitted`))
     .map((page) => page.pageId);
   const missingVisualReviewPageIds = status.pages
-    .filter(
-      (page) =>
-        page.visualReview === "missing" && hasBlocker(`${page.pageId}: visual review`),
-    )
+    .filter((page) => page.visualReview === "missing" && hasBlocker(`${page.pageId}: visual review`))
     .map((page) => page.pageId);
   const failedVisualReviewPageIds = status.pages
-    .filter(
-      (page) =>
-        page.visualReview === "revise" && hasBlocker(`${page.pageId}: visual review`),
-    )
+    .filter((page) => page.visualReview === "revise" && hasBlocker(`${page.pageId}: visual review`))
     .map((page) => page.pageId);
   const ledger = readRunLedger(projectRoot);
-  const currentPageHashes = Object.fromEntries(
-    status.pages.map((page) => [page.pageId, page.pageSha256]),
-  );
+  const currentPageHashes = Object.fromEntries(status.pages.map((page) => [page.pageId, page.pageSha256]));
   const structuralFailure = ledger
-    ? [...ledger.facts].reverse().find(
-        (fact) =>
-          fact.type === "deck.structural-review-recorded" &&
-          fact.ok === false &&
-          Object.keys(currentPageHashes).length === Object.keys(fact.pageRevisions).length &&
-          Object.entries(currentPageHashes).every(
-            ([pageId, sha]) => fact.pageRevisions[pageId] === sha,
-          ),
-      )
+    ? [...ledger.facts]
+        .reverse()
+        .find(
+          (fact) =>
+            fact.type === "deck.structural-review-recorded" &&
+            fact.ok === false &&
+            Object.keys(currentPageHashes).length === Object.keys(fact.pageRevisions).length &&
+            Object.entries(currentPageHashes).every(([pageId, sha]) => fact.pageRevisions[pageId] === sha),
+        )
     : undefined;
-  const structuralIssues = structuralFailure?.type === "deck.structural-review-recorded"
-    ? [...structuralFailure.issues]
-    : [];
+  const structuralIssues =
+    structuralFailure?.type === "deck.structural-review-recorded" ? [...structuralFailure.issues] : [];
   const structuralFailedPageIds = status.pages
     .filter((page) => structuralIssues.some((issue) => issue.includes(page.pageId)))
     .map((page) => page.pageId);
@@ -208,13 +199,13 @@ function composeGateFailure(name: string, projectRoot: string): CommandReceipt |
       ? "write_todo"
       : failedLayoutPageIds.length || failedVisualReviewPageIds.length || status.structuralReview === "fail"
         ? "write_page"
-      : missingRasterPageIds.length || missingImagePageIds.length
-        ? "render_page"
-        : missingVisualReviewPageIds.length
-          ? "review_page"
-          : status.structuralReview !== "pass"
-            ? "review_pages"
-            : "resolve_reported_blockers";
+        : missingRasterPageIds.length || missingImagePageIds.length
+          ? "render_page"
+          : missingVisualReviewPageIds.length
+            ? "review_page"
+            : status.structuralReview !== "pass"
+              ? "review_pages"
+              : "resolve_reported_blockers";
   return {
     ok: false,
     name,
@@ -358,12 +349,14 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           tag: typeof args.tag === "string" ? args.tag : undefined,
         });
         const ledger = inspectRunLedger(context.projectRoot, epochFor(context.sessionId));
-        const requiredReferenceChunks = readRunLedger(context.projectRoot)?.sourcePack.requirements
-          .flatMap((requirement) => requirement.chunkIndexes.map((chunkIndex) => ({
-            sourceId: requirement.sourceId,
-            chunkIndex,
-            reason: requirement.reason,
-          }))) ?? [];
+        const requiredReferenceChunks =
+          readRunLedger(context.projectRoot)?.sourcePack.requirements.flatMap((requirement) =>
+            requirement.chunkIndexes.map((chunkIndex) => ({
+              sourceId: requirement.sourceId,
+              chunkIndex,
+              reason: requirement.reason,
+            })),
+          ) ?? [];
         const prefix = ledger.initialized
           ? ledger.referencesComplete
             ? "All required source chunks are read."
@@ -371,18 +364,23 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
                 .map((chunk) => `${chunk.sourceId}#${chunk.chunkIndex}`)
                 .join(", ")}.`
           : "No strict source ledger is initialized.";
-        return ok(name, `${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`, {
-          referencesComplete: ledger.initialized && ledger.referencesComplete,
-          requiredReferenceChunks,
-          missingReferenceChunks: ledger.missingReferenceChunks,
-          next: ledger.initialized && !ledger.referencesComplete ? "read_reference" : undefined,
-          sourceFiles: catalog.sourceFiles,
-          visualFiles: catalog.visualFiles,
-          listedSourceFiles: filtered.sourceFiles,
-          listedVisualFiles: filtered.visualFiles,
-          sources: [...filtered.sources, ...filtered.visuals],
-          uncropped: true,
-        }, `${prefix}\n${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`);
+        return ok(
+          name,
+          `${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`,
+          {
+            referencesComplete: ledger.initialized && ledger.referencesComplete,
+            requiredReferenceChunks,
+            missingReferenceChunks: ledger.missingReferenceChunks,
+            next: ledger.initialized && !ledger.referencesComplete ? "read_reference" : undefined,
+            sourceFiles: catalog.sourceFiles,
+            visualFiles: catalog.visualFiles,
+            listedSourceFiles: filtered.sourceFiles,
+            listedVisualFiles: filtered.visualFiles,
+            sources: [...filtered.sources, ...filtered.visuals],
+            uncropped: true,
+          },
+          `${prefix}\n${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`,
+        );
       }
       if (name === "read_reference") {
         const receipt = await invokeDomain(name, args, context);
@@ -399,20 +397,25 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
       if (name === "commit_design" || name === "write_todo") {
         const binding = readBinding(context.projectRoot);
         const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
-        const adopted = requestedSources.length ? requestedSources : sourceIdList(
-          listSourceReceipts(context.projectRoot)
-            .filter((row) => row.state === "adopted" || row.state === "executed")
-            .map((row) => row.sourceId));
+        const adopted = requestedSources.length
+          ? requestedSources
+          : sourceIdList(
+              listSourceReceipts(context.projectRoot)
+                .filter((row) => row.state === "adopted" || row.state === "executed")
+                .map((row) => row.sourceId),
+            );
         const preflight = planningReferencePreflight(repoRoot, context.projectRoot, name, adopted);
         if (preflight) return preflight;
         let items: readonly CanonicalPlanPage[];
-        try { items = parseCanonicalPagePlan(args.items ?? args.slidePlan); }
-        catch (error) { return fail(name, error instanceof Error ? error.message : String(error)); }
+        try {
+          items = parseCanonicalPagePlan(args.items ?? args.slidePlan);
+        } catch (error) {
+          return fail(name, error instanceof Error ? error.message : String(error));
+        }
         const packIssue = kindThemePackIssue({
           brief: binding?.brief ?? "",
           adoptedSourceIds: adopted,
-          designSystemId:
-            binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
+          designSystemId: binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
           userExplicitPack: binding?.design.kind === "explicit-style",
         });
         if (packIssue) {
@@ -452,7 +455,8 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         }
         return ok(name, "design plan adopted", {
           outcome: "committed",
-          items, plannedPageIds: items.map((page) => page.pageId),
+          items,
+          plannedPageIds: items.map((page) => page.pageId),
           adoptedSourceIds: adopted.length ? adopted : ["agent-self-directed-plan"],
         });
       }
@@ -476,8 +480,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         const packIssue = kindThemePackIssue({
           brief: binding?.brief ?? "",
           adoptedSourceIds: sourceIdList(args.adoptedSourceIds, args.adopt, adopted),
-          designSystemId:
-            binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
+          designSystemId: binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
           userExplicitPack: binding?.design.kind === "explicit-style",
         });
         if (packIssue) {
@@ -501,9 +504,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           const pageId = String(receipt.payload.pageId ?? args.id ?? "");
           // "executed" must name a source this page actually used — a blanket
           // mark of every adopted row would credit sources the page never drew.
-          const pageSources = new Set(
-            sourceIdList(args.adoptedSourceIds, args.adopt).map((id) => id.trim()),
-          );
+          const pageSources = new Set(sourceIdList(args.adoptedSourceIds, args.adopt).map((id) => id.trim()));
           for (const row of listSourceReceipts(context.projectRoot).filter(
             (item) => item.state === "adopted" && pageSources.has(item.sourceId),
           )) {
@@ -571,8 +572,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
       const ledger = inspectRunLedger(binding.projectRoot);
       const composed = ledger.composed;
       const exported = Boolean(readVerifiedDelivery(binding.projectRoot));
-      const designSystemId =
-        binding.design.kind === "explicit-style" ? binding.design.designSystemId : undefined;
+      const designSystemId = binding.design.kind === "explicit-style" ? binding.design.designSystemId : undefined;
       return {
         runId: binding.runId,
         sessionId: binding.sessionId,
@@ -594,9 +594,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         ledger,
         // inspection.pages tracks pages that exist now: a structurally deleted
         // page keeps its historical revision facts but must not look alive.
-        pages: pageOrder.length
-          ? ledger.pages.filter((page) => pageOrder.includes(page.pageId))
-          : ledger.pages,
+        pages: pageOrder.length ? ledger.pages.filter((page) => pageOrder.includes(page.pageId)) : ledger.pages,
         pageOrder,
         structuralReview: ledger.structuralReview,
         composeReady: ledger.composeReady,
@@ -608,9 +606,10 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           verifiedDelivery: readVerifiedDelivery(binding.projectRoot),
           binding: {
             provider: binding.provider,
-            design: binding.design.kind === "explicit-style"
-              ? { kind: "explicit-style", designSystemId: binding.design.designSystemId }
-              : { kind: "self-directed" },
+            design:
+              binding.design.kind === "explicit-style"
+                ? { kind: "explicit-style", designSystemId: binding.design.designSystemId }
+                : { kind: "self-directed" },
             brief: binding.brief,
           },
         }),

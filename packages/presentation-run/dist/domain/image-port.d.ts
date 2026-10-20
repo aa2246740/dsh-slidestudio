@@ -1,3 +1,5 @@
+import { type EndpointTemplate } from "./endpoint-template.js";
+export { IMAGE_GENERATE_PRESETS, type ImageGeneratePreset } from "./image-presets.js";
 export type ImageKind = "generated";
 export type GeneratedImage = {
     bytes: Buffer;
@@ -12,6 +14,10 @@ export type ImagePortConfig = {
     apiKey?: string;
     model?: string;
     timeoutMs?: number;
+    /** Wire format; empty/unknown falls back to "openai". */
+    preset?: string;
+    /** {{var}} request template; only used when preset === "template". */
+    template?: EndpointTemplate;
     /** false = never call a remote image API. */
     enabled?: boolean;
 };

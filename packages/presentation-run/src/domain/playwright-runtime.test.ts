@@ -34,10 +34,7 @@ function fakeUsableRuntime(dir: string, version = "1.61.1", browserDirName = "ch
   );
   const pkgDir = path.join(dir, "node_modules", "playwright");
   fs.mkdirSync(pkgDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(pkgDir, "package.json"),
-    JSON.stringify({ name: "playwright", version }),
-  );
+  fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name: "playwright", version }));
   const exe = path.join(dir, "browsers", browserDirName, "chrome-headless-shell");
   fs.mkdirSync(path.dirname(exe), { recursive: true });
   fs.writeFileSync(exe, "#!/bin/sh\n");
@@ -55,11 +52,25 @@ describe("resolvePlaywrightRuntime", () => {
   it("prefers the repo runtime over everything else", () => {
     const repo = tmpdir("repo");
     const home = tmpdir("home");
-    fs.mkdirSync(path.dirname(repoPlaywrightRuntimeFile(repo)), { recursive: true });
-    fs.writeFileSync(repoPlaywrightRuntimeFile(repo), STUB_RUNTIME);
+    fakeUsableRuntime(path.dirname(repoPlaywrightRuntimeFile(repo)));
     const resolved = resolvePlaywrightRuntime({}, { repoRoot: repo, homeDir: home });
     assert.equal(resolved.source, "repo");
     assert.equal(resolved.ready, true);
+  });
+
+  it("requires a browser executable as well as the runtime wrapper and module", () => {
+    const dir = tmpdir("missing-browser");
+    fakeUsableRuntime(dir);
+    const runtimeFile = path.join(dir, "runtime.mjs");
+    const browser = path.join(dir, "browsers", "chromium_headless_shell-1228", "chrome-headless-shell");
+    fs.rmSync(browser);
+    const env = { SLIDESTUDIO_PLAYWRIGHT_RUNTIME: runtimeFile } as NodeJS.ProcessEnv;
+
+    assert.equal(runtimeFileReady(runtimeFile), true);
+    assert.equal(resolvePlaywrightRuntime(env).ready, false);
+
+    fs.writeFileSync(browser, "#!/bin/sh\n");
+    assert.equal(resolvePlaywrightRuntime(env).ready, true);
   });
 
   it("falls through to a usable managed runtime before the codex one", () => {
@@ -130,7 +141,7 @@ describe("resolvePlaywrightRuntime", () => {
     assert.equal(resolved.ready, true);
     assert.equal(runtimeLayoutUsable(resolved.path), true);
     const src = fs.readFileSync(resolved.path, "utf8");
-    assert.match(src, /MODULE_DIR = "\/[^"]*node_modules"/);
+    assert.ok(src.includes(`MODULE_DIR = ${JSON.stringify(path.join(repo, "node_modules"))}`));
   });
 
   it("reports pending when nothing usable exists", () => {
@@ -192,18 +203,21 @@ describe("playwrightRuntimeSource", () => {
   it("emits a file that passes the ready sniff and stamps its layout", () => {
     const dir = tmpdir("source");
     const file = path.join(dir, "runtime.mjs");
-    fs.writeFileSync(file, playwrightRuntimeSource({
-      version: "1.61.1",
-      revision: "1228",
-      browserDirName: "chromium_headless_shell-1228",
-      moduleDir: "/opt/x/node_modules",
-      browsersDir: "/opt/x/ms-playwright",
-    }));
+    fs.writeFileSync(
+      file,
+      playwrightRuntimeSource({
+        version: "1.61.1",
+        revision: "1228",
+        browserDirName: "chromium_headless_shell-1228",
+        moduleDir: "/opt/x/node_modules",
+        browsersDir: "/opt/x/ms-playwright",
+      }),
+    );
     assert.equal(runtimeFileReady(file), true);
     const src = fs.readFileSync(file, "utf8");
     assert.match(src, /PINNED_PLAYWRIGHT_VERSION = "1\.61\.1"/);
-    assert.match(src, /MODULE_DIR = "\/opt\/x\/node_modules"/);
-    assert.match(src, /BROWSERS_DIR = "\/opt\/x\/ms-playwright"/);
+    assert.ok(src.includes(`MODULE_DIR = ${JSON.stringify(path.resolve("/opt/x/node_modules"))}`));
+    assert.ok(src.includes(`BROWSERS_DIR = ${JSON.stringify(path.resolve("/opt/x/ms-playwright"))}`));
     assert.match(src, /BROWSER_DIR_NAME = "chromium_headless_shell-1228"/);
   });
 });
@@ -263,18 +277,15 @@ describe("provisionManagedRuntime", () => {
     for (const name of ["playwright", "playwright-core"]) {
       const pkg = path.join(fixture, name);
       fs.mkdirSync(pkg, { recursive: true });
-      fs.writeFileSync(
-        path.join(pkg, "package.json"),
-        JSON.stringify({ name, version: "1.61.1" }),
-      );
+      fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name, version: "1.61.1" }));
       fs.writeFileSync(path.join(pkg, "index.mjs"), "export const chromium = {};\n");
       if (name === "playwright") fs.writeFileSync(path.join(pkg, "cli.js"), "// cli\n");
     }
     const tars: Record<string, Buffer> = {};
     for (const name of ["playwright", "playwright-core"]) {
-      const tgz = path.join(fixture, `${name}.tgz`);
-      execFileSync("tar", ["-czf", tgz, "-C", fixture, name]);
-      tars[name] = fs.readFileSync(tgz);
+      const tgz = `${name}.tgz`;
+      execFileSync("tar", ["-czf", tgz, name], { cwd: fixture });
+      tars[name] = fs.readFileSync(path.join(fixture, tgz));
     }
     const fetchImpl = (async (url: string | URL) => {
       const u = String(url);
@@ -338,6 +349,6 @@ describe("provisionManagedRuntime", () => {
     assert.equal(runtimeLayoutUsable(result.path), true);
     assert.equal(result.reusedModuleDir, path.join(reuseDir, "node_modules"));
     const src = fs.readFileSync(result.path, "utf8");
-    assert.match(src, /MODULE_DIR = "\/[^"]*node_modules"/);
+    assert.ok(src.includes(`MODULE_DIR = ${JSON.stringify(result.reusedModuleDir)}`));
   });
 });

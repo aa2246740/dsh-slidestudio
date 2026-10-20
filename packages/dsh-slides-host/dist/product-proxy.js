@@ -14,7 +14,39 @@ export function editorOrigin() {
 export function editorPort() {
     return Number(new URL(editorOrigin()).port || (new URL(editorOrigin()).protocol === "https:" ? 443 : 80));
 }
-const HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"]);
+const HOP = new Set([
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+]);
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/**
+ * The editor proxy runs before the host request guard, so it owns the
+ * browser-to-host CSRF check: a mutation must come from this host's own origin
+ * (same rule as the sidecar), and only then is it presented to the sidecar as
+ * same-origin.
+ */
+function crossSiteMutation(req) {
+    if (!MUTATING.has(req.method ?? "GET"))
+        return false;
+    const site = String(req.headers["sec-fetch-site"] ?? "").toLowerCase();
+    if (site && site !== "same-origin" && site !== "same-site" && site !== "none")
+        return true;
+    const origin = String(req.headers.origin ?? "").trim();
+    if (!origin)
+        return false;
+    try {
+        return new URL(origin).host !== String(req.headers.host ?? "");
+    }
+    catch {
+        return true;
+    }
+}
 export function shouldProxyToEditor(pathname) {
     if (pathname === "/api/generate" || pathname === "/api/generate-status")
         return false;
@@ -70,6 +102,11 @@ export function editorPath(pathname) {
     return pathname;
 }
 export function proxyToEditor(req, res, origin = editorOrigin()) {
+    if (crossSiteMutation(req)) {
+        res.writeHead(403, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        res.end(JSON.stringify({ error: "cross-site mutation rejected" }));
+        return;
+    }
     const target = new URL(origin);
     const incoming = new URL(req.url ?? "/", "http://127.0.0.1");
     const targetPath = `${editorPath(incoming.pathname)}${incoming.search}`;
@@ -83,6 +120,9 @@ export function proxyToEditor(req, res, origin = editorOrigin()) {
     // pinned to loopback even when the configured origin names another host so
     // this never becomes an open proxy; the port follows the config.
     headers.host = target.host || `127.0.0.1:${target.port}`;
+    // The sidecar compares Origin with its own Host; the browser hop was checked above.
+    if (headers.origin)
+        headers.origin = target.origin;
     const transport = target.protocol === "https:" ? https : http;
     const proxy = transport.request({
         protocol: target.protocol,

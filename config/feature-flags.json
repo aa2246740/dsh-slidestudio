@@ -1,0 +1,16 @@
+{
+  "flags": {
+    "project_retention_days": {
+      "default": 0,
+      "since": "0.2.4",
+      "description": "Days to keep unmodified generated projects in output/ before the sweeper removes them. 0 keeps user work until explicitly deleted. SLIDESTUDIO_RETENTION_DAYS overrides this flag.",
+      "owner": "native-web"
+    },
+    "image_generate": {
+      "default": true,
+      "since": "0.2.4",
+      "description": "Kill switch for the optional image-generate path; when false the editor never offers image generation even if a backend is configured.",
+      "owner": "native-web"
+    }
+  }
+}

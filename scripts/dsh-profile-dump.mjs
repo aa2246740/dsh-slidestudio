@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { dshEnv } from "./lib/dsh-runtime.mjs";
+import { assertDshNodeRuntime, dshCommand, dshEnv } from "./lib/dsh-runtime.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.DSH_HOME || path.join(ROOT, ".dsh", "home");
@@ -17,7 +17,9 @@ if (!fs.existsSync(path.join(HOME, "profiles", "slides", "package.json"))) {
   throw new Error("slides profile missing; run npm run dsh:profile:init");
 }
 
-const result = spawnSync(dsh, ["--profile", "slides", "--dump-config"], {
+assertDshNodeRuntime();
+const command = dshCommand(dsh, ["--profile", "slides", "--dump-config"]);
+const result = spawnSync(command.command, command.args, {
   cwd: ROOT,
   env: dshEnv({ DSH_HOME: HOME }),
   encoding: "utf8",
