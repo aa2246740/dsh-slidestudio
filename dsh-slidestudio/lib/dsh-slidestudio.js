@@ -183,7 +183,7 @@ function createObservability({ app, version = "development", sink = (line) => co
 //#region lib/types/logger.js
 const logger = createObservability({
 	app: "slidestudio-plugin",
-	version: "0.2.7"
+	version: "0.2.8"
 });
 //#endregion
 //#region lib/types/dsh-slidestudio.js

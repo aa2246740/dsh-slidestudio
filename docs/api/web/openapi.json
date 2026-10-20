@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Legacy web SPA static surface",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "description": "Local-first API. Source: apps/web/public/health.json. Critical interfaces only for native/Host; legacy routes are complete. Never expose this loopback-only API publicly."
   },
   "servers": [

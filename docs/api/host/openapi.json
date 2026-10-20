@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "SlideStudio Host API shared by standalone and plugin",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "description": "Local-first API. Source: packages/dsh-slides-host/src/routes.ts. Critical interfaces only for native/Host; legacy routes are complete. Never expose this loopback-only API publicly."
   },
   "servers": [
