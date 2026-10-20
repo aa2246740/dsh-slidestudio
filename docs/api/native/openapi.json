@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Native editor API, critical HTTP interfaces",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "description": "Local-first API. Source: apps/native-web/src/server.mjs. Critical interfaces only for native/Host; legacy routes are complete. Never expose this loopback-only API publicly."
   },
   "servers": [
