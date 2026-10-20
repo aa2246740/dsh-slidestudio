@@ -8,6 +8,8 @@ import "@deepseek-ai/dsh-attachment";
 declare module "@deepseek-ai/cordis" {
     interface Context {
         webServer: {
+            /** The listening port (set once the service has activated). */
+            readonly port?: number;
             register(route: {
                 kind: "exact" | "prefix";
                 path: string;
@@ -16,6 +18,7 @@ declare module "@deepseek-ai/cordis" {
         };
     }
 }
+export { runModelSwitchTransaction } from "./model-switch.js";
 export declare const name = "slides-host";
 export declare const inject: string[];
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
@@ -37,10 +40,5 @@ export type SlidesHostConfig = {
     editorBaseUrl?: string;
     personal?: boolean;
 };
-export declare function runModelSwitchTransaction(input: {
-    apply: () => void;
-    activate: () => void | Promise<void>;
-    rollback: () => void;
-}): Promise<void>;
 export declare function apply(ctx: Context, config?: SlidesHostConfig): void;
 //# sourceMappingURL=plugin.d.ts.map

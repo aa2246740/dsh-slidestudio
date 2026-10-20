@@ -16,6 +16,21 @@ import {
   type RasterPage,
   type RenderedLayoutSnapshot,
 } from "./page-raster.js";
+import { playwrightRuntimeSource } from "./playwright-runtime.js";
+
+function writeUsableRuntimeFixture(runtimeFile: string) {
+  const dir = path.dirname(runtimeFile);
+  const version = "1.61.1";
+  const browserDirName = "chromium_headless_shell-1228";
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(runtimeFile, playwrightRuntimeSource({ version, revision: "1228", browserDirName }));
+  const playwrightDir = path.join(dir, "node_modules", "playwright");
+  fs.mkdirSync(playwrightDir, { recursive: true });
+  fs.writeFileSync(path.join(playwrightDir, "package.json"), JSON.stringify({ name: "playwright", version }));
+  const browser = path.join(dir, "browsers", browserDirName, "chrome-headless-shell");
+  fs.mkdirSync(path.dirname(browser), { recursive: true });
+  fs.writeFileSync(browser, "#!/bin/sh\n");
+}
 
 describe("page raster project manifest", () => {
   it("accepts any root PPTD manifest name, not only deck.pptd", () => {
@@ -38,14 +53,8 @@ describe("page raster project manifest", () => {
     const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "pw-home-"));
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-state-"));
     const env = { OPEN_SLIDESTUDIO_ROOT: repo } as NodeJS.ProcessEnv;
-    const resolved = pinnedPlaywrightRuntimePath(
-      env,
-      { repoRoot: repo, homeDir: emptyHome, stateDir },
-    );
-    assert.equal(
-      resolved,
-      path.join(stateDir, "playwright-runtime", "runtime.mjs"),
-    );
+    const resolved = pinnedPlaywrightRuntimePath(env, { repoRoot: repo, homeDir: emptyHome, stateDir });
+    assert.equal(resolved, path.join(stateDir, "playwright-runtime", "runtime.mjs"));
     assert.equal(rasterRuntimeReady(env, resolved), false);
     assert.equal(resolved.includes(".codex/playwright-runtime"), false);
   });
@@ -54,17 +63,24 @@ describe("page raster project manifest", () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "pw-repo-ready-"));
     const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "pw-home-empty-"));
     const file = path.join(repo, ".runtime", "playwright", "runtime.mjs");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(
-      file,
-      `export function verifyPinnedRuntime() { return true; }
-export async function launchPinnedChromium() { throw new Error("stub"); }
-`,
-    );
+    writeUsableRuntimeFixture(file);
     const env = { OPEN_SLIDESTUDIO_ROOT: repo } as NodeJS.ProcessEnv;
     const resolved = pinnedPlaywrightRuntimePath(env, { repoRoot: repo, homeDir: emptyHome });
     assert.equal(resolved, file);
     assert.equal(rasterRuntimeReady(env, resolved), true);
+  });
+
+  it("requires a browser executable for render readiness", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-repo-missing-browser-"));
+    const file = path.join(dir, ".runtime", "playwright", "runtime.mjs");
+    writeUsableRuntimeFixture(file);
+    const browser = path.join(path.dirname(file), "browsers", "chromium_headless_shell-1228", "chrome-headless-shell");
+    fs.rmSync(browser);
+    const env = { OPEN_SLIDESTUDIO_ROOT: dir } as NodeJS.ProcessEnv;
+
+    assert.equal(rasterRuntimeReady(env, file), false);
+    fs.writeFileSync(browser, "#!/bin/sh\n");
+    assert.equal(rasterRuntimeReady(env, file), true);
   });
 
   it("refuses to claim render ready when the runtime file exists but has no launch API", () => {
@@ -94,24 +110,26 @@ function snapshot(contrastRatio: number, requiredContrast: number): RenderedLayo
     slideWidth: 960,
     slideHeight: 540,
     fontsReady: true,
-    nodes: [{
-      id: "cover-title",
-      type: "text",
-      layoutRole: "content",
-      left: 80,
-      top: 80,
-      right: 880,
-      bottom: 140,
-      scrollWidth: 800,
-      clientWidth: 800,
-      scrollHeight: 60,
-      clientHeight: 60,
-      textColor: "rgb(0, 0, 0)",
-      backgroundColor: "rgb(14, 42, 71)",
-      backgroundSource: "path:fill",
-      contrastRatio,
-      requiredContrast,
-    }],
+    nodes: [
+      {
+        id: "cover-title",
+        type: "text",
+        layoutRole: "content",
+        left: 80,
+        top: 80,
+        right: 880,
+        bottom: 140,
+        scrollWidth: 800,
+        clientWidth: 800,
+        scrollHeight: 60,
+        clientHeight: 60,
+        textColor: "rgb(0, 0, 0)",
+        backgroundColor: "rgb(14, 42, 71)",
+        backgroundSource: "path:fill",
+        contrastRatio,
+        requiredContrast,
+      },
+    ],
   };
 }
 
@@ -153,10 +171,7 @@ describe("rendered text contrast DOM sampler", () => {
   before(async () => {
     const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
     const repo = path.resolve(pkg, "../..");
-    const runtimePath = pinnedPlaywrightRuntimePath(
-      { OPEN_SLIDESTUDIO_ROOT: repo },
-      { repoRoot: repo },
-    );
+    const runtimePath = pinnedPlaywrightRuntimePath({ OPEN_SLIDESTUDIO_ROOT: repo }, { repoRoot: repo });
     // Any resolved source is fine (repo, managed, codex or machine install);
     // it only has to be a real pinned runtime the DOM sampler can launch.
     assert.equal(rasterRuntimeReady({ OPEN_SLIDESTUDIO_ROOT: repo }, runtimePath), true);
@@ -195,10 +210,13 @@ describe("rendered text contrast DOM sampler", () => {
   }
 
   it("ignores transparent HTML default fill and finds the real light slide", async () => {
-    const report = await sample(`
+    const report = await sample(
+      `
       <div class="el" style="inset:0;z-index:1"></div>
       <div class="el text" data-id="light-on-light" style="z-index:2;color:#fff">Unreadable white copy</div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.ok(
       report.hardIssues.some((issue) => issue.kind === "text-contrast" && issue.elementId === "light-on-light"),
       JSON.stringify(report.hardIssues),
@@ -217,9 +235,12 @@ describe("rendered text contrast DOM sampler", () => {
   });
 
   it("keeps a text box's own solid background in the contrast stack", async () => {
-    const report = await sample(`
+    const report = await sample(
+      `
       <div class="el text" data-id="self-bg" style="color:#fff;background:#0E2A47">Readable own-background copy</div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.equal(
       report.hardIssues.some((issue) => issue.kind === "text-contrast"),
       false,
@@ -286,9 +307,12 @@ describe("rendered text contrast DOM sampler", () => {
   });
 
   it("applies shared group opacity after composing text over its own background", async () => {
-    const report = await sample(`
+    const report = await sample(
+      `
       <div class="el text" data-id="opacity-group" style="font-size:24px;color:#fff;background:#000;opacity:.5">Readable grouped copy</div>
-    `, "#FFFFFF");
+    `,
+      "#FFFFFF",
+    );
     assert.equal(
       report.hardIssues.some((issue) => issue.kind === "text-contrast"),
       false,
@@ -297,24 +321,30 @@ describe("rendered text contrast DOM sampler", () => {
   });
 
   it("checks SVG chart labels against the slide or the bar beneath them", async () => {
-    const lowContrast = await sample(`
+    const lowContrast = await sample(
+      `
       <div class="el chart" data-id="chart-low" style="left:80px;top:80px;width:400px;height:160px">
         <svg width="400" height="160"><text x="20" y="40" fill="#777777" font-size="12">Low contrast axis</text></svg>
       </div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.ok(
       lowContrast.hardIssues.some((issue) => issue.kind === "text-contrast" && issue.elementId === "chart-low"),
       JSON.stringify(lowContrast.hardIssues),
     );
 
-    const onBar = await sample(`
+    const onBar = await sample(
+      `
       <div class="el chart" data-id="chart-bar" style="left:80px;top:80px;width:400px;height:160px">
         <svg width="400" height="160">
           <rect x="10" y="10" width="240" height="80" fill="#0E2A47"></rect>
           <text x="30" y="55" fill="#FFFFFF" font-size="18">Readable on bar</text>
         </svg>
       </div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.equal(
       onBar.hardIssues.some((issue) => issue.kind === "text-contrast"),
       false,
@@ -323,17 +353,19 @@ describe("rendered text contrast DOM sampler", () => {
   });
 
   it("fails closed for text over gradient and SVG url paints", async () => {
-    const gradient = await sample(`
+    const gradient = await sample(
+      `
       <div class="el text" data-id="gradient" style="color:#fff;background-image:linear-gradient(#fff,#fff)">Unresolved gradient</div>
-    `, "#0E2A47");
+    `,
+      "#0E2A47",
+    );
     assert.ok(
-      gradient.hardIssues.some(
-        (issue) => issue.kind === "text-contrast-unresolved" && issue.elementId === "gradient",
-      ),
+      gradient.hardIssues.some((issue) => issue.kind === "text-contrast-unresolved" && issue.elementId === "gradient"),
       JSON.stringify(gradient.hardIssues),
     );
 
-    const svgPaint = await sample(`
+    const svgPaint = await sample(
+      `
       <div class="el chart" data-id="svg-paint" style="left:80px;top:80px;width:400px;height:160px">
         <svg width="400" height="160">
           <defs><linearGradient id="white"><stop stop-color="#fff"></stop></linearGradient></defs>
@@ -341,36 +373,40 @@ describe("rendered text contrast DOM sampler", () => {
           <text x="30" y="55" fill="#FFFFFF" font-size="18">Unresolved SVG paint</text>
         </svg>
       </div>
-    `, "#0E2A47");
+    `,
+      "#0E2A47",
+    );
     assert.ok(
-      svgPaint.hardIssues.some(
-        (issue) => issue.kind === "text-contrast-unresolved" && issue.elementId === "svg-paint",
-      ),
+      svgPaint.hardIssues.some((issue) => issue.kind === "text-contrast-unresolved" && issue.elementId === "svg-paint"),
       JSON.stringify(svgPaint.hardIssues),
     );
   });
 
   it("blocks a horizontal rule whose rendered clearance above text is unsafe", async () => {
-    const report = await sample(`
+    const report = await sample(
+      `
       <div class="el shape" data-id="section-rule" style="left:72px;top:310px;width:816px;height:1px;background:#D9D2C5"></div>
       <div class="el text" data-id="section-label" style="left:72px;top:322px;width:816px;height:16px;color:#706960;font-size:10px">H1 累計（合併口徑）</div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.ok(
       report.hardIssues.some(
-        (issue) => String(issue.kind) === "line-text-clearance" &&
-          issue.elementId === "section-rule,section-label",
+        (issue) => String(issue.kind) === "line-text-clearance" && issue.elementId === "section-rule,section-label",
       ),
       JSON.stringify(report.hardIssues),
     );
 
-    const crossing = await sample(`
+    const crossing = await sample(
+      `
       <div class="el shape" data-id="crossing-rule" style="left:72px;top:328px;width:816px;height:1px;background:#D9D2C5"></div>
       <div class="el text" data-id="crossed-label" style="left:72px;top:322px;width:816px;height:16px;color:#706960;font-size:10px">判斷</div>
-    `, "#F7F2EA");
+    `,
+      "#F7F2EA",
+    );
     assert.ok(
       crossing.hardIssues.some(
-        (issue) => String(issue.kind) === "line-text-intersection" &&
-          issue.elementId === "crossing-rule,crossed-label",
+        (issue) => String(issue.kind) === "line-text-intersection" && issue.elementId === "crossing-rule,crossed-label",
       ),
       JSON.stringify(crossing.hardIssues),
     );

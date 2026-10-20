@@ -3,10 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadProject } from "@open-slidestudio/pptd-v2";
 import { parseCanonicalPagePlan } from "./page-plan.js";
-import { isCloserPage, pageHasReadableCopy, isPlaceholderReviewIssue, persistPageKey, writePageSchemaIssues, writePageSchemaError, composedPageLeftoverIssues, renderedLayoutBlocksCompose, } from "./layout-qa.js";
+import { isCloserPage, pageHasReadableCopy, isPlaceholderReviewIssue, persistPageKey, renderedLayoutBlocksCompose, } from "./layout-qa.js";
 import { inspectProjectCapabilities } from "../capabilities.js";
-import { listSourceReceipts } from "../receipts.js";
-import { packColorWriteContextFrom } from "./theme-pack.js";
+import { executionPolicyFor, leftoverComposeBlockers, yamlStructureBlockers } from "./run-ledger-policy.js";
 import { MISSING_HOSTED_WEB_SEARCH_RECEIPT, hostedResearchNeedsWebSearchReceipt, ledgerHasSuccessfulWebSearch, } from "./hosted-web-search.js";
 import { spinWait, writeFileAtomic } from "./atomic-file.js";
 export const RUN_LEDGER_REL = path.join("_agent", "run-ledger.v1.json");
@@ -165,7 +164,11 @@ function mutateLedger(root, apply) {
         if (!current)
             throw new Error("run ledger is not initialized");
         const next = apply(current);
-        writeLedger(root, next);
+        // Reducers return the same object when nothing changed; a read-only
+        // mutation (e.g. an unchanged execution-policy ensure on a state poll)
+        // must not rewrite the whole ledger on disk.
+        if (next !== current)
+            writeLedger(root, next);
         return next;
     }
     finally {
@@ -191,6 +194,13 @@ export function ensureRunLedgerExecutionPolicy(root, executionPolicy) {
     const existing = readRunLedger(root);
     if (!existing)
         return undefined;
+    // Cheap early-out before taking the lock: hydrate() calls this on every
+    // /slides/state poll, so an already-matching policy must not churn the
+    // lock file or rewrite the ledger. The locked mutation re-validates below.
+    if (existing.sourcePack.executionPolicy !== undefined &&
+        stableSha256(existing.sourcePack.executionPolicy) === stableSha256(executionPolicy)) {
+        return existing;
+    }
     return mutateLedger(root, (current) => {
         const currentPolicy = current.sourcePack.executionPolicy;
         if (currentPolicy && stableSha256(currentPolicy) !== stableSha256(executionPolicy)) {
@@ -693,109 +703,6 @@ export function currentVisualReviewsMissing(root, pageCount, env = process.env) 
         return true;
     return inspection.pages.some((page) => page.visualReview !== "pass");
 }
-function leftoverComposeBlockers(root) {
-    if (!fs.existsSync(path.join(root, "deck.pptd")))
-        return [];
-    try {
-        const seen = new Set();
-        const blockers = [];
-        for (const issue of composedPageLeftoverIssues(loadProject(root).pages)) {
-            if (seen.has(issue.message))
-                continue;
-            seen.add(issue.message);
-            blockers.push(issue.message);
-        }
-        return blockers;
-    }
-    catch (error) {
-        // A manifest exists but cannot be read — that is a blocker, not "clean".
-        return [`project unreadable: ${error instanceof Error ? error.message : String(error)}`];
-    }
-}
-function yamlStructureBlockers(root) {
-    const blockers = [];
-    if (!fs.existsSync(path.join(root, "deck.pptd")))
-        return blockers;
-    try {
-        const project = loadProject(root);
-        const last = project.pages.at(-1);
-        const lastBasename = last ? path.basename(last.path, ".page") : undefined;
-        const diskPageCount = project.pages.length;
-        const adoptedSourceIds = [];
-        let designSystemId;
-        try {
-            const rec = JSON.parse(fs.readFileSync(path.join(root, "_agent", "runtime.json"), "utf8"));
-            if (typeof rec.designSystemId === "string" && rec.designSystemId.trim()) {
-                designSystemId = rec.designSystemId.trim();
-            }
-        }
-        catch {
-            designSystemId = undefined;
-        }
-        for (const row of listSourceReceipts(root)) {
-            if (row.state === "adopted" || row.state === "executed")
-                adoptedSourceIds.push(row.sourceId);
-        }
-        const packCtx = packColorWriteContextFrom({ designSystemId, adoptedSourceIds });
-        for (const loaded of project.pages) {
-            const page = {
-                id: persistPageKey(loaded.path),
-                pageType: loaded.page.pageType,
-                elements: loaded.page.elements,
-                background: loaded.page.background,
-            };
-            const ctx = {
-                lastDiskBasename: lastBasename,
-                diskPageCount,
-                theme: project.presentation.theme,
-                ...packCtx,
-            };
-            const err = writePageSchemaError(writePageSchemaIssues(page, ctx), page, ctx);
-            if (err)
-                blockers.push(`${page.id}: ${err.error}`);
-        }
-    }
-    catch (error) {
-        // A deck that exists but cannot be parsed is a blocker, not "no issues".
-        blockers.push(`project unreadable: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return blockers;
-}
-function legacyExecutionPolicy(root) {
-    const runtimePath = path.join(root, "_agent", "runtime.json");
-    if (fs.existsSync(runtimePath)) {
-        try {
-            const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
-            const strict = runtime.strictExecution === true;
-            return {
-                currentRenderedLayoutRequired: strict && typeof runtime.editorBaseUrl === "string" && runtime.editorBaseUrl.trim().length > 0,
-                structuralReviewRequired: strict,
-            };
-        }
-        catch {
-            // A present but unreadable production runtime cannot safely opt out.
-            return { currentRenderedLayoutRequired: true, structuralReviewRequired: true };
-        }
-    }
-    const bindingPath = path.join(root, "_agent", "presentation-run.v1.json");
-    if (!fs.existsSync(bindingPath)) {
-        return { currentRenderedLayoutRequired: false, structuralReviewRequired: false };
-    }
-    try {
-        const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
-        const boundToEditor = typeof binding.editorBaseUrl === "string" && binding.editorBaseUrl.trim().length > 0;
-        return {
-            currentRenderedLayoutRequired: boundToEditor,
-            structuralReviewRequired: true,
-        };
-    }
-    catch {
-        return { currentRenderedLayoutRequired: true, structuralReviewRequired: true };
-    }
-}
-function executionPolicyFor(root, ledger) {
-    return ledger.sourcePack.executionPolicy ?? legacyExecutionPolicy(root);
-}
 export function inspectRunLedger(root, contextEpochId, env = process.env, ledgerOverride) {
     const ledger = ledgerOverride ?? readRunLedger(root);
     if (!ledger) {
@@ -892,7 +799,7 @@ export function inspectRunLedger(root, contextEpochId, env = process.env, ledger
     if (missingReferenceChunks.length) {
         blockers.push(`${missingReferenceChunks.length} required source chunks unread`);
     }
-    blockers.push(...yamlStructureBlockers(root));
+    blockers.push(...yamlStructureBlockers(root, persistPageKey));
     blockers.push(...leftoverComposeBlockers(root));
     for (const page of pages) {
         const raster = [...ledger.facts]

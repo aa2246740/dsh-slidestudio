@@ -1,3 +1,4 @@
+import { stubPlaywrightRuntime, invokeSlides, emptyRuntime } from "./oauth-test-fixtures.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,10 +14,7 @@ import {
   resetGenerateRouteState,
   resolveSlidesLlmRoute,
 } from "./args.js";
-import {
-  classifyAgentError,
-  isWaitAndResumeFault,
-} from "./agent-fault.js";
+import { classifyAgentError, isWaitAndResumeFault } from "./agent-fault.js";
 import {
   bindGrokImageEnv,
   grokModelFromCatalog,
@@ -33,18 +31,7 @@ import { connectionState, slidesProviderHasModel } from "./providers.js";
 import type { RuntimeModelInfo } from "./local-models.js";
 import { handleSlidesRequest, type SlidesHostRuntime } from "./routes.js";
 import { inspectCapabilities } from "@open-slidestudio/presentation-run";
-
-function stubPlaywrightRuntime(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oauth-pw-"));
-  const file = path.join(dir, "runtime.mjs");
-  fs.writeFileSync(
-    file,
-    `export function verifyPinnedRuntime() { return true; }
-export async function launchPinnedChromium() { throw new Error("stub"); }
-`,
-  );
-  return file;
-}
+import { addPlaywrightRuntimeLayout } from "./runtime-test-fixture.js";
 
 const FIXTURE_ACCESS = "test-access-not-a-live-token";
 const FIXTURE_REFRESH = "test-refresh-not-a-live-token";
@@ -60,73 +47,8 @@ function signedInEnv(): NodeJS.ProcessEnv {
 
 function writeOauthDoc(home: string, xai: Record<string, unknown>): string {
   const file = path.join(home, OAUTH_AUTH_FILENAME);
-  fs.writeFileSync(
-    file,
-    `${JSON.stringify({ version: 1, credentials: { xai } }, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  fs.writeFileSync(file, `${JSON.stringify({ version: 1, credentials: { xai } }, null, 2)}\n`, { mode: 0o600 });
   return file;
-}
-
-function invokeSlides(
-  runtime: SlidesHostRuntime,
-  method: string,
-  url: string,
-): Promise<{ status: number; json: unknown }> {
-  return new Promise((resolve, reject) => {
-    const req = Readable.from([Buffer.alloc(0)]) as IncomingMessage;
-    req.method = method;
-    req.url = url;
-    req.headers = { host: "127.0.0.1:13080" };
-    const res = {
-      statusCode: 0,
-      headersSent: false,
-      chunks: "",
-      writeHead(status: number) {
-        this.statusCode = status;
-        this.headersSent = true;
-      },
-      end(chunk?: unknown) {
-        this.chunks = chunk == null ? "" : String(chunk);
-        try {
-          resolve({
-            status: this.statusCode,
-            json: this.chunks ? JSON.parse(this.chunks) : null,
-          });
-        } catch (error) {
-          reject(error);
-        }
-      },
-    };
-    handleSlidesRequest(runtime, req, res as unknown as ServerResponse);
-  });
-}
-
-function emptyRuntime(dshHome: string): SlidesHostRuntime {
-  return {
-    workspaceRoot: dshHome,
-    dshHome,
-    store: {
-      inspect: () => {
-        throw new Error("unused");
-      },
-      bindingFor: () => undefined,
-    } as unknown as SlidesHostRuntime["store"],
-    presentation: {
-      hydrate: () => undefined,
-      inspect: async () => undefined,
-    } as unknown as SlidesHostRuntime["presentation"],
-    agentBusy: () => false,
-    markBusy: () => undefined,
-    cancelRateLimitWait: () => undefined,
-    operatorStop: async () => undefined,
-    getAgent: () => undefined,
-    createAgent: async () => {
-      throw new Error("unused");
-    },
-    resumeAgent: async () => undefined,
-    switchModel: async () => undefined,
-  };
 }
 
 describe("xai grok generate route", () => {
@@ -338,9 +260,10 @@ describe("xai grok generate route", () => {
     process.env.SLIDESTUDIO_LLM_MODEL = GROK_DEFAULT_MODEL;
     try {
       const runtime = emptyRuntime(home);
-      runtime.listModelCatalog = async () => new Map([
-        [GROK_PROVIDER, new Map([[GROK_DEFAULT_MODEL, { name: "Grok", inputModalities: ["text", "image"] }]])],
-      ]);
+      runtime.listModelCatalog = async () =>
+        new Map([
+          [GROK_PROVIDER, new Map([[GROK_DEFAULT_MODEL, { name: "Grok", inputModalities: ["text", "image"] }]])],
+        ]);
       const res = await invokeSlides(runtime, "GET", "/slides/health");
       assert.equal(res.status, 200);
       const parsed = res.json as {
@@ -403,14 +326,9 @@ describe("xai grok generate route", () => {
     process.env.SLIDESTUDIO_PLAYWRIGHT_RUNTIME = runtimeFile;
     try {
       const runtime = emptyRuntime(home);
-      runtime.listModelCatalog = async () => new Map([
-        [GROK_PROVIDER, new Map([["grok-4.6", { name: "Grok", inputModalities: ["text", "image"] }]])],
-      ]);
-      const res = await invokeSlides(
-        runtime,
-        "GET",
-        "/slides/health?provider=pi-xai&model=grok-4.6",
-      );
+      runtime.listModelCatalog = async () =>
+        new Map([[GROK_PROVIDER, new Map([["grok-4.6", { name: "Grok", inputModalities: ["text", "image"] }]])]]);
+      const res = await invokeSlides(runtime, "GET", "/slides/health?provider=pi-xai&model=grok-4.6");
       assert.equal(res.status, 200);
       const parsed = res.json as {
         connection: { providerId: string };
@@ -465,10 +383,13 @@ describe("xai grok generate route", () => {
       availableModelIds: ["grok-4.6"],
     });
     const catalog = new Map<string, ReadonlyMap<string, RuntimeModelInfo>>([
-      ["pi-xai", new Map([
-        ["grok-4.7", { name: "Grok 4.7", inputModalities: ["text", "image"], efforts: ["low", "high"] }],
-        ["grok-4.6", { name: "Grok 4.6", inputModalities: ["text"], efforts: [] }],
-      ])],
+      [
+        "pi-xai",
+        new Map([
+          ["grok-4.7", { name: "Grok 4.7", inputModalities: ["text", "image"], efforts: ["low", "high"] }],
+          ["grok-4.6", { name: "Grok 4.6", inputModalities: ["text"], efforts: [] }],
+        ]),
+      ],
     ]);
     const runtime = emptyRuntime(home);
     runtime.listModelCatalog = async () => catalog;
@@ -480,10 +401,15 @@ describe("xai grok generate route", () => {
     assert.equal(slidesProviderHasModel(home, GROK_PROVIDER, "grok-4.3", catalog), false);
     const grouped = await invokeSlides(runtime, "GET", "/slides/models");
     const groups = grouped.json as Array<{
-      providerId: string; models: Array<{ id: string; name: string; inputModalities: string[] }>;
-      modelEfforts: Record<string, string[]>; degraded: boolean;
+      providerId: string;
+      models: Array<{ id: string; name: string; inputModalities: string[] }>;
+      modelEfforts: Record<string, string[]>;
+      degraded: boolean;
     }>;
-    assert.deepEqual(groups.map((row) => row.providerId), [GROK_PROVIDER]);
+    assert.deepEqual(
+      groups.map((row) => row.providerId),
+      [GROK_PROVIDER],
+    );
     assert.deepEqual(groups[0]?.models[0], { id: "grok-4.7", name: "Grok 4.7", inputModalities: ["text", "image"] });
     assert.deepEqual(groups[0]?.modelEfforts["grok-4.7"], ["low", "high"]);
 
@@ -503,7 +429,9 @@ describe("xai grok generate route", () => {
     assert.equal(textParsed.capability.vision.mode, "none");
     runtime.providerHealth = () => ({ kind: "broken", reason: "adapter unavailable" });
     assert.deepEqual((await invokeSlides(runtime, "GET", "/slides/models")).json, []);
-    const brokenHealth = (await invokeSlides(runtime, "GET", "/slides/health?provider=pi-xai&model=grok-4.7")).json as { selection: { ready: boolean } };
+    const brokenHealth = (await invokeSlides(runtime, "GET", "/slides/health?provider=pi-xai&model=grok-4.7")).json as {
+      selection: { ready: boolean };
+    };
     assert.equal(brokenHealth.selection.ready, false);
     runtime.providerHealth = () => ({ kind: "degraded", reason: "try later" });
     const degraded = (await invokeSlides(runtime, "GET", "/slides/models")).json as typeof groups;
@@ -518,16 +446,35 @@ describe("xai grok generate route", () => {
 
   it("uses subscription grants rather than a duplicate imported API-key slot", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "oauth-imported-route-"));
-    fs.writeFileSync(path.join(home, OAUTH_AUTH_FILENAME), JSON.stringify({
-      version: 1,
-      credentials: { anthropic: { type: "oauth", access: FIXTURE_ACCESS, refresh: FIXTURE_REFRESH, expires: Date.now() + 60_000 } },
-    }));
+    fs.writeFileSync(
+      path.join(home, OAUTH_AUTH_FILENAME),
+      JSON.stringify({
+        version: 1,
+        credentials: {
+          anthropic: { type: "oauth", access: FIXTURE_ACCESS, refresh: FIXTURE_REFRESH, expires: Date.now() + 60_000 },
+        },
+      }),
+    );
     const opts = {
-      home, provider: "pi-anthropic", model: "claude-sonnet-4-6",
+      home,
+      provider: "pi-anthropic",
+      model: "claude-sonnet-4-6",
       catalog: {
-        sourceHome: "/unused", destHome: home, excluded: [], oauthSkipped: [],
-        defaultProvider: "pi-anthropic", defaultModel: "claude-sonnet-4-6",
-        providers: [{ id: "pi-anthropic", name: "Claude", apiKeyEnv: "MISSING_TEST_KEY", ready: false, models: ["claude-sonnet-4-6"] }],
+        sourceHome: "/unused",
+        destHome: home,
+        excluded: [],
+        oauthSkipped: [],
+        defaultProvider: "pi-anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providers: [
+          {
+            id: "pi-anthropic",
+            name: "Claude",
+            apiKeyEnv: "MISSING_TEST_KEY",
+            ready: false,
+            models: ["claude-sonnet-4-6"],
+          },
+        ],
       },
     };
     assert.equal(assertSlidesGenerateReady({}, opts).provider, "pi-anthropic");

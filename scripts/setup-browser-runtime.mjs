@@ -5,6 +5,7 @@
  * Hub generate must not depend on a Codex homedir that may be missing on the box.
  */
 import { execFile } from "node:child_process";
+import { npmInvocation } from "./lib/npm-command.mjs";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -43,6 +44,7 @@ const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");
 const EXECUTABLE_NAMES = new Set([
   "chrome-headless-shell",
+  "chrome-headless-shell.exe",
   "headless_shell.exe",
   "chrome",
   "Chromium",
@@ -119,10 +121,7 @@ function seedRuntimePath() {
 async function copySeed(seedPath) {
   const seed = await import(`${pathToFileURL(seedPath).href}?setup=${Date.now()}`);
   const pinned = seed.verifyPinnedRuntime();
-  if (
-    pinned.playwrightVersion !== PINNED_PLAYWRIGHT_VERSION ||
-    pinned.chromiumRevision !== PINNED_CHROMIUM_REVISION
-  ) {
+  if (pinned.playwrightVersion !== PINNED_PLAYWRIGHT_VERSION || pinned.chromiumRevision !== PINNED_CHROMIUM_REVISION) {
     throw new Error(
       `Browser runtime seed mismatch: expected Playwright ${PINNED_PLAYWRIGHT_VERSION} / Chromium ${PINNED_CHROMIUM_REVISION}, found ${pinned.playwrightVersion} / ${pinned.chromiumRevision}`,
     );
@@ -170,7 +169,9 @@ async function npmInstall() {
       2,
     )}\n`,
   );
-  await execFileAsync("npm", ["install", "--prefix", runtimeRoot, "--ignore-scripts", "--no-audit", "--no-fund"], {
+  const npmArgs = ["install", "--prefix", runtimeRoot, "--ignore-scripts", "--no-audit", "--no-fund"];
+  const npm = npmInvocation(npmArgs);
+  await execFileAsync(npm.command, npm.args, {
     cwd: ROOT,
     env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" },
     maxBuffer: 10 * 1024 * 1024,
@@ -242,7 +243,17 @@ if (mode === "--check") {
   await writeRuntime();
   const pinned = await verify();
   console.log(`[setup:browser] ready: ${runtimeFile}`);
-  console.log(JSON.stringify({ playwrightVersion: pinned.playwrightVersion, chromiumRevision: pinned.chromiumRevision, executablePath: pinned.executablePath }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        playwrightVersion: pinned.playwrightVersion,
+        chromiumRevision: pinned.chromiumRevision,
+        executablePath: pinned.executablePath,
+      },
+      null,
+      2,
+    ),
+  );
 } else {
   throw new Error(`Unknown setup:browser mode ${mode}`);
 }

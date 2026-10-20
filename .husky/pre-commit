@@ -1,3 +1,4 @@
+set -e
 lint-staged --concurrent false
 npm run test:tooling
 npm run quality:fast

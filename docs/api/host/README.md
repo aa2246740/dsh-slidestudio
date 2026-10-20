@@ -7,6 +7,8 @@ Source: `packages/dsh-slides-host/src/routes.ts`. This is a local API, not a pub
 | Method | Route | Behavior |
 | --- | --- | --- |
 | GET | `/slides/health` | Read selected-provider readiness and produce gates |
+| GET | `/slides/runtime` | Read browser rendering runtime readiness |
+| POST | `/slides/runtime` | Start or retry managed browser runtime provisioning |
 | GET | `/slides/models` | Read the current runtime-backed model roster, without invented fallback entries |
 | GET | `/slides/providers` | Read supplier-scoped provider status; never expose API keys |
 | POST | `/slides/assistant-intent` | Classify the next turn without granting write permission |

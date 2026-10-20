@@ -5,6 +5,16 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import * as prettier from "prettier";
+import { parseTypeDiagnostics } from "./quality/type-diagnostics.mjs";
+
+test("type diagnostics preserve the same findings on Windows and Unix", () => {
+  const unix = "apps/server/src/index.mjs(10,2): error TS7006: Parameter 'req' implicitly has an 'any' type.\n";
+  const windows = unix.replaceAll("/", "\\").replaceAll("\n", "\r\n");
+  assert.deepEqual(parseTypeDiagnostics(windows), parseTypeDiagnostics(unix));
+  assert.deepEqual(parseTypeDiagnostics(windows), [
+    "apps/server/src/index.mjs TS7006: Parameter 'req' implicitly has an 'any' type.",
+  ]);
+});
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const eslint = new ESLint({ cwd: ROOT, overrideConfigFile: path.join(ROOT, "eslint.config.mjs") });

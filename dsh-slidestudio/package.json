@@ -43,7 +43,7 @@
     "locale/*.json"
   ],
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "license": "Apache-2.0",
   "dependencies": {

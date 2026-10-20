@@ -1,3 +1,4 @@
+import { SHAPE_GROUP_LABELS, ELEMENT_TYPE_LABELS } from "./element-labels.js";
 import { t } from "./i18n.js";
 import {
   clearWaitingRow,
@@ -15,8 +16,17 @@ import { appendBriefChip, clipChromeText } from "./brief-chip.js";
 import { mountReasonCard } from "./reader-reasoning.js";
 import { createGenerationLiveBuffer } from "./generation-live.js";
 import { renderChatMarkdown } from "./chat-markdown.js";
+import { workspaceEditInstruction } from "./workspace-edit-instruction.js";
 import { mountAssistantQuestion } from "./assistant-questions.js";
 import { conversationMessageKey } from "./assistant-conversation.js";
+import {
+  clearPendingWorkspaceEdit as clearPendingWorkspaceEditRecord,
+  createWorkspaceEditRecovery,
+  isResumableWorkspaceTarget,
+  persistPendingWorkspaceEdit as persistPendingWorkspaceEditRecord,
+  readPendingWorkspaceEdit as readPendingWorkspaceEditRecord,
+  samePendingWorkspaceEdit,
+} from "./workspace-edit-recovery.js";
 import { createConversationScroll, conversationProcessRows } from "./conversation-scroll.js";
 import {
   targetFromAssistantIntent,
@@ -223,22 +233,7 @@ let textLinkDialogBusy = false;
 
 // Palette/ink come from the shared chart layout contract (pptd-v2).
 
-const SHAPE_GROUP_LABELS = {
-  "Basic Shapes": t("基本形状"),
-  "Rectangle Variants": t("矩形"),
-  "Stars and Bursts": t("星形"),
-  "Arrow Shapes": t("箭头"),
-  "Arrow Callouts": t("箭头标注"),
-  "Callouts": t("标注"),
-  "Brackets and Braces": t("括号"),
-  "Ribbons": t("丝带"),
-  "Scrolls": t("卷轴"),
-  "Math Symbols": t("数学"),
-  "Chart Shapes": t("图表"),
-  "Tab Shapes": t("选项卡"),
-  "Action Buttons": t("动作按钮"),
-  "Flowchart Shapes": t("流程图"),
-};
+
 
 // One picker, like PowerPoint's ribbon: each choice names the East Asian face
 // and the Latin face it is set with. Storage still keeps the two apart.
@@ -340,14 +335,15 @@ function pageIdFromPath(pagePath) {
   return String(pagePath || "").split("/").pop().replace(/\.page$/i, "");
 }
 
+/** @returns {WorkspaceEditTargetDecision} */
 function workAgentTargetFromPlan(plan) {
-  return targetFromAssistantIntent(plan, {
+  return /** @type {WorkspaceEditTargetDecision} */ (targetFromAssistantIntent(plan, {
     pagePaths: model?.pagePaths || [], pageIndex: model?.pageIndex ?? 0,
     selectedElements: selectedIds().map(id => {
       const element = model?.elements.find(candidate => candidate.id === id);
       return element ? { id, label: elementReadableName(element) } : null;
     }),
-  });
+  }));
 }
 
 function paintWorkAgentTarget(text = $("work-brief")?.value || "") {
@@ -2909,19 +2905,11 @@ function renderRail() {
         if (previewVersion) return;
         const pageIdx = Number(b.dataset.pageIndex);
         const currentVm = viewModel();
-        const menu = $("ctx-menu");
+        const menu = /** @type {HTMLElement} */ ($("ctx-menu"));
         contextMenuReturnFocus = b;
-        menu.style.left = `${ev.clientX}px`;
-        menu.style.top = `${ev.clientY}px`;
-        menu.innerHTML = "";
-        setTimeout(() => {
-          menu.hidden = false;
-          const rect = menu.getBoundingClientRect();
-          const gutter = 8;
-          menu.style.left = `${Math.max(gutter, Math.min(ev.clientX, window.innerWidth - rect.width - gutter))}px`;
-          menu.style.top = `${Math.max(gutter, Math.min(ev.clientY, window.innerHeight - rect.height - gutter))}px`;
-          menu.querySelector("button:not(:disabled)")?.focus();
-        }, 0);
+        prepareContextMenu({ menu, ev });
+        setTimeout(() => revealContextMenu({ menu, ev }), 0);
+        /** @type {Array<[string, boolean, () => void]>} */
         const items = [
           [t("上移"), allowed("chrome.pages.reorder") && pageIdx > 0, () =>
             command("reorderPage", { fromIndex: pageIdx, toIndex: pageIdx - 1 })],
@@ -3402,7 +3390,7 @@ function ctxPop(id, title, svg, control, fill) {
   if (pop.getAttribute("role") === "menu") {
     pop.querySelectorAll(":scope > button").forEach((item) => item.setAttribute("role", "menuitem"));
   }
-  b.setAttribute("aria-haspopup", pop.getAttribute("role"));
+  b.setAttribute("aria-haspopup", pop.getAttribute("role") || "menu");
   b.setAttribute("aria-controls", pop.id);
   b.setAttribute("aria-expanded", "false");
   wrap.append(b, pop);
@@ -3461,6 +3449,7 @@ function appendCommonOps(pop, el) {
     .filter(Boolean);
   const anyLocked = selected.some((candidate) => candidate.locked);
   const anyHidden = selected.some((candidate) => candidate.hidden);
+  /** @type {Array<[string, string, () => void]>} */
   const rows = [
     [t("上移一层"), "element.arrange.forward", () => command("arrange", { dir: "forward" })],
     [t("下移一层"), "element.arrange.backward", () => command("arrange", { dir: "backward" })],
@@ -3495,15 +3484,7 @@ function disableForLockedSelection(control, anyLocked) {
   return control;
 }
 
-const ELEMENT_TYPE_LABELS = {
-  text: t("文字"),
-  shape: t("形状"),
-  image: t("图片"),
-  table: t("表格"),
-  chart: t("图表"),
-  line: t("线条"),
-  icon: t("图标"),
-};
+
 
 function elementReadableName(el) {
   if (!el) return t("对象");
@@ -3515,6 +3496,7 @@ function elementReadableName(el) {
   const text = String(el.text || el.chartTitle || "").replace(/\s+/g, " ").trim().slice(0, 28);
   if (text) return `${type}“${text}”`;
   const subtype = String(el.shapeName || el.iconName || "").trim();
+  /** @type {Record<string, string>} */
   const shapeNames = { rect: t("矩形"), roundRect: t("圆角矩形"), ellipse: t("椭圆"), line: t("线条") };
   return shapeNames[subtype] || (subtype ? `${type} · ${subtype}` : type);
 }
@@ -3759,6 +3741,7 @@ function renderCtxBar() {
           input.disabled = !allowed("element.chart.axis.set");
           input.value = el.chartAxis?.[key] || "";
           input.addEventListener("change", () => {
+            /** @type {Record<string, string>} */
             const axis = {
               x: $("ctx-chart-axis-x")?.value ?? el.chartAxis?.x ?? "",
               y: $("ctx-chart-axis-y")?.value ?? el.chartAxis?.y ?? "",
@@ -3926,7 +3909,8 @@ function renderCtxBar() {
     textAlignHorizontal.classList.add("property-segments", "four");
     for (const align of ["left", "center", "right", "justify"]) {
       const text = { left: t("左"), center: t("中"), right: t("右"), justify: t("两端") }[align];
-      textAlignHorizontal.append(stateBtn(text, t(`文字水平{p0}`, { p0: { left: t("左对齐"), center: t("居中对齐"), right: t("右对齐"), justify: t("两端对齐") }[align] }), "element.text.toolbar.align.set", () =>
+      const alignLabel = { left: t("左对齐"), center: t("居中对齐"), right: t("右对齐"), justify: t("两端对齐") }[align];
+      textAlignHorizontal.append(stateBtn(text, t(`文字水平{p0}`, { p0: String(alignLabel) }), "element.text.toolbar.align.set", () =>
         command("setTextStyle", {
           controlId: "element.text.toolbar.align.set",
           patch: { align: [align, el.align?.[1] || "top"] },
@@ -4330,7 +4314,7 @@ function renderCtxBar() {
       for (const [v, lab] of arrows) {
         const o = document.createElement("option");
         o.value = v || "";
-        o.textContent = t(`起 {p0}`, { p0: lab });
+        o.textContent = t(`起 {p0}`, { p0: String(lab) });
         if ((el.lineArrow?.[0] || "") === (v || "")) o.selected = true;
         start.append(o);
       }
@@ -4342,7 +4326,7 @@ function renderCtxBar() {
       for (const [v, lab] of arrows) {
         const o = document.createElement("option");
         o.value = v || "";
-        o.textContent = t(`终 {p0}`, { p0: lab });
+        o.textContent = t(`终 {p0}`, { p0: String(lab) });
         if ((el.lineArrow?.[1] || "") === (v || "")) o.selected = true;
         end.append(o);
       }
@@ -4437,6 +4421,7 @@ function renderCtxBar() {
     }));
   }
   if (el.type !== "text") {
+    /** @type {Record<string, [string, string, string]>} */
     const labels = {
       chart: ["chart", t("图表"), t("数据、类型与呈现")],
       shape: el.smartArt ? ["smartart", t("SmartArt 与形状"), t("结构、形状、填充与描边")] : ["shape", t("形状"), t("形状、填充与描边")],
@@ -4456,12 +4441,13 @@ function renderCtxBar() {
   // Each field names only the number it changed. The array is built when that command runs,
   // from the bounds the previous command already saved, so a repaint in between cannot
   // put an older X, Y, width, or height back.
-  for (const [label, index] of [["X", 0], ["Y", 1], [t("宽"), 2], [t("高"), 3]]) {
+  const boundsFields = /** @type {string[]} */ (["x", "y", "width", "height"]);
+  for (const [label, index] of /** @type {Array<[string, number]>} */ ([["X", 0], ["Y", 1], [t("宽"), 2], [t("高"), 3]])) {
     positionGrid.append(propertyNumber(label, Math.round(bounds[index] || 0), "element.bounds.set", (value) => {
       command("setBounds", { boundsIndex: index, boundsValue: value });
     }, {
       id: `ctx-bounds-${index}`,
-      field: ["x", "y", "width", "height"][index],
+      field: boundsFields[index],
       ...(index >= 2 ? { min: 1, error: t(`{p0}`, { p0: label }) } : {}),
     }));
   }
@@ -6015,24 +6001,32 @@ function menuSep() {
   return s;
 }
 
-$("slide").addEventListener("contextmenu", (ev) => {
-  ev.preventDefault();
-  ev.stopPropagation();
-  const menu = $("ctx-menu");
-  contextMenuReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-    ? document.activeElement
-    : $("slide");
+/** @param {{ menu: HTMLElement, ev: MouseEvent }} context */
+function prepareContextMenu({ menu, ev }) {
   menu.style.left = `${ev.clientX}px`;
   menu.style.top = `${ev.clientY}px`;
   menu.innerHTML = "";
-  setTimeout(() => {
-    menu.hidden = false;
-    const rect = menu.getBoundingClientRect();
-    const gutter = 8;
-    menu.style.left = `${Math.max(gutter, Math.min(ev.clientX, window.innerWidth - rect.width - gutter))}px`;
-    menu.style.top = `${Math.max(gutter, Math.min(ev.clientY, window.innerHeight - rect.height - gutter))}px`;
-    menu.querySelector("button:not(:disabled)")?.focus();
-  }, 0);
+}
+
+/** @param {{ menu: HTMLElement, ev: MouseEvent }} context */
+function revealContextMenu({ menu, ev }) {
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const gutter = 8;
+  menu.style.left = `${Math.max(gutter, Math.min(ev.clientX, window.innerWidth - rect.width - gutter))}px`;
+  menu.style.top = `${Math.max(gutter, Math.min(ev.clientY, window.innerHeight - rect.height - gutter))}px`;
+  menu.querySelector("button:not(:disabled)")?.focus();
+}
+
+$("slide").addEventListener("contextmenu", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const menu = /** @type {HTMLElement} */ ($("ctx-menu"));
+  contextMenuReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+    ? document.activeElement
+    : $("slide");
+  prepareContextMenu({ menu, ev });
+  setTimeout(() => revealContextMenu({ menu, ev }), 0);
   const el = selectedEl();
   if (!el) {
     menu.append(
@@ -6303,6 +6297,7 @@ function renderTimeline() {
   const maxMs = Math.max(2000, ...anims.map((a, i) => (a.delayMs || i * 400) + (a.durationMs || 400)));
   tlMaxSec = maxMs / 1000;
   tracks.innerHTML = "";
+  /** @type {Record<string, string>} */
   const effectLabel = {
     "fade-in": t("淡入"),
     "fly-in": t("飞入"),
@@ -9497,6 +9492,7 @@ function paintEditorGeneration(activity) {
   const currentAction = lastReadable && (lastReadable.kind === "thought" || lastReadable.kind === "reasoning") && lastReadable.status === "running"
     ? t("模型正在思考")
     : lastReadable?.displayTitle || lastReadable?.title || "";
+  /** @type {Record<string, string>} */
   const actionByPhase = {
     "awaiting-project": t("正在连接生成会话并准备编辑画布"),
     planning: t("正在梳理页面结构和事实来源"),
@@ -9895,6 +9891,7 @@ async function pollGenerationActivity() {
   try {
     connectGenerationLive();
     let activity = await api(generationActivityUrl());
+    void resumePendingWorkspaceEdit(activity);
     if (activity.sessionId) {
       const response = await fetch(`/slides/state/${encodeURIComponent(activity.sessionId)}`);
       if (!response.ok) throw new Error(t("无法确认助手状态"));
@@ -9903,7 +9900,6 @@ async function pollGenerationActivity() {
       if (state.agentStatus === "idle") assistantTurnPending = false;
       activity = settledAssistantActivity(activity, state.agentStatus);
     }
-    void resumePendingWorkspaceEdit(activity);
     mergeAcknowledgedCommentTurns(activity);
     const latestMessage = activity.conversation?.messages?.at(-1);
     const latestReview = acceptedReviewSubmissions(activity).find(item => item.id === latestMessage?.reviewSubmissionId);
@@ -10624,36 +10620,73 @@ function relTime(iso) {
   return t(`{p0}`, { p0: Math.floor(sec / 86400) });
 }
 
-const pendingWorkspaceEditKey = () => `slides.pending-edit:${currentProjectPath()}`;
-function readPendingWorkspaceEdit() {
-  try {
-    const pending = JSON.parse(localStorage.getItem(pendingWorkspaceEditKey()) || "null");
-    return pending?.project === currentProjectPath() && pending?.sessionId && pending?.aiLockToken && pending?.snapshotId && pending?.target?.targetPageIds?.length ? pending : null;
-  } catch { return null; }
+const staleWorkspaceEditPrompted = new Set();
+function readPendingWorkspaceEdit(project = currentProjectPath()) {
+  return readPendingWorkspaceEditRecord(localStorage, project);
 }
 function persistPendingWorkspaceEdit(pending) {
-  localStorage.setItem(pendingWorkspaceEditKey(), JSON.stringify(pending));
+  persistPendingWorkspaceEditRecord(localStorage, pending);
 }
 function clearPendingWorkspaceEdit(token) {
-  if (readPendingWorkspaceEdit()?.aiLockToken === token) localStorage.removeItem(pendingWorkspaceEditKey());
+  clearPendingWorkspaceEditRecord(localStorage, currentProjectPath(), token);
 }
+/** @param {Parameters<typeof executeWorkAgentEdit>} args */
 async function runWorkAgentEdit(...args) {
   const run = () => executeWorkAgentEdit(...args);
   return navigator.locks ? navigator.locks.request(`slides.edit:${currentProjectPath()}`, run) : run();
 }
+const recoverWorkspaceEdit = createWorkspaceEditRecovery({
+  storage: localStorage,
+  currentProject: currentProjectPath,
+  readPending: readPendingWorkspaceEdit,
+  promptedTokens: staleWorkspaceEditPrompted,
+  fetch,
+  nativeApi,
+  controlExecuting: () => Boolean(activeWorkspaceReviewControl && !activeWorkspaceReviewControl.settled),
+  withProjectLock: (project, recover) =>
+    navigator.locks?.request
+      ? navigator.locks.request(`slides.edit:${project}`, { ifAvailable: true }, (lock) => lock ? recover() : false)
+      : recover(),
+  confirm: () =>
+    window.confirm(
+      t("此修改已停止运行。当前演示文稿不会回滚，之前的快照仍保留在版本历史中；待处理指令会保留在编辑框中。是否解除本地保护？"),
+    ),
+  getComposer: () => /** @type {{value: string, dispatchEvent: (event: Event) => boolean} | null} */ ($("work-brief")),
+  onStorageFailure: () => showToast(t("无法归档待处理指令；本地保护仍保持。"), 6000),
+  settleMatchingControl: (token) => {
+    const control = activeWorkspaceReviewControl;
+    if (control?.settled && control.aiLockToken === token) {
+      activeWorkspaceReviewControl = null;
+      workAgentSubmitPending = false;
+      aiReviewLiveLabel = "";
+      setAiReviewTurnActive(false);
+    }
+  },
+  repaint: () => paintEditorGeneration(generationActivity),
+  onRecovered: () => showToast(t("待处理指令已恢复到编辑框；演示文稿未回滚。"), 6000),
+});
+async function recoverStalePendingWorkspaceEdit(pending) {
+  return recoverWorkspaceEdit(pending);
+}
 async function resumePendingWorkspaceEdit(activity) {
-  if (activeWorkspaceReviewControl) return;
   const pending = readPendingWorkspaceEdit();
-  if (!pending || activity.sessionId !== pending.sessionId) return;
+  if (!pending) return;
+  if (activeWorkspaceReviewControl && !activeWorkspaceReviewControl.settled) return;
+  if (!(await recoverStalePendingWorkspaceEdit(pending))) return;
+  if (activeWorkspaceReviewControl) return;
+  if (!samePendingWorkspaceEdit(readPendingWorkspaceEdit(), pending) || activity.sessionId !== pending.sessionId ||
+      !pending.text || !isResumableWorkspaceTarget(pending.target)) return;
   const message = activity.conversation?.messages?.find(item => item.clientRequestId === pending.clientRequestId);
   if (!message) return; // Never resubmit an uncertain network request on refresh.
+  const pendingText = pending.text;
+  const pendingTarget = pending.target;
   const resume = async () => {
     if (activeWorkspaceReviewControl || readPendingWorkspaceEdit()?.aiLockToken !== pending.aiLockToken) return;
     const receipt = { project: pending.project, clientRequestId: pending.clientRequestId, message, requestText: pending.text };
     workspaceEditReceipts.set(message.id, receipt);
     const control = {cancelRequested: false, receipt, recovering: true};
     try {
-      const result = await executeWorkAgentEdit(pending.text, pending.target, [], control, pending);
+      const result = await executeWorkAgentEdit(pendingText, pendingTarget, [], control, pending);
       Object.assign(receipt, {snapshotId: result.snapshotId, snapshotLabel: result.snapshotLabel});
     } catch (error) { failAssistantSend(receipt, error); }
     finally { workAgentSubmitPending = false; paintEditorGeneration(generationActivity); }
@@ -10662,6 +10695,20 @@ async function resumePendingWorkspaceEdit(activity) {
   else await resume();
 }
 
+/** @typedef {import("./workspace-edit-types.js").WorkspaceEditTarget} WorkspaceEditTarget */
+/** @typedef {import("./workspace-edit-types.js").InvalidWorkspaceEditTarget} InvalidWorkspaceEditTarget */
+/** @typedef {import("./workspace-edit-types.js").WorkspaceEditTargetDecision} WorkspaceEditTargetDecision */
+/** @typedef {import("./workspace-edit-types.js").WorkspaceEditRecovery} WorkspaceEditRecovery */
+/** @typedef {import("./workspace-edit-types.js").WorkspaceEditReceipt} WorkspaceEditReceipt */
+/** @typedef {import("./workspace-edit-types.js").WorkspaceReviewControl} WorkspaceReviewControl */
+
+/**
+ * @param {string} text
+ * @param {WorkspaceEditTarget} requestedTarget
+ * @param {Array<{id: string}>} attachments
+ * @param {WorkspaceReviewControl} [control]
+ * @param {WorkspaceEditRecovery | null} [recovery]
+ */
 async function executeWorkAgentEdit(
   text,
   requestedTarget,
@@ -10708,12 +10755,16 @@ async function executeWorkAgentEdit(
   };
 
   activeWorkspaceReviewControl = control;
+  control.settled = false;
   setAiReviewTurnActive(true);
   try {
     let before;
     let activity;
     if (recovery) {
-      ({snapshotId, snapshotLabel, sessionId, aiLockToken} = recovery);
+      snapshotId = recovery.snapshotId;
+      snapshotLabel = recovery.snapshotLabel || "";
+      sessionId = recovery.sessionId;
+      aiLockToken = recovery.aiLockToken;
       before = recovery.before;
       activity = generationActivity;
       turnMayHaveStarted = true;
@@ -10765,6 +10816,7 @@ async function executeWorkAgentEdit(
     });
     aiLockToken = String(lock?.lock?.token || "");
     if (!aiLockToken) throw new Error(t("无法保护修改前版本，未发送修改请求"));
+    control.aiLockToken = aiLockToken;
     const lockedTargetPages = Array.isArray(lock?.lock?.scope?.targetPages)
       ? lock.lock.scope.targetPages
       : [];
@@ -10807,62 +10859,7 @@ async function executeWorkAgentEdit(
     if (control.cancelRequested) throw aiReviewError("AI_USER_CANCELLED", t("已取消这次 Agent 修改"));
 
     updateStage("DSH Agent 正在修改", target.label);
-    const insertPosition = target.insertIndex === undefined ? ""
-      : target.insertIndex >= target.targetPageIds.length
-        ? "文稿末尾"
-        : target.insertIndex <= 0
-          ? "文稿最前面"
-          : `第 ${target.insertIndex} 页之后、第 ${target.insertIndex + 1} 页之前`;
-    const structuralActions = [
-      target.insertIndex !== undefined ? `在${insertPosition}新增页面` : "",
-      target.deletablePageIds?.length ? `删除页面 ${target.deletablePageIds.join("、")}` : "",
-      target.reorderPageIds?.length ? `将页面顺序调整为 ${target.reorderPageIds.join("、")}` : "",
-      target.editablePageIds?.length ? `允许修改现有页面 ${target.editablePageIds.join("、")}` : "",
-    ].filter(Boolean).join("；");
-    const metaScope = target.editableMeta?.length
-      ? `本轮还授权修改文稿级字段：${target.editableMeta.map((field) => field === "title" ? "标题" : "主题").join("、")}——用 update_deck 只传这些字段，其他文稿级字段保持不变。`
-      : "不得改动文稿标题和全局元数据。";
-    const elementScope = target.scope === "meta"
-      ? `本轮只授权修改文稿级字段：${target.editableMeta.map((field) => field === "title" ? "标题" : "主题").join("、")}——只能调用 update_deck 且只传这些字段；不得调用 write_page、edit_elements、edit_page_background 或任何页面写工具，所有页面和页面顺序必须逐字节保持不变。`
-      : target.scope === "elements"
-      ? `只允许修改所选元素 ${target.elementIds.join("、")}，且必须恰好覆盖这个集合；其他元素必须保持不变。`
-      : target.rewrite
-        ? `本轮是整稿重写：用户不满意当前文稿，新大纲将替换现有的全部 ${target.targetPageIds.length} 页（现有页面 id：${target.targetPageIds.join("、")}）。`
-        : target.structureOnly
-        ? `本轮只做页面结构修改：${structuralActions}。${metaScope}上述授权之外的现有页面必须逐字节保持不变，不得新增、删除或重排任何其他页面。`
-        : target.scope === "deck"
-          ? `整份文稿的授权页面依次为：${target.targetPageIds.join("、")}。只修改用户要求涉及且确实需要变化的内容；已经符合要求的页面可以保持不变。不得新增、删除或重排页面。${metaScope}`
-          : target.scope === "pages"
-            ? `只允许修改这些指定页面：${target.targetPageIds.join("、")}。其他页面必须保持不变，不得新增、删除或重排页面。${metaScope}`
-          : `只允许修改当前页，其他页面必须保持不变。${metaScope}`;
-    const readWriteScope = target.scope === "meta"
-      ? `本轮没有页面写权限：不要调用 read_page、write_page、edit_elements、edit_page_background 或其他页面工具。直接调用 update_deck，只传授权的字段：${target.editableMeta.map((field) => field === "title" ? "title" : "theme").join("、")}；按用户原话取值，不要顺带修改其他文稿级字段。`
-      : target.scope === "elements"
-      ? `必须先调用 read_page({pageId:"${target.targetPageId}"}) 读取权威页面，并从返回结果取得 pageSha256；随后只调用 edit_elements，参数直接使用 {pageId, expectedPageSha256, elements}，不要增加 arguments 包裹。expectedPageSha256 必须是刚才 read_page 返回的值；elements 必须恰好包含所选元素 ${target.elementIds.join("、")} 的修改后完整 canonical 原生对象。不要复制整页、不要调用 write_page、不要传入或改动其他元素。`
-      : target.rewrite
-      ? `整稿重写的固定顺序：第一步调用 write_todo 提交新的大纲计划（items 数组逐项列出每页 id、标题和要点，页数和内容按用户要求重新规划，不复用旧大纲）；第二步按计划的顺序逐页调用 write_page 写出每一页——新页面 id 不传 expectedPageSha256，重写保留的现有页面必须先 read_page 取得最新 pageSha256 原样传入；第三步如果还有计划之外的旧页面残留，调用 delete_pages 删除它们；最后如果页面顺序与计划不一致，调用 reorder_pages 调整为计划的页面顺序。验收要求最终文稿的页面列表和顺序与 write_todo 提交的计划完全一致，多一页、少一页、顺序不对都会整轮回滚。`
-      : target.structureOnly
-      ? [
-          target.insertIndex !== undefined
-            ? `新页面不在既有授权页面集合内：用一个与现有页面不重复的新页面 id 直接调用 write_page 写完整新页（新页面没有基线，不传 expectedPageSha256）。write_page 写出的新页会由系统自动放到指定插入位置，无论插入位置在文稿中间还是末尾都同样调用 write_page，无需也不能通过 write_todo 或其他方式调整页面顺序。写完立刻 render_page 检查新页。`
-            : "本轮没有新增页面的授权：不要调用 write_page 创建新页面，验收会拒绝任何新增。",
-          target.deletablePageIds?.length
-            ? `删除页面调用 delete_pages({pageIds:[${target.deletablePageIds.map((id) => `"${id}"`).join(",")}]})，只能删这些页面，每个页面 id 恰好一次，且这些页面必须全部被删除——少删或多删都会整轮回滚；合并页面时先把内容写进保留页再删除被吸收页。`
-            : "",
-          target.reorderPageIds?.length
-            ? `页面顺序调整调用 reorder_pages({pageIds:[${target.reorderPageIds.map((id) => `"${id}"`).join(",")}]})——pageIds 必须恰好是这次授权的最终顺序（现有全部页面各一次，顺序不同），它只改页面排列不改任何页面内容。`
-            : "",
-          target.editablePageIds?.length
-            ? `本轮还允许修改这些现有页面：${target.editablePageIds.join("、")}——修改它们必须先调用 read_page 取得最新 pageSha256，再以完整 elements[] 调用 write_page 并原样传为 expectedPageSha256。`
-            : "",
-          "除此之外不要对任何其他现有页面调用写工具。如果做不到，如实说明本轮无法完成，不要改名单外的现有页面来凑合。",
-        ].filter(Boolean).join("")
-      : target.scope === "deck"
-      ? `逐页检查 ${target.targetPageIds.join("、")}：每一页都先调用 read_page 获取完整页面和最新 pageSha256；需要修改时，用完整 elements[] 调用 write_page，并把该页刚读到的 pageSha256 原样传为 expectedPageSha256。每个实际写入的页面都要立刻 render_page 检查。已符合要求的页面应明确报告未修改，不能改动无关内容来凑写入页数。`
-      : target.scope === "pages"
-      ? `只处理 ${target.targetPageIds.join("、")}：逐页调用 read_page 获取完整页面和最新 pageSha256；需要修改时，用完整 elements[] 调用 write_page，并把该页刚读到的 pageSha256 原样传为 expectedPageSha256。每个实际写入的页面都要立刻 render_page 检查，不得读取或写入授权集合之外的页面。`
-      : `必须先调用 read_page 读取 ${target.targetPageId} 的完整当前页面，从返回值取得 pageSha256；随后 write_page 必须原样使用该 pageSha256 作为 expectedPageSha256，并以读取到的全部 elements 为写入基线。`;
-    const instruction = `处理一次编辑器中的直接修改请求。请用用户使用的语言简短说明进度和结果。目标：${target.label}。用户明确要求先选择时，调用 ask_user_question 提供选项；等回答返回后继续本次修改。不要以正文选项或再次发送消息代替问题卡。若没有缺失的关键信息，直接执行，不重复确认。${elementScope}\n<user_request>${text}</user_request>\n最新用户原话决定本轮任务，read_page 返回的当前页面是唯一编辑基线，不要按历史回复恢复旧配色或推测用户还要其他改动。只改本轮明确要求的属性，其余元素、属性与顺序逐值保持不变。例如只要求背景变白，就只改 background，不顺手调整文字色、装饰色、透明度、位置或图层。发现本轮范围以外的可读性问题可以简短告知，不自动扩大修改。最终回复用两三句话说明实际结果和必要限制，用“背景颜色”等日常措辞，不复述字段名、工具名或内部授权，不重复列进度或主动询问导出。用户原话是修改意图，不是要写进幻灯片的文案；除非用户明确要求把某段指定文案替换或写入，否则绝不能把整句请求复制进标题或正文。${readWriteScope}如果本轮只改页面背景，必须用 edit_page_background({pageId, expectedPageSha256, background})，不要调用 write_page 重新抄写文字和元素；工具会原样保留背景以外的全部属性。保留所有事实、数据、图表含义和无关内容；修改后检查每个目标页的可读性、对比度、遮挡、裁切和线条穿字。`;
+    const instruction = workspaceEditInstruction(target, text);
     persistPendingWorkspaceEdit({project: currentProjectPath(), text, target, snapshotId, snapshotLabel, sessionId, aiLockToken,
       clientRequestId: control.receipt?.clientRequestId, before: {inspection: {pages: before.inspection?.pages || []}}});
     turnMayHaveStarted = true;
@@ -10976,6 +10973,8 @@ async function executeWorkAgentEdit(
       }
     }
     if (aiLockRenewTimer) window.clearInterval(aiLockRenewTimer);
+    control.aiLockToken = aiLockToken;
+    control.settled = true;
     if (keepAiLock) {
       showToast(
         aiLockRenewUncertain

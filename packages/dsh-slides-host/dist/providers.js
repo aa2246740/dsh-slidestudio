@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { bindMinimaxCnKey, generateRouteState, minimaxCnKeyPresent, openrouterKeyPresent, readMinimaxCnKey, resolveSlidesLlmRoute, OPENROUTER_MINIMAX_FREE_MODEL, } from "./args.js";
-import { isAntigravityId, loadSlidesModelCatalog, providerModelEffortsFromHome, providerReasoningEffortsFromHome } from "./local-models.js";
+import { isAntigravityId, loadSlidesModelCatalog, providerModelEffortsFromHome, providerReasoningEffortsFromHome, } from "./local-models.js";
 import { readByokProviders } from "./byok.js";
 import { GROK_DEFAULT_MODEL, GROK_PREFERRED_MODELS, GROK_PROVIDER, OSS_OAUTH_PROVIDERS, readXaiLoginSnapshot, routeHasNativeSearch, signedInOauthRoutes, } from "./oauth-login.js";
 const FALLBACK_PROVIDERS = [
@@ -45,12 +47,14 @@ export function slidesProviders(home) {
             ...(modelEfforts !== undefined ? { modelEfforts } : {}),
         };
     });
-    const base = keys.length > 0 ? keys : FALLBACK_PROVIDERS.map((provider) => ({
-        ...provider,
-        ready: provider.id === "minimax-cn"
-            && Boolean(minimaxCnKeyPresent() || (home && loadHomeKey(home, provider.id)))
-            && !generateRouteState.minimaxCnAuthFailed,
-    }));
+    const base = keys.length > 0
+        ? keys
+        : FALLBACK_PROVIDERS.map((provider) => ({
+            ...provider,
+            ready: provider.id === "minimax-cn" &&
+                Boolean(minimaxCnKeyPresent() || (home && loadHomeKey(home, provider.id))) &&
+                !generateRouteState.minimaxCnAuthFailed,
+        }));
     if (home) {
         for (const row of readByokProviders(home)) {
             if (base.some((item) => item.id === row.id))
@@ -103,14 +107,20 @@ export function slidesProviders(home) {
 /** Hosted plugins use DSH's live adapters; no duplicate credential/catalog store. */
 export function hostedProviders(catalog) {
     return [...catalog].map(([id, models]) => ({
-        id, name: id, methods: [], models: [...models.keys()], ready: models.size > 0,
+        id,
+        name: id,
+        methods: [],
+        models: [...models.keys()],
+        ready: models.size > 0,
         nativeSearch: routeHasNativeSearch(id),
         modelEfforts: Object.fromEntries([...models].map(([model, info]) => [model, info.efforts ?? []])),
     }));
 }
 /** The same model roster is used by the picker, health and execution guards. */
 export function withDshModelCatalog(providers, catalog) {
-    return providers.filter((provider) => !isAntigravityId(provider.id)).map((provider) => {
+    return providers
+        .filter((provider) => !isAntigravityId(provider.id))
+        .map((provider) => {
         if (!catalog)
             return provider;
         const advertised = catalog.get(provider.id);
@@ -181,14 +191,50 @@ function catalogApiKeyEnv(home, providerId) {
     }
     return readByokProviders(home).find((row) => row.id === providerId)?.apiKeyEnv;
 }
+/** Resolve Windows tools from System32 so Git Bash's GNU `whoami` on PATH cannot shadow them. */
+function windowsSystemTool(name) {
+    return path.join(process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows", "System32", name);
+}
 export function saveHomeKey(home, providerId, apiKey) {
     const value = apiKey.trim();
     if (!value)
         throw new Error("api key required");
     fs.mkdirSync(credentialsDir(home), { recursive: true, mode: 0o700 });
     const file = keyFile(home, providerId);
-    fs.writeFileSync(file, `${value}\n`, { mode: 0o600 });
-    fs.chmodSync(file, 0o600);
+    const temp = path.join(credentialsDir(home), `.${providerId}.${randomUUID()}.tmp`);
+    let descriptor;
+    try {
+        descriptor = fs.openSync(temp, "wx", 0o600);
+        if (process.platform === "win32") {
+            const identity = execFileSync(windowsSystemTool("whoami.exe"), ["/user", "/fo", "csv", "/nh"], {
+                encoding: "utf8",
+            });
+            const sid = identity
+                .split(",")
+                .map((part) => part.trim().replace(/^"|"$/g, ""))
+                .find((part) => /^S-1-(?:\d+-)+\d+$/.test(part));
+            if (!sid)
+                throw new Error("Unable to resolve the current Windows SID for key-file permissions");
+            const systemRoot = process.env.SystemRoot;
+            if (!systemRoot)
+                throw new Error("Unable to resolve the Windows system directory for key-file permissions");
+            execFileSync(path.join(systemRoot, "System32", "icacls.exe"), [temp, "/inheritance:r", "/grant:r", `*${sid}:(F)`], {
+                stdio: "ignore",
+            });
+        }
+        fs.writeFileSync(descriptor, `${value}\n`);
+        if (process.platform !== "win32")
+            fs.fchmodSync(descriptor, 0o600);
+        fs.closeSync(descriptor);
+        descriptor = undefined;
+        fs.renameSync(temp, file);
+    }
+    catch (error) {
+        if (descriptor !== undefined)
+            fs.closeSync(descriptor);
+        fs.rmSync(temp, { force: true });
+        throw error;
+    }
     if (providerId === "minimax-cn") {
         process.env.MINIMAX_CN_API_KEY = value;
         process.env.MINIMAXCN_API_KEY = value;
@@ -295,7 +341,11 @@ export function connectionState(home, env = process.env, model = "MiniMax-M3") {
             providerId: route.provider,
             ready: true,
             method: "api_key",
-            source: hadEnvCn && route.provider === "minimax-cn" ? "env" : fromHome && route.provider === "minimax-cn" ? "dsh-home" : "env",
+            source: hadEnvCn && route.provider === "minimax-cn"
+                ? "env"
+                : fromHome && route.provider === "minimax-cn"
+                    ? "dsh-home"
+                    : "env",
             model: route.model || model,
         };
     }

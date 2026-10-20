@@ -11,7 +11,7 @@ import { footerZoneTopForSlide } from "@open-slidestudio/pptd-v2";
 import {
   repoPlaywrightRuntimeFile,
   resolvePlaywrightRuntime,
-  runtimeFileReady,
+  runtimeLayoutUsable,
   type PlaywrightRuntimeRoots,
 } from "./playwright-runtime.js";
 
@@ -106,10 +106,7 @@ export type PageLayoutDiagnostics = {
 
 export type PageRasterPort = {
   available: boolean;
-  render: (opts: {
-    projectRoot: string;
-    pageIndex: number;
-  }) => Promise<PageRasterResult>;
+  render: (opts: { projectRoot: string; pageIndex: number }) => Promise<PageRasterResult>;
   close?: () => Promise<void>;
 };
 
@@ -117,11 +114,7 @@ export type PageRasterPortOpts = {
   editorBaseUrl?: string;
   pinnedRuntimePath?: string;
   nativeSlideSize?: boolean;
-  screenshot?: (opts: {
-    editorBaseUrl: string;
-    projectRoot: string;
-    pageIndex: number;
-  }) => Promise<PageRasterShot>;
+  screenshot?: (opts: { editorBaseUrl: string; projectRoot: string; pageIndex: number }) => Promise<PageRasterShot>;
 };
 
 export type { PlaywrightRuntimeRoots } from "./playwright-runtime.js";
@@ -157,17 +150,15 @@ export function pinnedPlaywrightRuntimePath(
   return resolvePlaywrightRuntime(env, roots).path;
 }
 
-/** True only when the pinned runtime file exists and exports the launch API. Does not launch Chromium. */
+/** True only when the pinned runtime, Playwright package, and browser are available. */
 export function rasterRuntimeReady(
   env: NodeJS.ProcessEnv = process.env,
   runtimeFile = pinnedPlaywrightRuntimePath(env),
 ): boolean {
-  return runtimeFileReady(runtimeFile);
+  return runtimeLayoutUsable(runtimeFile, env);
 }
 
-export function editorUrlFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
+export function editorUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const url = env.SLIDESTUDIO_EDITOR_URL?.trim();
   return url ? url.replace(/\/+$/, "") : undefined;
 }
@@ -176,11 +167,7 @@ export function pageRasterRel(id: string): string {
   return `_agent/rasters/${mediaId(id)}.png`;
 }
 
-export function savePageRaster(
-  projectRoot: string,
-  id: string,
-  bytes: Buffer,
-): { src: string; abs: string } {
+export function savePageRaster(projectRoot: string, id: string, bytes: Buffer): { src: string; abs: string } {
   const dir = path.join(projectRoot, "_agent", "rasters");
   fs.mkdirSync(dir, { recursive: true });
   const name = `${mediaId(id)}.png`;
@@ -190,10 +177,7 @@ export function savePageRaster(
 }
 
 /** Bytes grok-4.6 can see. Missing or tiny files are not a raster. */
-export function readPageRaster(
-  projectRoot: string,
-  pageId: string,
-): Buffer | undefined {
+export function readPageRaster(projectRoot: string, pageId: string): Buffer | undefined {
   const rel = pageRasterRel(pageId);
   const abs = path.resolve(projectRoot, rel);
   const root = path.resolve(projectRoot);
@@ -245,8 +229,12 @@ export function assessRenderedLayout(snapshot: RenderedLayoutSnapshot): PageLayo
   }
 
   for (const node of snapshot.nodes) {
-    if (node.left < -epsilon || node.top < -epsilon ||
-      node.right > snapshot.slideWidth + epsilon || node.bottom > snapshot.slideHeight + epsilon) {
+    if (
+      node.left < -epsilon ||
+      node.top < -epsilon ||
+      node.right > snapshot.slideWidth + epsilon ||
+      node.bottom > snapshot.slideHeight + epsilon
+    ) {
       hardIssues.push({
         kind: "element-outside-slide",
         elementId: node.id,
@@ -300,9 +288,7 @@ export function assessRenderedLayout(snapshot: RenderedLayoutSnapshot): PageLayo
     }
   }
 
-  const texts = snapshot.nodes.filter(
-    (node) => node.type === "text" && node.layoutRole !== "decoration",
-  );
+  const texts = snapshot.nodes.filter((node) => node.type === "text" && node.layoutRole !== "decoration");
   const slideScale = snapshot.slideWidth > 0 ? snapshot.slideWidth / 960 : 1;
   const minimumRuleClearance = 14 * slideScale;
   const minimumRuleOverlap = Math.max(4, 8 * slideScale);
@@ -371,18 +357,14 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
       return { slideWidth: 0, slideHeight: 0, fontsReady: false, nodes: [] };
     }
     const slideRect = slide.getBoundingClientRect();
-    const fontNodes = Array.from(
-      slide.querySelectorAll(".el.text, .el.chart text, .el.table td, .el.table th"),
-    );
-    const fontsReady = !fonts || (
-      fonts.status === "loaded" &&
-      fontNodes.every((node) => fonts.check(`12px ${getComputedStyle(node).fontFamily}`))
-    );
+    const fontNodes = Array.from(slide.querySelectorAll(".el.text, .el.chart text, .el.table td, .el.table th"));
+    const fontsReady =
+      !fonts ||
+      (fonts.status === "loaded" &&
+        fontNodes.every((node) => fonts.check(`12px ${getComputedStyle(node).fontFamily}`)));
     type Rgba = { r: number; g: number; b: number; a: number };
     const parseColor = (value: string): Rgba | undefined => {
-      const match = value.match(
-        /rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/i,
-      );
+      const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/i);
       if (!match) return undefined;
       return {
         r: Number(match[1]),
@@ -505,9 +487,7 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
       }
       return resolved;
     };
-    const resolvePaintStack = (
-      candidates: readonly Element[],
-    ): ResolvedPaint | UnresolvedPaint | undefined => {
+    const resolvePaintStack = (candidates: readonly Element[]): ResolvedPaint | UnresolvedPaint | undefined => {
       const layers: SolidPaint[] = [];
       for (const candidate of candidates) {
         const paint = paintOnElement(candidate);
@@ -554,8 +534,8 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
         const resolved = resolvePaintStack([...ownLayers, ...underLayers]);
         if (!resolved || resolved.kind === "unresolved") return resolved;
         const sharedIndex = resolved.layers.findIndex(
-          (layer, index) => index < ownLayers.length &&
-            (layer.element === runElement || layer.element.contains(runElement)),
+          (layer, index) =>
+            index < ownLayers.length && (layer.element === runElement || layer.element.contains(runElement)),
         );
         if (sharedIndex < 0) return resolved;
         const shared = resolved.layers[sharedIndex]!;
@@ -569,9 +549,7 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
             rawBackground: shared.rawColor,
             under: under ?? resolved.color,
             commonOpacity: shared.opacity,
-            foregroundOnlyOpacity: shared.opacity > 0
-              ? clampAlpha(opacityThrough(runElement) / shared.opacity)
-              : 0,
+            foregroundOnlyOpacity: shared.opacity > 0 ? clampAlpha(opacityThrough(runElement) / shared.opacity) : 0,
           },
         };
       } finally {
@@ -587,11 +565,8 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
         const isText = node.classList.contains("text");
         const slideScale = slideRect.width > 0 ? slideRect.width / 960 : 1;
         const isHorizontalRule =
-          node.classList.contains("shape") &&
-          rect.width >= 16 * slideScale &&
-          rect.height <= 4 * slideScale;
-        const hasContrastText =
-          isText || node.classList.contains("chart") || node.classList.contains("table");
+          node.classList.contains("shape") && rect.width >= 16 * slideScale && rect.height <= 4 * slideScale;
+        const hasContrastText = isText || node.classList.contains("chart") || node.classList.contains("table");
         let worstContrast:
           | {
               ratio: number;
@@ -613,14 +588,10 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
           for (const textRun of textRuns) {
             const run: Element = textRun.parentElement ?? node;
             const computed = getComputedStyle(run);
-            const foregroundCss = run.namespaceURI === "http://www.w3.org/2000/svg"
-              ? computed.fill
-              : computed.color;
+            const foregroundCss = run.namespaceURI === "http://www.w3.org/2000/svg" ? computed.fill : computed.color;
             const range = document.createRange();
             range.selectNodeContents(textRun);
-            const rects = Array.from(range.getClientRects()).filter(
-              (rect) => rect.width > 0.5 && rect.height > 0.5,
-            );
+            const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0.5 && rect.height > 0.5);
             if (rects.length === 0) continue;
             if (/^url\(/i.test(foregroundCss)) {
               contrastUnresolvedSource ??= `${run.tagName.toLowerCase()}:foreground-image`;
@@ -638,9 +609,7 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
               : computed.fontWeight === "bold"
                 ? 700
                 : 400;
-            const required = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700)
-              ? 3
-              : 4.5;
+            const required = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700) ? 3 : 4.5;
             for (const runRect of rects) {
               const points: Array<[number, number]> = [
                 [runRect.left + runRect.width * 0.5, runRect.top + runRect.height * 0.5],
@@ -666,9 +635,7 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
                   visibleBackground = composite(
                     {
                       ...background.textGroup.rawBackground,
-                      a: clampAlpha(
-                        background.textGroup.rawBackground.a * background.textGroup.commonOpacity,
-                      ),
+                      a: clampAlpha(background.textGroup.rawBackground.a * background.textGroup.commonOpacity),
                     },
                     { ...background.textGroup.under, a: 1 },
                   );
@@ -705,7 +672,7 @@ export async function readRenderedLayout(page: RasterPage): Promise<PageLayoutDi
           layoutRole: (["footer", "content", "decoration"] as const).includes(
             node.dataset.layoutRole as "footer" | "content" | "decoration",
           )
-            ? node.dataset.layoutRole as "footer" | "content" | "decoration"
+            ? (node.dataset.layoutRole as "footer" | "content" | "decoration")
             : undefined,
           left: rect.left - slideRect.left,
           top: rect.top - slideRect.top,
@@ -746,8 +713,7 @@ async function shotWithReuse(opts: {
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
     await page.waitForSelector("#slide .el", { timeout: 20_000 });
     await page.addStyleTag({
-      content:
-        ".insert-pill,.pill-handle,.notes-link,.annot-tip,.more-menu,.ctx-bar{visibility:hidden!important}",
+      content: ".insert-pill,.pill-handle,.notes-link,.annot-tip,.more-menu,.ctx-bar{visibility:hidden!important}",
     });
     if (opts.nativeSlideSize) {
       await normalizeRasterPageToNativeSlideSize(page);
@@ -782,9 +748,7 @@ async function launchBrowser(runtimeFile: string): Promise<RasterBrowser> {
   return (await runtime.launchPinnedChromium({ headless: true })) as RasterBrowser;
 }
 
-export function createPageRasterPort(
-  opts: PageRasterPortOpts = {},
-): PageRasterPort {
+export function createPageRasterPort(opts: PageRasterPortOpts = {}): PageRasterPort {
   const editorBaseUrl = (opts.editorBaseUrl ?? editorUrlFromEnv())?.replace(/\/+$/, "");
   const runtimeFile = opts.pinnedRuntimePath ?? pinnedPlaywrightRuntimePath();
   const runtimeOk = Boolean(opts.screenshot) || rasterRuntimeReady(process.env, runtimeFile);
@@ -799,7 +763,7 @@ export function createPageRasterPort(
       await b.close().catch(() => undefined);
     },
     async render({ projectRoot, pageIndex }) {
-      if (!available || !editorBaseUrl && !opts.screenshot) {
+      if (!available || (!editorBaseUrl && !opts.screenshot)) {
         const missingRuntime = Boolean(editorBaseUrl) && !runtimeOk;
         return {
           width: 960,
@@ -828,10 +792,10 @@ export function createPageRasterPort(
             })
           : await shotWithReuse({
               editorBaseUrl: editorBaseUrl as string,
-            projectRoot: root,
-            pageIndex,
-            nativeSlideSize: opts.nativeSlideSize ?? true,
-            getBrowser: async () => {
+              projectRoot: root,
+              pageIndex,
+              nativeSlideSize: opts.nativeSlideSize ?? true,
+              getBrowser: async () => {
                 if (!browser) browser = await launchBrowser(runtimeFile);
                 return browser;
               },

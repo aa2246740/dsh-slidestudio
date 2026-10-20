@@ -16,7 +16,7 @@ dsh plugin --profile web add dsh-slidestudio
 
 This prebuilt npm package uses the official `dsh.bundle.patch` convention. No source checkout or install-time build is needed.
 
-Requires DeepSeek Harness 0.2.0-rc.2 through 0.2.x and Node.js ^22.19.0 or >=24.0.0. The optional Personal entry requires dsh-personal 0.2.8 through 0.2.x; otherwise Slides appears in the main navigation.
+Requires DeepSeek Harness 0.2.0-rc.2 through 0.2.x and Node.js ^22.19.0 or >=24.11.0. The optional Personal entry requires dsh-personal 0.2.8 through 0.2.x; otherwise Slides appears in the main navigation.
 
 ## Before generating
 

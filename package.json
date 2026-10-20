@@ -90,7 +90,7 @@
     "release:package": "npm run build:native && npm run build --prefix dsh-slidestudio && node dsh-slidestudio/scripts/release.mjs"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "license": "Apache-2.0",
   "dependencies": {
@@ -147,8 +147,8 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",
     "husky": "9.1.7",
-    "jscpd": "5.4.0",
-    "knip": "6.39.0",
+    "jscpd": "5.4.1",
+    "knip": "6.41.0",
     "lint-staged": "16.4.0",
     "prettier": "3.9.9",
     "tsdown": "0.22.2",

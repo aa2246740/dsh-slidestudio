@@ -36,18 +36,12 @@ describe("slides client plugin", () => {
   });
 
   it("starts every Hub prompt as a fresh task; resume only via explicit in-run retry", () => {
-    const hub = fs.readFileSync(
-      path.resolve(ROOT, "../../apps/native-web/public/hub.js"),
-      "utf8",
-    );
+    const hub = fs.readFileSync(path.resolve(ROOT, "../../apps/native-web/public/hub.js"), "utf8");
     const capabilityState = fs.readFileSync(
       path.resolve(ROOT, "../../apps/native-web/public/hub-health-state.js"),
       "utf8",
     );
-    const app = fs.readFileSync(
-      path.resolve(ROOT, "../../apps/native-web/public/app.js"),
-      "utf8",
-    );
+    const app = fs.readFileSync(path.resolve(ROOT, "../../apps/native-web/public/app.js"), "utf8");
     const generationProcess = fs.readFileSync(
       path.resolve(ROOT, "../../apps/native-web/public/generation-process.js"),
       "utf8",
@@ -77,7 +71,10 @@ describe("slides client plugin", () => {
     assert.match(capabilityState, /联网检索 · 模型自带/);
     assert.match(capabilityState, /card\.imageSearch\?\.configured[\s\S]*搜图工具/);
     assert.match(capabilityState, /card\.imageGenerate\?\.configured[\s\S]*生图工具/);
-    assert.match(capabilityState, /label: t\("看图"\)[\s\S]*label: t\("联网"\)[\s\S]*label: t\("搜图"\)[\s\S]*label: t\("生图"\)/);
+    assert.match(
+      capabilityState,
+      /label: t\("看图"\)[\s\S]*label: t\("联网"\)[\s\S]*label: t\("搜图"\)[\s\S]*label: t\("生图"\)/,
+    );
     assert.match(hub, /serverCapability = data\.capability/);
   });
 
@@ -98,8 +95,9 @@ describe("slides client plugin", () => {
     assert.match(html, /添加自定义提供方/);
     assert.match(html, /data-settings-pane="models"/);
     assert.match(html, /id="search-url"/);
-    assert.match(html, /data-settings-pane="tools"[^>]* hidden/);
-    assert.match(html, /自定义工具（搜图\/生图）以后开发/);
+    assert.match(html, /data-settings-pane="tools"/);
+    assert.doesNotMatch(html, /data-settings-pane="tools"[^>]* hidden/);
+    assert.doesNotMatch(html, /自定义工具（搜图\/生图）以后开发/);
     assert.doesNotMatch(html, /id="btn-pi-settings"/);
     assert.match(html, /class="capability-row"/);
     assert.match(html, /id="pi-model"[^>]*role="listbox"/);

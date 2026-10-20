@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { writeFileAtomic } from "./atomic-file.js";
 import { mediaId } from "./media-store.js";
 import { footerZoneTopForSlide } from "@open-slidestudio/pptd-v2";
-import { repoPlaywrightRuntimeFile, resolvePlaywrightRuntime, runtimeFileReady, } from "./playwright-runtime.js";
+import { repoPlaywrightRuntimeFile, resolvePlaywrightRuntime, runtimeLayoutUsable, } from "./playwright-runtime.js";
 export function projectHasPptd(root) {
     try {
         return fs.readdirSync(root).some((name) => name.toLowerCase().endsWith(".pptd"));
@@ -44,9 +44,9 @@ export async function normalizeRasterPageToNativeSlideSize(page) {
 export function pinnedPlaywrightRuntimePath(env = process.env, roots = {}) {
     return resolvePlaywrightRuntime(env, roots).path;
 }
-/** True only when the pinned runtime file exists and exports the launch API. Does not launch Chromium. */
+/** True only when the pinned runtime, Playwright package, and browser are available. */
 export function rasterRuntimeReady(env = process.env, runtimeFile = pinnedPlaywrightRuntimePath(env)) {
-    return runtimeFileReady(runtimeFile);
+    return runtimeLayoutUsable(runtimeFile, env);
 }
 export function editorUrlFromEnv(env = process.env) {
     const url = env.SLIDESTUDIO_EDITOR_URL?.trim();
@@ -96,8 +96,10 @@ export function assessRenderedLayout(snapshot) {
         });
     }
     for (const node of snapshot.nodes) {
-        if (node.left < -epsilon || node.top < -epsilon ||
-            node.right > snapshot.slideWidth + epsilon || node.bottom > snapshot.slideHeight + epsilon) {
+        if (node.left < -epsilon ||
+            node.top < -epsilon ||
+            node.right > snapshot.slideWidth + epsilon ||
+            node.bottom > snapshot.slideHeight + epsilon) {
             hardIssues.push({
                 kind: "element-outside-slide",
                 elementId: node.id,
@@ -222,8 +224,9 @@ export async function readRenderedLayout(page) {
         }
         const slideRect = slide.getBoundingClientRect();
         const fontNodes = Array.from(slide.querySelectorAll(".el.text, .el.chart text, .el.table td, .el.table th"));
-        const fontsReady = !fonts || (fonts.status === "loaded" &&
-            fontNodes.every((node) => fonts.check(`12px ${getComputedStyle(node).fontFamily}`)));
+        const fontsReady = !fonts ||
+            (fonts.status === "loaded" &&
+                fontNodes.every((node) => fonts.check(`12px ${getComputedStyle(node).fontFamily}`)));
         const parseColor = (value) => {
             const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/i);
             if (!match)
@@ -375,8 +378,7 @@ export async function readRenderedLayout(page) {
                 const resolved = resolvePaintStack([...ownLayers, ...underLayers]);
                 if (!resolved || resolved.kind === "unresolved")
                     return resolved;
-                const sharedIndex = resolved.layers.findIndex((layer, index) => index < ownLayers.length &&
-                    (layer.element === runElement || layer.element.contains(runElement)));
+                const sharedIndex = resolved.layers.findIndex((layer, index) => index < ownLayers.length && (layer.element === runElement || layer.element.contains(runElement)));
                 if (sharedIndex < 0)
                     return resolved;
                 const shared = resolved.layers[sharedIndex];
@@ -390,9 +392,7 @@ export async function readRenderedLayout(page) {
                         rawBackground: shared.rawColor,
                         under: under ?? resolved.color,
                         commonOpacity: shared.opacity,
-                        foregroundOnlyOpacity: shared.opacity > 0
-                            ? clampAlpha(opacityThrough(runElement) / shared.opacity)
-                            : 0,
+                        foregroundOnlyOpacity: shared.opacity > 0 ? clampAlpha(opacityThrough(runElement) / shared.opacity) : 0,
                     },
                 };
             }
@@ -408,9 +408,7 @@ export async function readRenderedLayout(page) {
                 const rect = node.getBoundingClientRect();
                 const isText = node.classList.contains("text");
                 const slideScale = slideRect.width > 0 ? slideRect.width / 960 : 1;
-                const isHorizontalRule = node.classList.contains("shape") &&
-                    rect.width >= 16 * slideScale &&
-                    rect.height <= 4 * slideScale;
+                const isHorizontalRule = node.classList.contains("shape") && rect.width >= 16 * slideScale && rect.height <= 4 * slideScale;
                 const hasContrastText = isText || node.classList.contains("chart") || node.classList.contains("table");
                 let worstContrast;
                 let contrastUnresolvedSource;
@@ -426,9 +424,7 @@ export async function readRenderedLayout(page) {
                     for (const textRun of textRuns) {
                         const run = textRun.parentElement ?? node;
                         const computed = getComputedStyle(run);
-                        const foregroundCss = run.namespaceURI === "http://www.w3.org/2000/svg"
-                            ? computed.fill
-                            : computed.color;
+                        const foregroundCss = run.namespaceURI === "http://www.w3.org/2000/svg" ? computed.fill : computed.color;
                         const range = document.createRange();
                         range.selectNodeContents(textRun);
                         const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0.5 && rect.height > 0.5);
@@ -450,9 +446,7 @@ export async function readRenderedLayout(page) {
                             : computed.fontWeight === "bold"
                                 ? 700
                                 : 400;
-                        const required = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700)
-                            ? 3
-                            : 4.5;
+                        const required = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700) ? 3 : 4.5;
                         for (const runRect of rects) {
                             const points = [
                                 [runRect.left + runRect.width * 0.5, runRect.top + runRect.height * 0.5],
@@ -584,7 +578,7 @@ export function createPageRasterPort(opts = {}) {
             await b.close().catch(() => undefined);
         },
         async render({ projectRoot, pageIndex }) {
-            if (!available || !editorBaseUrl && !opts.screenshot) {
+            if (!available || (!editorBaseUrl && !opts.screenshot)) {
                 const missingRuntime = Boolean(editorBaseUrl) && !runtimeOk;
                 return {
                     width: 960,

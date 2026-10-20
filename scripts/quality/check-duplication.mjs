@@ -7,8 +7,16 @@ const measurements = {};
 for (const app of APPS) {
   const output = path.join(ROOT, "output/quality/duplication", app.replaceAll("/", "-"));
   const result = spawnSync(
-    path.join(ROOT, "node_modules/.bin/jscpd"),
-    [path.join(ROOT, app), "--config", path.join(ROOT, ".jscpd.json"), "--output", output, "--silent"],
+    process.execPath,
+    [
+      path.join(ROOT, "node_modules/jscpd/run-jscpd.js"),
+      path.join(ROOT, app),
+      "--config",
+      path.join(ROOT, ".jscpd.json"),
+      "--output",
+      output,
+      "--silent",
+    ],
     { cwd: ROOT, encoding: "utf8", maxBuffer: 5 * 1024 * 1024 },
   );
   if (result.error || result.status !== 0) throw result.error ?? new Error(result.stderr || "jscpd failed");

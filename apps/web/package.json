@@ -15,7 +15,7 @@
     "@open-slidestudio/agent-core": "0.1.0",
     "@open-slidestudio/exporter-pptx": "0.1.0",
     "@open-slidestudio/pptd": "0.1.0",
-    "lucide-react": "^0.510.0",
+    "lucide-react": "^1.49.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zustand": "^5.0.0"
