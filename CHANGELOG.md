@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8 — 2026-10-20
+
+- Playwright onboarding in the Hub: a runtime panel shows checking, installing, ready, failed, or manual setup, with the failure reason, a retry button, `npm run setup:browser`, and the `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` override. `/slides/health` reports the actual rendering runtime.
+- Tools pane and image API presets with safe endpoint templating; interruptible stop and standalone editor routing.
+- AI review locks: new `GET /api/reviews/ai-lock/status`; expired or orphaned review guards can be recovered, while live guards and busy sessions stay protected. A pending browser edit is archived and kept in the composer, never resubmitted.
+- Session checks no longer take the project write lock; run ledger and binding writes are skipped when nothing changed; an operator stop waits at most 15 s for idle.
+- The `/app` editor proxy passes same-origin edits to the sidecar and rejects cross-site requests.
+- Windows: the local launcher starts DSH through the current Node (no `spawn npm ENOENT`), key files are written atomically with owner-only ACLs, tar extraction and `chrome-headless-shell.exe` detection work, and permission errors during the session scan return 400 instead of 500.
+- Node engines are now `^22.19.0 || >=24.11.0`.
+- Repository tooling: ops alerting, automated PR review digests, feature flags, ratcheted type checks, bundle budgets for all four app payloads, and generated API docs. CI builds native packages and installs the pinned Playwright runtime before coverage.
+
 ## 0.2.4 — 2026-10-05
 
 - Resolve the Playwright rendering runtime automatically: `SLIDESTUDIO_PLAYWRIGHT_RUNTIME`, the repo copy, a managed dir under the DSH data dir, a self-consistent `~/.codex` seed, or a machine-wide Playwright install. A stale codex seed no longer claims the runtime, and machines with nothing usable get a background download of the pinned runtime (npm registry tarballs plus Playwright's own browser installer, npmmirror fallback, no npm required on the host).
