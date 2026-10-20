@@ -44,6 +44,8 @@ test("warmed model and review GET polling does not acquire the project write loc
     });
   });
   const base = `http://127.0.0.1:${port}`;
+  /** @type {string[]} */
+  const serverLogs = [];
   const server = spawn(process.execPath, ["apps/native-web/src/server.mjs"], {
     cwd: ROOT,
     env: {
@@ -52,19 +54,28 @@ test("warmed model and review GET polling does not acquire the project write loc
       OPEN_SLIDESTUDIO_PROJECT: project,
       SLIDESTUDIO_RETENTION_DAYS: "0",
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  /** @param {Buffer | string} chunk */
+  const collectLog = (chunk) => {
+    serverLogs.push(String(chunk));
+  };
+  server.stdout.on("data", collectLog);
+  server.stderr.on("data", collectLog);
   let watcher;
   try {
     let ready = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (server.exitCode !== null) {
+        throw new Error(`server exited ${server.exitCode} before listen\n${serverLogs.join("")}`);
+      }
       try {
         if ((await fetch(`${base}/api/health`)).ok) {
           ready = true;
           break;
         }
       } catch {
-        if (attempt === 79) throw new Error("server did not start");
+        if (attempt === 79) throw new Error(`server did not start\n${serverLogs.join("")}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }

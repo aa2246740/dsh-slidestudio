@@ -124,3 +124,13 @@ test("documented root commands and bootstrap stages refer to real scripts", () =
   }
   assert.equal(scripts["setup:dev"], "npm ci && npm run build:native && npm run setup:browser && npm start");
 });
+
+test("readiness quality builds native packages and pins Playwright before coverage", () => {
+  const yaml = readFileSync(path.join(ROOT, ".github/workflows/quality.yml"), "utf8");
+  const coverageIdx = yaml.indexOf("npm run test:coverage");
+  const nativeIdx = yaml.indexOf("npm run build:native");
+  const browserIdx = yaml.indexOf("npm run setup:browser");
+  assert.notEqual(coverageIdx, -1, "quality.yml must run test:coverage");
+  assert.ok(nativeIdx >= 0 && nativeIdx < coverageIdx, "quality.yml must build native packages before coverage");
+  assert.ok(browserIdx >= 0 && browserIdx < coverageIdx, "quality.yml must pin Playwright before coverage");
+});

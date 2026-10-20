@@ -17,7 +17,7 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -32,6 +32,14 @@ jobs:
         run: npm run docs:check
       - name: Legacy declarations for offline API adapters
         run: npm run build:legacy
+      - name: Native packages required by the editor server
+        run: npm run build:native
+      - name: Pin Playwright runtime for native-web coverage tests
+        run: npm run setup:browser
+      - name: Install Playwright OS libraries
+        run: node .runtime/playwright/node_modules/playwright/cli.js install-deps chromium
+        env:
+          DEBIAN_FRONTEND: noninteractive
       - name: Collect tests without executing them
         run: npm run test:list
       - name: Four-app critical-interface coverage and dynamic API security
