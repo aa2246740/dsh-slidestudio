@@ -161,36 +161,54 @@ test("live, settled and reloaded conversation preserves turn ownership and the r
       "false",
     ]);
     // At the tail, a new turn never expands all old tools. Finishing retains the visible answer.
+    // Wait until the reloaded transcript is idle. A still-discussing phase swallows Enter,
+    // and seeding turn 4 before that request paints a collapsed row that the live wait can miss.
+    await page.waitForFunction(() => {
+      const status = document.querySelector("#editor-generation-status")?.textContent || "";
+      const think = document.querySelector("#generation-think-status");
+      return status.includes("继续聊聊") && Boolean(think?.hidden);
+    });
     const nextUser = { id: "u4", at: "2026-09-20T04:00:00Z", text: "继续讨论", mode: "discuss" };
+    let turnEventsSent = false;
     await page.route("**/slides/assistant-intent", (r) =>
       r.fulfill({ json: { ok: true, intent: "discuss", scope: "page", pages: [1] } }),
     );
-    await page.route("**/slides/sessions/stability-test/turn", (r) => {
-      nextUser.clientRequestId = r.request().postDataJSON().clientRequestId;
-      messages.push(nextUser);
+    await page.route("**/slides/sessions/stability-test/turn", async (r) => {
+      let clientRequestId = "";
+      try {
+        const body = r.request().postDataJSON();
+        if (body && typeof body.clientRequestId === "string") clientRequestId = body.clientRequestId;
+      } catch {
+        clientRequestId = "";
+      }
+      nextUser.clientRequestId = clientRequestId;
+      if (!messages.some((message) => message.id === nextUser.id)) messages.push(nextUser);
       busy = true;
-      return r.fulfill({ json: { ok: true, userMessage: nextUser } });
-    });
-    events.push({
-      id: "tool4",
-      turn: 4,
-      at: "2026-09-20T04:00:01Z",
-      kind: "tool",
-      callId: "tool4",
-      name: "read_page",
-      detail: '{"pageId":"1_cover"}',
-      status: "complete",
-      ok: true,
-    });
-    events.push({
-      id: "final4",
-      turn: 4,
-      at: "2026-09-20T04:00:02Z",
-      kind: "message",
-      detail:
-        "这次修改已经处理。\n\n" +
-        Array.from({ length: 14 }, (_, i) => `第 ${i + 1} 段最终答复。保持清楚、稳定的阅读顺序。`).join("\n\n"),
-      status: "running",
+      if (!turnEventsSent) {
+        turnEventsSent = true;
+        events.push({
+          id: "tool4",
+          turn: 4,
+          at: "2026-09-20T04:00:01Z",
+          kind: "tool",
+          callId: "tool4",
+          name: "read_page",
+          detail: '{"pageId":"1_cover"}',
+          status: "complete",
+          ok: true,
+        });
+        events.push({
+          id: "final4",
+          turn: 4,
+          at: "2026-09-20T04:00:02Z",
+          kind: "message",
+          detail:
+            "这次修改已经处理。\n\n" +
+            Array.from({ length: 14 }, (_, i) => `第 ${i + 1} 段最终答复。保持清楚、稳定的阅读顺序。`).join("\n\n"),
+          status: "running",
+        });
+      }
+      await r.fulfill({ json: { ok: true, userMessage: { ...nextUser } } });
     });
     await page.getByLabel("与 AI 协作", { exact: true }).fill("继续讨论");
     await page.getByLabel("与 AI 协作", { exact: true }).press("Enter");

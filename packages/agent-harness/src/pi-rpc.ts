@@ -1,6 +1,5 @@
 /**
  * Pi `--mode rpc` transport (stdio JSONL).
- * Product generation uses the exact repository dependency by default.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -32,6 +31,7 @@ export type PiRpcOptions = {
   tools?: string;
   env?: NodeJS.ProcessEnv;
   commandTimeoutMs?: number;
+  now?: () => Date;
 };
 
 export type PiRpcLine = Record<string, unknown>;
@@ -539,7 +539,7 @@ export class PiRpcSession {
       return;
     }
     if (typeof data._receivedAt !== "string" || !data._receivedAt) {
-      data._receivedAt = new Date().toISOString();
+      data._receivedAt = (this.options.now?.() ?? new Date()).toISOString();
     }
     if (data.type === "response" && typeof data.id === "string") {
       const pending = this.pending.get(data.id);

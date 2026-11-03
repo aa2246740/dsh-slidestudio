@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as setTimeout$1 } from "node:timers/promises";
 import { apply as apply$1 } from "@open-slidestudio/dsh-slides-host";
-//#region ../scripts/lib/observability.mjs
+// ../scripts/lib/observability.mjs
 const PRIVATE_KEYS = /(?:authorization|cookie|token|secret|password|api.?key|prompt|brief|text|content|attachment|email|phone|path|project|session)/i;
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,80}$/;
 function scrub(value, depth = 0) {
@@ -135,14 +135,12 @@ function createObservability({ app, version = "development", sink = (line) => co
 		wrap
 	};
 }
-//#endregion
-//#region lib/types/logger.js
+// lib/types/logger.js
 const logger = createObservability({
 	app: "slidestudio-plugin",
 	version: "0.2.9"
 });
-//#endregion
-//#region lib/types/editor-sidecar.js
+// lib/types/editor-sidecar.js
 const HOP_HEADERS = /* @__PURE__ */ new Set([
 	"connection",
 	"keep-alive",
@@ -215,8 +213,7 @@ function proxyToSidecar(req, res, editorOrigin) {
 	});
 	req.pipe(proxy);
 }
-//#endregion
-//#region lib/types/data-directory.js
+// lib/types/data-directory.js
 /** Persist the workspace outside the versioned package. A linked checkout keeps
 * its existing projects in place; later registry installs reuse that location.
 */
@@ -241,8 +238,7 @@ function resolveDataDirectory(productRoot, home, override) {
 	}, null, 2)}\n`, { mode: 384 });
 	return root;
 }
-//#endregion
-//#region lib/types/sidecar-ready.js
+// lib/types/sidecar-ready.js
 /** Hold the first iframe request until the freshly spawned editor is listening. */
 async function waitForEditor(origin, timeoutMs = 15e3) {
 	const deadline = Date.now() + timeoutMs;
@@ -259,8 +255,7 @@ async function waitForEditor(origin, timeoutMs = 15e3) {
 	} while (Date.now() < deadline);
 	return false;
 }
-//#endregion
-//#region lib/types/slides-preset.js
+// lib/types/slides-preset.js
 /** The slide preset's director persona, kept verbatim with the standalone bundle. */
 const SLIDES_PERSONA_PREFIX = [
 	"You are the DSH SlideStudio slides director. Working directory is {{cwd}}.",
@@ -315,8 +310,7 @@ function registerSlidesPreset(ctx) {
 		}]
 	}));
 }
-//#endregion
-//#region lib/types/dsh-slidestudio.js
+// lib/types/dsh-slidestudio.js
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
 const applySlidesHostAny = apply$1;
 const name = "dsh-slidestudio";
@@ -330,16 +324,31 @@ const inject = [
 ];
 const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
 const SIDECAR_RESTART_COOLDOWN_MS = 2e3;
-function sidecarStillRunning(proc) {
-	return proc != null && proc.exitCode == null && proc.killed !== true;
+const SIDECAR_KILL_GRACE_MS = 200;
+/** `killed` only means a signal was delivered. A child that ignores SIGTERM is still alive. */
+function processAlive(proc) {
+	return proc != null && proc.exitCode == null && proc.signalCode == null;
+}
+function defaultSleep(ms, signal) {
+	if (signal?.aborted || ms <= 0) return Promise.resolve();
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			clearTimeout(timer);
+			resolve();
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }
 /** Restart the editor after an unexpected exit instead of latching the first failure. */
 function createEditorSupervisor(options) {
 	const cooldownMs = options.cooldownMs ?? SIDECAR_RESTART_COOLDOWN_MS;
+	const killGraceMs = options.killGraceMs ?? SIDECAR_KILL_GRACE_MS;
 	const now = options.now ?? (() => Date.now());
-	const sleep = options.sleep ?? ((ms) => new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	}));
+	const sleep = options.sleep ?? defaultSleep;
 	const start = options.start ?? startEditorSidecar;
 	const wait = options.wait ?? ((origin) => waitForEditor(origin));
 	let child;
@@ -349,6 +358,10 @@ function createEditorSupervisor(options) {
 	let cooldownUntil = 0;
 	let ticket = 0;
 	let launching;
+	let disposed = false;
+	let cooldownAbort;
+	const owned = /* @__PURE__ */ new Set();
+	const reaping = /* @__PURE__ */ new Map();
 	const resetPort = () => {
 		port = options.port;
 		origin = `http://127.0.0.1:${port}`;
@@ -356,44 +369,99 @@ function createEditorSupervisor(options) {
 	const armCooldown = () => {
 		cooldownUntil = now() + cooldownMs;
 	};
-	const forget = (proc) => {
+	const releaseCurrent = (proc) => {
 		if (child === proc) child = void 0;
 		pending = void 0;
 		resetPort();
 		armCooldown();
 	};
+	const exitedWithin = (proc, ms) => new Promise((resolve) => {
+		if (!processAlive(proc)) {
+			resolve(true);
+			return;
+		}
+		const timer = setTimeout(() => {
+			proc.off("exit", onExit);
+			resolve(!processAlive(proc));
+		}, ms);
+		const onExit = () => {
+			clearTimeout(timer);
+			resolve(true);
+		};
+		proc.once("exit", onExit);
+	});
+	const reap = (proc) => {
+		if (!proc) return Promise.resolve();
+		const existing = reaping.get(proc);
+		if (existing) return existing;
+		const job = (async () => {
+			if (!processAlive(proc)) return;
+			try {
+				proc.kill("SIGTERM");
+			} catch {}
+			if (processAlive(proc) && !await exitedWithin(proc, killGraceMs)) {
+				if (processAlive(proc)) try {
+					proc.kill("SIGKILL");
+				} catch {}
+				await exitedWithin(proc, killGraceMs);
+			}
+		})().finally(() => {
+			reaping.delete(proc);
+			owned.delete(proc);
+			if (child === proc) child = void 0;
+		});
+		reaping.set(proc, job);
+		return job;
+	};
 	const launch = () => {
+		if (disposed) return Promise.resolve(false);
 		resetPort();
 		const spawned = start(options.repoRoot, options.dataRoot, port);
+		if (disposed) {
+			if (spawned) {
+				owned.add(spawned);
+				reap(spawned);
+			}
+			return Promise.resolve(false);
+		}
 		if (!spawned) {
 			armCooldown();
 			pending = void 0;
 			return Promise.resolve(false);
 		}
 		child = spawned;
+		owned.add(spawned);
 		const mine = ++ticket;
+		let settled = false;
+		const finish = (ok) => {
+			if (settled) return;
+			settled = true;
+			resolveLaunch(ok);
+		};
+		let resolveLaunch = () => {};
 		const result = new Promise((resolve) => {
-			let settled = false;
-			spawned.on("exit", () => {
-				if (!settled) {
-					settled = true;
-					resolve(false);
-				}
-				if (mine === ticket) forget(spawned);
-			});
-			wait(origin).then((ok) => {
-				if (settled || mine !== ticket) return;
-				if (ok) {
-					settled = true;
-					resolve(true);
-					return;
-				}
-				settled = true;
-				ticket += 1;
-				if (sidecarStillRunning(spawned)) spawned.kill("SIGTERM");
-				forget(spawned);
-				resolve(false);
-			});
+			resolveLaunch = resolve;
+		});
+		spawned.on("exit", () => {
+			owned.delete(spawned);
+			if (!disposed && mine === ticket) releaseCurrent(spawned);
+			finish(false);
+		});
+		wait(origin).then(async (ok) => {
+			if (settled) return;
+			if (disposed || mine !== ticket) {
+				finish(false);
+				if (processAlive(spawned)) await reap(spawned);
+				return;
+			}
+			if (ok) {
+				finish(true);
+				return;
+			}
+			ticket += 1;
+			releaseCurrent(spawned);
+			await reap(spawned);
+			finish(false);
 		});
 		pending = result;
 		return result;
@@ -401,25 +469,36 @@ function createEditorSupervisor(options) {
 	return {
 		origin: () => origin,
 		ensure() {
-			if (sidecarStillRunning(child) && pending) return pending;
+			if (disposed) return Promise.resolve(false);
+			if (processAlive(child) && pending) return pending;
 			if (launching) return launching;
+			const epoch = ticket;
+			const controller = new AbortController();
+			cooldownAbort = controller;
 			launching = (async () => {
 				const delay = cooldownUntil - now();
-				if (delay > 0) await sleep(delay);
-				if (sidecarStillRunning(child) && pending) return pending;
+				if (delay > 0) await sleep(delay, controller.signal);
+				if (disposed || epoch !== ticket || controller.signal.aborted) return false;
+				if (processAlive(child) && pending) return pending;
 				return launch();
 			})().finally(() => {
+				if (cooldownAbort === controller) cooldownAbort = void 0;
 				launching = void 0;
 			});
 			return launching;
 		},
 		stop() {
+			disposed = true;
 			ticket += 1;
-			const current = child;
+			cooldownAbort?.abort();
+			cooldownAbort = void 0;
+			const procs = new Set(owned);
+			if (child) procs.add(child);
+			for (const proc of reaping.keys()) procs.add(proc);
 			child = void 0;
 			pending = void 0;
 			resetPort();
-			if (sidecarStillRunning(current)) current.kill("SIGTERM");
+			return Promise.all([...procs].map((proc) => reap(proc))).then(() => void 0);
 		}
 	};
 }
@@ -505,5 +584,4 @@ function apply(ctx) {
 	});
 	logger.log("info", "plugin_loaded");
 }
-//#endregion
 export { apply, createEditorSupervisor, inject, name };

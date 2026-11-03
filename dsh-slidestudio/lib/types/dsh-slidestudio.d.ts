@@ -21,7 +21,7 @@ type WaitSidecar = (origin: string) => Promise<boolean>;
 export type EditorSupervisor = {
     origin: () => string;
     ensure: () => Promise<boolean>;
-    stop: () => void;
+    stop: () => Promise<void>;
 };
 /** Restart the editor after an unexpected exit instead of latching the first failure. */
 export declare function createEditorSupervisor(options: {
@@ -29,8 +29,9 @@ export declare function createEditorSupervisor(options: {
     dataRoot: string;
     port: number;
     cooldownMs?: number;
+    killGraceMs?: number;
     now?: () => number;
-    sleep?: (ms: number) => Promise<void>;
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
     start?: StartSidecar;
     wait?: WaitSidecar;
 }): EditorSupervisor;

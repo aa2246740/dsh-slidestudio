@@ -164,7 +164,7 @@ describe("runtimeLayoutUsable", () => {
   it("accepts a consistent module+browser layout", () => {
     const dir = tmpdir("usable");
     fakeUsableRuntime(dir);
-    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs")), true);
+    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs"), {} as NodeJS.ProcessEnv), true);
   });
 
   it("rejects version mismatch between stamp and installed module", () => {
@@ -174,14 +174,15 @@ describe("runtimeLayoutUsable", () => {
       path.join(dir, "node_modules", "playwright", "package.json"),
       JSON.stringify({ name: "playwright", version: "1.60.0" }),
     );
-    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs")), false);
+    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs"), {} as NodeJS.ProcessEnv), false);
   });
 
   it("rejects when the browser executable is gone", () => {
     const dir = tmpdir("nobrowser");
     fakeUsableRuntime(dir);
     fs.rmSync(path.join(dir, "browsers"), { recursive: true, force: true });
-    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs")), false);
+    // Ambient PLAYWRIGHT_BROWSERS_PATH must not satisfy a fixture whose own browser was removed.
+    assert.equal(runtimeLayoutUsable(path.join(dir, "runtime.mjs"), {} as NodeJS.ProcessEnv), false);
   });
 
   it("finds the executable under PLAYWRIGHT_BROWSERS_PATH", () => {

@@ -23,16 +23,32 @@ export const inject = [
 ];
 const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
 const SIDECAR_RESTART_COOLDOWN_MS = 2_000;
-function sidecarStillRunning(proc) {
-    return proc != null && proc.exitCode == null && proc.killed !== true;
+const SIDECAR_KILL_GRACE_MS = 200;
+/** `killed` only means a signal was delivered. A child that ignores SIGTERM is still alive. */
+function processAlive(proc) {
+    return proc != null && proc.exitCode == null && proc.signalCode == null;
+}
+function defaultSleep(ms, signal) {
+    if (signal?.aborted || ms <= 0)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 /** Restart the editor after an unexpected exit instead of latching the first failure. */
 export function createEditorSupervisor(options) {
     const cooldownMs = options.cooldownMs ?? SIDECAR_RESTART_COOLDOWN_MS;
+    const killGraceMs = options.killGraceMs ?? SIDECAR_KILL_GRACE_MS;
     const now = options.now ?? (() => Date.now());
-    const sleep = options.sleep ?? ((ms) => new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    }));
+    const sleep = options.sleep ?? defaultSleep;
     const start = options.start ?? startEditorSidecar;
     const wait = options.wait ?? ((origin) => waitForEditor(origin));
     let child;
@@ -42,6 +58,10 @@ export function createEditorSupervisor(options) {
     let cooldownUntil = 0;
     let ticket = 0;
     let launching;
+    let disposed = false;
+    let cooldownAbort;
+    const owned = new Set();
+    const reaping = new Map();
     const resetPort = () => {
         port = options.port;
         origin = `http://127.0.0.1:${port}`;
@@ -49,48 +69,113 @@ export function createEditorSupervisor(options) {
     const armCooldown = () => {
         cooldownUntil = now() + cooldownMs;
     };
-    const forget = (proc) => {
+    const releaseCurrent = (proc) => {
         if (child === proc)
             child = undefined;
         pending = undefined;
         resetPort();
         armCooldown();
     };
+    const exitedWithin = (proc, ms) => new Promise((resolve) => {
+        if (!processAlive(proc)) {
+            resolve(true);
+            return;
+        }
+        const timer = setTimeout(() => {
+            proc.off("exit", onExit);
+            resolve(!processAlive(proc));
+        }, ms);
+        const onExit = () => {
+            clearTimeout(timer);
+            resolve(true);
+        };
+        proc.once("exit", onExit);
+    });
+    const reap = (proc) => {
+        if (!proc)
+            return Promise.resolve();
+        const existing = reaping.get(proc);
+        if (existing)
+            return existing;
+        const job = (async () => {
+            if (!processAlive(proc))
+                return;
+            try {
+                proc.kill("SIGTERM");
+            }
+            catch { /* already gone */ }
+            if (processAlive(proc) && !await exitedWithin(proc, killGraceMs)) {
+                if (processAlive(proc)) {
+                    try {
+                        proc.kill("SIGKILL");
+                    }
+                    catch { /* already gone */ }
+                }
+                await exitedWithin(proc, killGraceMs);
+            }
+        })().finally(() => {
+            reaping.delete(proc);
+            owned.delete(proc);
+            if (child === proc)
+                child = undefined;
+        });
+        reaping.set(proc, job);
+        return job;
+    };
     const launch = () => {
+        if (disposed)
+            return Promise.resolve(false);
         resetPort();
         const spawned = start(options.repoRoot, options.dataRoot, port);
+        if (disposed) {
+            if (spawned) {
+                owned.add(spawned);
+                void reap(spawned);
+            }
+            return Promise.resolve(false);
+        }
         if (!spawned) {
             armCooldown();
             pending = undefined;
             return Promise.resolve(false);
         }
         child = spawned;
+        owned.add(spawned);
         const mine = ++ticket;
+        let settled = false;
+        const finish = (ok) => {
+            if (settled)
+                return;
+            settled = true;
+            resolveLaunch(ok);
+        };
+        let resolveLaunch = () => { };
         const result = new Promise((resolve) => {
-            let settled = false;
-            spawned.on("exit", () => {
-                if (!settled) {
-                    settled = true;
-                    resolve(false);
-                }
-                if (mine === ticket)
-                    forget(spawned);
-            });
-            void wait(origin).then((ok) => {
-                if (settled || mine !== ticket)
-                    return;
-                if (ok) {
-                    settled = true;
-                    resolve(true);
-                    return;
-                }
-                settled = true;
-                ticket += 1;
-                if (sidecarStillRunning(spawned))
-                    spawned.kill("SIGTERM");
-                forget(spawned);
-                resolve(false);
-            });
+            resolveLaunch = resolve;
+        });
+        spawned.on("exit", () => {
+            owned.delete(spawned);
+            if (!disposed && mine === ticket)
+                releaseCurrent(spawned);
+            finish(false);
+        });
+        void wait(origin).then(async (ok) => {
+            if (settled)
+                return;
+            if (disposed || mine !== ticket) {
+                finish(false);
+                if (processAlive(spawned))
+                    await reap(spawned);
+                return;
+            }
+            if (ok) {
+                finish(true);
+                return;
+            }
+            ticket += 1;
+            releaseCurrent(spawned);
+            await reap(spawned);
+            finish(false);
         });
         pending = result;
         return result;
@@ -98,30 +183,45 @@ export function createEditorSupervisor(options) {
     return {
         origin: () => origin,
         ensure() {
-            if (sidecarStillRunning(child) && pending)
+            if (disposed)
+                return Promise.resolve(false);
+            if (processAlive(child) && pending)
                 return pending;
             if (launching)
                 return launching;
+            const epoch = ticket;
+            const controller = new AbortController();
+            cooldownAbort = controller;
             launching = (async () => {
                 const delay = cooldownUntil - now();
                 if (delay > 0)
-                    await sleep(delay);
-                if (sidecarStillRunning(child) && pending)
+                    await sleep(delay, controller.signal);
+                if (disposed || epoch !== ticket || controller.signal.aborted)
+                    return false;
+                if (processAlive(child) && pending)
                     return pending;
                 return launch();
             })().finally(() => {
+                if (cooldownAbort === controller)
+                    cooldownAbort = undefined;
                 launching = undefined;
             });
             return launching;
         },
         stop() {
+            disposed = true;
             ticket += 1;
-            const current = child;
+            cooldownAbort?.abort();
+            cooldownAbort = undefined;
+            const procs = new Set(owned);
+            if (child)
+                procs.add(child);
+            for (const proc of reaping.keys())
+                procs.add(proc);
             child = undefined;
             pending = undefined;
             resetPort();
-            if (sidecarStillRunning(current))
-                current.kill("SIGTERM");
+            return Promise.all([...procs].map((proc) => reap(proc))).then(() => undefined);
         },
     };
 }

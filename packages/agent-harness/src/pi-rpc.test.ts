@@ -503,12 +503,14 @@ rl.on("line", (line) => {
       "utf8",
     );
     fs.chmodSync(bin, 0o755);
+    let clock = Date.parse("2026-08-18T14:20:00.000Z");
     const session = new PiRpcSession({
       bin: process.execPath,
       prefixArgs: [bin],
       cwd: dir,
       skills: [],
       commandTimeoutMs: 5_000,
+      now: () => new Date(clock += 50),
     });
     await session.start();
     await session.getState();
