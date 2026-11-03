@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const pluginDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(pluginDir, "..");
@@ -40,6 +40,33 @@ const BUNDLED_NODE_MODULES = [
   ...RUNTIME_PACKAGES.map((p) => `@open-slidestudio/${p}`),
 ];
 
+const cleanRuntimeFile = src => !src.split(/[\\/]/).some(part =>
+  [".git", "node_modules", ".versions", "_agent", ".DS_Store"].includes(part));
+
+export const PUBLISHED_FILES = [
+  "lib",
+  "apps",
+  "packages",
+  "vendor",
+  "scripts/lib",
+  "config",
+  "LICENSE",
+  "fixtures",
+  "cordis.patch.yml",
+  "locale",
+  "README.md",
+];
+
+export function copyPackagedConfig(destinationRoot) {
+  const from = join(repoRoot, "config");
+  if (!existsSync(from)) throw new Error("missing runtime input: config");
+  cpSync(from, join(destinationRoot, "config"), {
+    recursive: true,
+    filter: (src) => cleanRuntimeFile(src),
+  });
+}
+
+async function main() {
 // The official local installer records the archive path as a file dependency.
 // Keep earlier archives: deleting them can break its next add/remove operation.
 // Only this run's temporary stage is removed below.
@@ -48,8 +75,6 @@ const stage = mkdtempSync(join(output, "stage-"));
 const pkg = join(stage, "package");
 mkdirSync(pkg, { recursive: true });
 
-const cleanRuntimeFile = src => !src.split(/[\\/]/).some(part =>
-  [".git", "node_modules", ".versions", "_agent", ".DS_Store"].includes(part));
 const copy = (rel, { filter } = {}) => {
   const from = join(repoRoot, rel);
   if (!existsSync(from)) throw new Error(`missing runtime input: ${rel}`);
@@ -72,6 +97,7 @@ copy("vendor/open-kimi-ppt/skill-1.2.0");
 copy("vendor/open-kimi-ppt/git-pre-wipe");
 // Use the separately managed pinned browser runtime; never copy a browser into the plugin.
 copy("scripts/lib");
+copyPackagedConfig(pkg);
 copy("LICENSE");
 copy("fixtures/okp-yu7-ppt");
 for (const rel of ["lib", "locale", "README.md"]) {
@@ -134,18 +160,7 @@ const published = {
   private: false,
   publishConfig: { access: "public", registry: "https://registry.npmjs.org/" },
   dependencies: bundledVersions,
-  files: [
-    "lib",
-    "apps",
-    "packages",
-    "vendor",
-    "scripts/lib",
-    "LICENSE",
-    "fixtures",
-    "cordis.patch.yml",
-    "locale",
-    "README.md",
-  ],
+  files: PUBLISHED_FILES,
   bundleDependencies: BUNDLED_NODE_MODULES,
   dsh: {
     ...(manifest.dsh ?? {}),
@@ -174,3 +189,8 @@ const verification = JSON.parse(execFileSync(process.execPath, [
   join(pluginDir, "scripts/verify-release.mjs"), join(output, packed.filename),
 ], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
 console.log(JSON.stringify({ file: join(output, packed.filename), version, verification }, null, 2));
+}
+
+const invokedDirectly = process.argv[1]
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (invokedDirectly) await main();

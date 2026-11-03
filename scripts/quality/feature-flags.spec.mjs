@@ -42,4 +42,16 @@ describe("feature flags", () => {
   it("env names are screaming snake of the flag id", () => {
     assert.equal(flagEnvName("image-generate"), "SLIDESTUDIO_FLAG_IMAGE_GENERATE");
   });
+
+  it("uses safe defaults when the flags file is missing", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "slidestudio-flags-missing-"));
+    scratch.push(dir);
+    const flags = loadFeatureFlags(dir, {});
+    assert.equal(flags.get("project_retention_days"), 0);
+    assert.equal(flags.get("image_generate"), true);
+    assert.equal(flags.defined("image_generate"), true);
+    assert.equal(flags.defined("not_a_flag"), false);
+    const overridden = loadFeatureFlags(dir, { SLIDESTUDIO_FLAG_IMAGE_GENERATE: "off" });
+    assert.equal(overridden.get("image_generate"), false);
+  });
 });

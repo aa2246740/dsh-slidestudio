@@ -1,12 +1,13 @@
 {
   "name": "dsh-slidestudio",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "DSH SlideStudio — AI presentations with editable PPTX export for DeepSeek Harness",
   "type": "module",
   "main": "lib/dsh-slidestudio.js",
   "types": "lib/types/dsh-slidestudio.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
+    "lint": "eslint --config ../eslint.config.mjs src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:client": "node --test scripts/test-settings.mjs scripts/test-data-directory.mjs scripts/test-sidecar-ready.mjs scripts/test-session-entry.mjs",
     "test": "vitest run --config ../vitest.config.mjs --project plugin",
@@ -71,8 +72,9 @@
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "eslint": "10.13.0",
     "tsdown": "^0.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "6.0.3"
   },
   "private": true,
   "repository": {

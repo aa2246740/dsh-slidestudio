@@ -12,8 +12,23 @@ export function flagEnvName(name) {
   return `SLIDESTUDIO_FLAG_${name.toUpperCase().replace(/-/g, "_")}`;
 }
 
+/** Matches config/feature-flags.json. Used only when that file was not packaged. */
+const SAFE_FLAG_DEFAULTS = {
+  project_retention_days: { default: 0 },
+  image_generate: { default: true },
+};
+
+function flagDefinitions(root) {
+  try {
+    return JSON.parse(readFileSync(path.join(root, "config/feature-flags.json"), "utf8")).flags ?? {};
+  } catch (error) {
+    if (/** @type {{ code?: string }} */ (error)?.code === "ENOENT") return SAFE_FLAG_DEFAULTS;
+    throw error;
+  }
+}
+
 export function loadFeatureFlags(root, env = process.env) {
-  const defs = JSON.parse(readFileSync(path.join(root, "config/feature-flags.json"), "utf8")).flags ?? {};
+  const defs = flagDefinitions(root);
   return {
     defined: (name) => name in defs,
     get(name) {

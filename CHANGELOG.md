@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9 — 2026-11-03
+
+- The published plugin includes `config/feature-flags.json`. If that file is missing, the editor uses the safe flag defaults instead of crashing on startup.
+- An editor sidecar that exits is restarted after a short cooldown, on its configured port, instead of answering 503 until the plugin is reloaded.
+
 ## 0.2.8 — 2026-10-20
 
 - Playwright onboarding in the Hub: a runtime panel shows checking, installing, ready, failed, or manual setup, with the failure reason, a retry button, `npm run setup:browser`, and the `SLIDESTUDIO_PLAYWRIGHT_RUNTIME` override. `/slides/health` reports the actual rendering runtime.

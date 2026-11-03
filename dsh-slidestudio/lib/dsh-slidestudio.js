@@ -1,57 +1,13 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { spawn } from "node:child_process";
 import { get, request } from "node:http";
-import { setTimeout } from "node:timers/promises";
-import { apply as apply$1 } from "@open-slidestudio/dsh-slides-host";
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-//#region lib/types/data-directory.js
-/** Persist the workspace outside the versioned package. A linked checkout keeps
-* its existing projects in place; later registry installs reuse that location.
-*/
-function resolveDataDirectory(productRoot, home, override) {
-	const stateRoot = join(home, "data", "dsh-slidestudio");
-	const pointer = join(stateRoot, "workspace.json");
-	let root = override?.trim() || void 0;
-	if (root && !isAbsolute(root)) throw new Error("SLIDESTUDIO_DATA_DIR must be an absolute path");
-	if (!root && existsSync(pointer)) {
-		const saved = JSON.parse(readFileSync(pointer, "utf8"));
-		if (typeof saved.root !== "string" || !isAbsolute(saved.root)) throw new Error(`Invalid SlideStudio workspace: ${pointer}`);
-		root = saved.root;
-		if (!existsSync(root)) throw new Error(`SlideStudio workspace is missing: ${root}. Restore it or set SLIDESTUDIO_DATA_DIR.`);
-	}
-	root ??= existsSync(join(productRoot, "output", "dsh-slices")) ? productRoot : join(stateRoot, "workspace");
-	root = resolve(root);
-	mkdirSync(root, { recursive: true });
-	mkdirSync(stateRoot, { recursive: true });
-	writeFileSync(pointer, `${JSON.stringify({
-		version: 1,
-		root
-	}, null, 2)}\n`, { mode: 384 });
-	return root;
-}
-//#endregion
-//#region lib/types/sidecar-ready.js
-/** Hold the first iframe request until the freshly spawned editor is listening. */
-async function waitForEditor(origin, timeoutMs = 15e3) {
-	const deadline = Date.now() + timeoutMs;
-	do {
-		if (await new Promise((resolve) => {
-			const request = get(`${origin}/api/health`, (response) => {
-				response.resume();
-				resolve(response.statusCode === 200);
-			});
-			request.setTimeout(Math.max(1, Math.min(500, deadline - Date.now())), () => request.destroy());
-			request.on("error", () => resolve(false));
-		})) return true;
-		if (Date.now() < deadline) await setTimeout(Math.min(100, deadline - Date.now()));
-	} while (Date.now() < deadline);
-	return false;
-}
-//#endregion
+import { setTimeout as setTimeout$1 } from "node:timers/promises";
+import { apply as apply$1 } from "@open-slidestudio/dsh-slides-host";
 //#region ../scripts/lib/observability.mjs
 const PRIVATE_KEYS = /(?:authorization|cookie|token|secret|password|api.?key|prompt|brief|text|content|attachment|email|phone|path|project|session)/i;
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,80}$/;
@@ -183,84 +139,22 @@ function createObservability({ app, version = "development", sink = (line) => co
 //#region lib/types/logger.js
 const logger = createObservability({
 	app: "slidestudio-plugin",
-	version: "0.2.8"
+	version: "0.2.9"
 });
 //#endregion
-//#region lib/types/dsh-slidestudio.js
-/** Cross-package Context shape; cordis is shared at runtime, types differ. */
-const applySlidesHostAny = apply$1;
-const name = "dsh-slidestudio";
-const inject = [
-	"webServer",
+//#region lib/types/editor-sidecar.js
+const HOP_HEADERS = /* @__PURE__ */ new Set([
 	"connection",
-	"tools",
-	"agents",
-	"attachments",
-	"llm"
-];
-const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
-/** The slide preset's director persona, kept verbatim with the standalone bundle. */
-const SLIDES_PERSONA_PREFIX = [
-	"You are the DSH SlideStudio slides director. Working directory is {{cwd}}.",
-	"Write user-facing progress and explanations in the language of the user brief.",
-	"Treat clear user instructions as authorization; do not ask for a second confirmation for a whole-deck edit or a reversible styling change.",
-	"When a missing preference materially affects the result, use ask_user_question with concise options or free text. Wait for its native answer and continue the same task. Never invent an answer or repeat a cancelled question.",
-	"Use only the product PPT tools and ask_user_question. Never write YAML except through write_page.",
-	"Pass every tool's declared fields directly at the top level; never wrap them in an arguments object.",
-	"write_page elements use elementId, elementType, bounds [x,y,w,h], and content.text.",
-	"Put fontSize, fontFamily, color, and align directly on content; content.style is",
-	"only a string theme reference such as $title, never an object. Put layoutRole on the element.",
-	"Charts are data.cols + data.rows and series[].type/encode.",
-	"After adopt, every write_page color MUST be official #RRGGBB or a",
-	"Theme.colors $token that already resolves to that pack PART B",
-	"【Color Palette】 hex. Prefer pack hexes. Host does not fill",
-	"Theme.colors; empty-create $primary is #2563EB and is not a pack",
-	"color. Never host navy #06223F. Never 澄光 memory chrome (#FDC356) on",
-	"another pack. Never omit shape fill expecting a default; omitted",
-	"fill is no paint and must not become white. Set an explicit pack fill.",
-	"Copy the adopted pack's official PART A/B craft: body titles are",
-	"assertion-sentence conclusions with a one-line scope subtitle; body",
-	"pages carry a chapter breadcrumb; source/footnote bottom-left and",
-	"page number bottom-right. Host will not paint YAML or Theme.colors.",
-	"Use inspect_capabilities and the tools actually supplied for this session.",
-	"Provider-hosted search or image tools are available only when explicitly supplied; do not infer them from a model name.",
-	"search_image and generate_image remain product tools that write media/ for PPTD.",
-	"If imageSearch or imageGenerate is on, BATCH search_image and generate_image for every photo-led page into media/ with unique ids BEFORE write_page. Do not stop after the cover image. Mark photo-led pages with the photo exhibit in write_todo; a photo page whose media image is missing or reused is refused. Do not reuse one src as another page's full-bleed.",
-	"Splitting a section into more pages is fine: update write_todo with the new pageIds before writing them; a page not in the todo is refused."
-].join("\n");
-/**
-* Registers the `slides` agent preset programmatically through the public
-* `agentPresets` service — the same definition the standalone bundle declares
-* in cordis.patch.yml, but scoped to this plugin so it never alters the
-* profile's default preset or other features.
-*/
-function registerSlidesPreset(ctx) {
-	const presets = ctx.get("agentPresets");
-	if (!presets?.register) {
-		logger.log("warn", "agent_preset_unavailable");
-		return;
-	}
-	ctx.effect(() => presets.register({
-		id: "slides",
-		name: "DSH SlideStudio slides",
-		description: "Product PPT tools only. No bash, filesystem, or editor tools.",
-		order: 10,
-		plugins: [{
-			id: "persona",
-			name: "@deepseek-ai/dsh-persona",
-			config: {
-				prefix: SLIDES_PERSONA_PREFIX,
-				complete: true,
-				includeRuntimeContext: false
-			}
-		}, {
-			id: "slides-ask-user",
-			name: "@deepseek-ai/dsh-tool-ask-user"
-		}]
-	}));
-}
+	"keep-alive",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"te",
+	"trailers",
+	"transfer-encoding",
+	"upgrade"
+]);
 /** Lazily spawns the editor sidecar on its own loopback port. */
-function startEditorSidecar(repoRoot, dataRoot) {
+function startEditorSidecar(repoRoot, dataRoot, port) {
 	const server = join(repoRoot, "apps/native-web/src/server.mjs");
 	if (!existsSync(server)) {
 		logger.log("warn", "editor_sidecar_missing");
@@ -270,7 +164,7 @@ function startEditorSidecar(repoRoot, dataRoot) {
 		cwd: repoRoot,
 		env: {
 			...process.env,
-			PORT: String(EDITOR_PORT),
+			PORT: String(port),
 			OPEN_SLIDESTUDIO_ROOT: repoRoot,
 			SLIDESTUDIO_DATA_DIR: dataRoot
 		},
@@ -291,16 +185,6 @@ function startEditorSidecar(repoRoot, dataRoot) {
 	});
 	return child;
 }
-const HOP_HEADERS = /* @__PURE__ */ new Set([
-	"connection",
-	"keep-alive",
-	"proxy-authenticate",
-	"proxy-authorization",
-	"te",
-	"trailers",
-	"transfer-encoding",
-	"upgrade"
-]);
 /** Pipes one request to the editor sidecar; mirrors the standalone shell's product proxy. */
 function proxyToSidecar(req, res, editorOrigin) {
 	const upstream = new URL(req.url ?? "/", editorOrigin);
@@ -331,6 +215,218 @@ function proxyToSidecar(req, res, editorOrigin) {
 	});
 	req.pipe(proxy);
 }
+//#endregion
+//#region lib/types/data-directory.js
+/** Persist the workspace outside the versioned package. A linked checkout keeps
+* its existing projects in place; later registry installs reuse that location.
+*/
+function resolveDataDirectory(productRoot, home, override) {
+	const stateRoot = join(home, "data", "dsh-slidestudio");
+	const pointer = join(stateRoot, "workspace.json");
+	let root = override?.trim() || void 0;
+	if (root && !isAbsolute(root)) throw new Error("SLIDESTUDIO_DATA_DIR must be an absolute path");
+	if (!root && existsSync(pointer)) {
+		const saved = JSON.parse(readFileSync(pointer, "utf8"));
+		if (typeof saved.root !== "string" || !isAbsolute(saved.root)) throw new Error(`Invalid SlideStudio workspace: ${pointer}`);
+		root = saved.root;
+		if (!existsSync(root)) throw new Error(`SlideStudio workspace is missing: ${root}. Restore it or set SLIDESTUDIO_DATA_DIR.`);
+	}
+	root ??= existsSync(join(productRoot, "output", "dsh-slices")) ? productRoot : join(stateRoot, "workspace");
+	root = resolve(root);
+	mkdirSync(root, { recursive: true });
+	mkdirSync(stateRoot, { recursive: true });
+	writeFileSync(pointer, `${JSON.stringify({
+		version: 1,
+		root
+	}, null, 2)}\n`, { mode: 384 });
+	return root;
+}
+//#endregion
+//#region lib/types/sidecar-ready.js
+/** Hold the first iframe request until the freshly spawned editor is listening. */
+async function waitForEditor(origin, timeoutMs = 15e3) {
+	const deadline = Date.now() + timeoutMs;
+	do {
+		if (await new Promise((resolve) => {
+			const request = get(`${origin}/api/health`, (response) => {
+				response.resume();
+				resolve(response.statusCode === 200);
+			});
+			request.setTimeout(Math.max(1, Math.min(500, deadline - Date.now())), () => request.destroy());
+			request.on("error", () => resolve(false));
+		})) return true;
+		if (Date.now() < deadline) await setTimeout$1(Math.min(100, deadline - Date.now()));
+	} while (Date.now() < deadline);
+	return false;
+}
+//#endregion
+//#region lib/types/slides-preset.js
+/** The slide preset's director persona, kept verbatim with the standalone bundle. */
+const SLIDES_PERSONA_PREFIX = [
+	"You are the DSH SlideStudio slides director. Working directory is {{cwd}}.",
+	"Write user-facing progress and explanations in the language of the user brief.",
+	"Treat clear user instructions as authorization; do not ask for a second confirmation for a whole-deck edit or a reversible styling change.",
+	"When a missing preference materially affects the result, use ask_user_question with concise options or free text. Wait for its native answer and continue the same task. Never invent an answer or repeat a cancelled question.",
+	"Use only the product PPT tools and ask_user_question. Never write YAML except through write_page.",
+	"Pass every tool's declared fields directly at the top level; never wrap them in an arguments object.",
+	"write_page elements use elementId, elementType, bounds [x,y,w,h], and content.text.",
+	"Put fontSize, fontFamily, color, and align directly on content; content.style is",
+	"only a string theme reference such as $title, never an object. Put layoutRole on the element.",
+	"Charts are data.cols + data.rows and series[].type/encode.",
+	"After adopt, every write_page color MUST be official #RRGGBB or a",
+	"Theme.colors $token that already resolves to that pack PART B",
+	"【Color Palette】 hex. Prefer pack hexes. Host does not fill",
+	"Theme.colors; empty-create $primary is #2563EB and is not a pack",
+	"color. Never host navy #06223F. Never 澄光 memory chrome (#FDC356) on",
+	"another pack. Never omit shape fill expecting a default; omitted",
+	"fill is no paint and must not become white. Set an explicit pack fill.",
+	"Copy the adopted pack's official PART A/B craft: body titles are",
+	"assertion-sentence conclusions with a one-line scope subtitle; body",
+	"pages carry a chapter breadcrumb; source/footnote bottom-left and",
+	"page number bottom-right. Host will not paint YAML or Theme.colors.",
+	"Use inspect_capabilities and the tools actually supplied for this session.",
+	"Provider-hosted search or image tools are available only when explicitly supplied; do not infer them from a model name.",
+	"search_image and generate_image remain product tools that write media/ for PPTD.",
+	"If imageSearch or imageGenerate is on, BATCH search_image and generate_image for every photo-led page into media/ with unique ids BEFORE write_page. Do not stop after the cover image. Mark photo-led pages with the photo exhibit in write_todo; a photo page whose media image is missing or reused is refused. Do not reuse one src as another page's full-bleed.",
+	"Splitting a section into more pages is fine: update write_todo with the new pageIds before writing them; a page not in the todo is refused."
+].join("\n");
+function registerSlidesPreset(ctx) {
+	const presets = ctx.get("agentPresets");
+	if (!presets?.register) {
+		logger.log("warn", "agent_preset_unavailable");
+		return;
+	}
+	ctx.effect(() => presets.register({
+		id: "slides",
+		name: "DSH SlideStudio slides",
+		description: "Product PPT tools only. No bash, filesystem, or editor tools.",
+		order: 10,
+		plugins: [{
+			id: "persona",
+			name: "@deepseek-ai/dsh-persona",
+			config: {
+				prefix: SLIDES_PERSONA_PREFIX,
+				complete: true,
+				includeRuntimeContext: false
+			}
+		}, {
+			id: "slides-ask-user",
+			name: "@deepseek-ai/dsh-tool-ask-user"
+		}]
+	}));
+}
+//#endregion
+//#region lib/types/dsh-slidestudio.js
+/** Cross-package Context shape; cordis is shared at runtime, types differ. */
+const applySlidesHostAny = apply$1;
+const name = "dsh-slidestudio";
+const inject = [
+	"webServer",
+	"connection",
+	"tools",
+	"agents",
+	"attachments",
+	"llm"
+];
+const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
+const SIDECAR_RESTART_COOLDOWN_MS = 2e3;
+function sidecarStillRunning(proc) {
+	return proc != null && proc.exitCode == null && proc.killed !== true;
+}
+/** Restart the editor after an unexpected exit instead of latching the first failure. */
+function createEditorSupervisor(options) {
+	const cooldownMs = options.cooldownMs ?? SIDECAR_RESTART_COOLDOWN_MS;
+	const now = options.now ?? (() => Date.now());
+	const sleep = options.sleep ?? ((ms) => new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	}));
+	const start = options.start ?? startEditorSidecar;
+	const wait = options.wait ?? ((origin) => waitForEditor(origin));
+	let child;
+	let port = options.port;
+	let origin = `http://127.0.0.1:${port}`;
+	let pending;
+	let cooldownUntil = 0;
+	let ticket = 0;
+	let launching;
+	const resetPort = () => {
+		port = options.port;
+		origin = `http://127.0.0.1:${port}`;
+	};
+	const armCooldown = () => {
+		cooldownUntil = now() + cooldownMs;
+	};
+	const forget = (proc) => {
+		if (child === proc) child = void 0;
+		pending = void 0;
+		resetPort();
+		armCooldown();
+	};
+	const launch = () => {
+		resetPort();
+		const spawned = start(options.repoRoot, options.dataRoot, port);
+		if (!spawned) {
+			armCooldown();
+			pending = void 0;
+			return Promise.resolve(false);
+		}
+		child = spawned;
+		const mine = ++ticket;
+		const result = new Promise((resolve) => {
+			let settled = false;
+			spawned.on("exit", () => {
+				if (!settled) {
+					settled = true;
+					resolve(false);
+				}
+				if (mine === ticket) forget(spawned);
+			});
+			wait(origin).then((ok) => {
+				if (settled || mine !== ticket) return;
+				if (ok) {
+					settled = true;
+					resolve(true);
+					return;
+				}
+				settled = true;
+				ticket += 1;
+				if (sidecarStillRunning(spawned)) spawned.kill("SIGTERM");
+				forget(spawned);
+				resolve(false);
+			});
+		});
+		pending = result;
+		return result;
+	};
+	return {
+		origin: () => origin,
+		ensure() {
+			if (sidecarStillRunning(child) && pending) return pending;
+			if (launching) return launching;
+			launching = (async () => {
+				const delay = cooldownUntil - now();
+				if (delay > 0) await sleep(delay);
+				if (sidecarStillRunning(child) && pending) return pending;
+				return launch();
+			})().finally(() => {
+				launching = void 0;
+			});
+			return launching;
+		},
+		stop() {
+			ticket += 1;
+			const current = child;
+			child = void 0;
+			pending = void 0;
+			resetPort();
+			if (sidecarStillRunning(current)) current.kill("SIGTERM");
+		}
+	};
+}
+function editorUnavailable(res) {
+	res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
+	res.end("SlideStudio editor is restarting. Retry this request.");
+}
 function apply(ctx) {
 	const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 	const checkoutRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -344,10 +440,13 @@ function apply(ctx) {
 		editorBaseUrl: editorOrigin,
 		personal: true
 	});
-	const sidecar = startEditorSidecar(repoRoot, dataRoot);
-	const editorReady = sidecar ? waitForEditor(editorOrigin) : Promise.resolve(false);
+	const supervisor = createEditorSupervisor({
+		repoRoot,
+		dataRoot,
+		port: EDITOR_PORT
+	});
 	ctx.effect(() => () => {
-		if (sidecar && !sidecar.killed) sidecar.kill("SIGTERM");
+		supervisor.stop();
 	});
 	ctx.effect(() => {
 		const connection = ctx.get("connection");
@@ -367,21 +466,20 @@ function apply(ctx) {
 					res.end("Access denied");
 					return;
 				}
-				if (!await editorReady) {
-					res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
-					res.end("SlideStudio editor could not start. Disable and enable the plugin to retry.");
+				if (!await supervisor.ensure()) {
+					editorUnavailable(res);
 					return;
 				}
 				if (req.destroyed || res.destroyed) return;
 				const url = new URL(req.url ?? "/", "http://127.0.0.1");
 				req.url = `${prefix === "/app" ? url.pathname.slice(prefix.length) || "/" : url.pathname}${url.search}`;
-				proxyToSidecar(req, res, editorOrigin);
+				proxyToSidecar(req, res, supervisor.origin());
 			}
 		}));
 		stops.push(ctx.webServer.register({
 			kind: "exact",
 			path: "/personal/slides/editor",
-			handler: (req, res) => {
+			handler: async (req, res) => {
 				logger.observe(req, res);
 				const rejection = connection?.requestRejection?.(req);
 				if (rejection !== void 0) {
@@ -389,8 +487,12 @@ function apply(ctx) {
 					res.end("Access denied");
 					return;
 				}
+				if (!await supervisor.ensure()) {
+					editorUnavailable(res);
+					return;
+				}
 				const project = new URL(req.url ?? "/personal/slides/editor", "http://127.0.0.1").searchParams.get("project") ?? "";
-				const target = new URL("/index.html", editorOrigin);
+				const target = new URL("/index.html", supervisor.origin());
 				target.searchParams.set("workspace", "1");
 				if (project) target.searchParams.set("project", project);
 				res.writeHead(302, { location: target.href });
@@ -404,4 +506,4 @@ function apply(ctx) {
 	logger.log("info", "plugin_loaded");
 }
 //#endregion
-export { apply, inject, name };
+export { apply, createEditorSupervisor, inject, name };
