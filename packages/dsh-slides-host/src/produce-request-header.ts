@@ -27,9 +27,7 @@ export const CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES = [
   PRODUCE_GENERATE_IMAGE_NAME,
 ] as const;
 
-const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(
-  CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES,
-);
+const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES);
 
 export const PRODUCE_WEB_SEARCH_DESCRIPTION =
   "Search the web for current information. Provide 1–4 queries in the required queries array. Use a one-item array for a single search. Returns facts and source URLs. First-class produce tool via xAI when inspect_capabilities.research.configured. Assistant prose is not a search.";
@@ -77,16 +75,19 @@ export function stripNativeWebForbid(text: string): string {
   for (const pattern of FORBID_SENTENCE_PATTERNS) {
     out = out.replace(pattern, "");
   }
-  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Drop leaked function-calling `web_search` so dsh-oauth hosted tools own the route. */
-export function stripProductWebSearchTools(tools: readonly ToolSchema[]): ToolSchema[] {
-  return tools.filter((tool) => tool.name !== PRODUCE_WEB_SEARCH_NAME);
+export function stripProductWebSearchTools(tools: readonly ToolSchema[] | undefined): ToolSchema[] {
+  return (tools ?? []).filter((tool) => tool.name !== PRODUCE_WEB_SEARCH_NAME);
 }
 
 export function filterUnavailableProduceTools(
-  tools: readonly ToolSchema[],
+  tools: readonly ToolSchema[] | undefined,
   allowed?: ReadonlySet<string>,
 ): ToolSchema[] {
   const withoutFunctionWebSearch = stripProductWebSearchTools(tools);
@@ -99,14 +100,19 @@ export function filterUnavailableProduceTools(
 }
 
 export function patchProduceAssembly<
-  T extends { sections: readonly ProducePromptSection[]; tools: readonly ToolSchema[] },
->(assembly: T, allowed?: ReadonlySet<string>): T {
+  T extends { sections: readonly ProducePromptSection[]; tools?: readonly ToolSchema[] },
+>(assembly: T, allowed?: ReadonlySet<string>): Omit<T, "tools"> & { tools: ToolSchema[] } {
   return {
     ...assembly,
-    sections: allowed?.has("ask_user_question") ? [
-      ...assembly.sections.filter(section => section.name !== "slides:conversation-interaction"),
-      { name: "slides:conversation-interaction", text: "与用户交互集中在对话中。用户已明确要求的修改直接执行，不重复确认。只有缺少影响结果的关键信息，或用户明确要求先选择时，调用 ask_user_question；不要用正文中的‘回复 A/B’或‘说开始改’代替问题卡。用户已授权‘选完就改’时，工具返回回答后在同一轮继续完成修改，不再要求用户发一条消息。取消或未回答不等于同意，不执行依赖该回答的修改。只讨论的轮次仍然只读。" },
-    ] : assembly.sections,
+    sections: allowed?.has("ask_user_question")
+      ? [
+          ...assembly.sections.filter((section) => section.name !== "slides:conversation-interaction"),
+          {
+            name: "slides:conversation-interaction",
+            text: "与用户交互集中在对话中。用户已明确要求的修改直接执行，不重复确认。只有缺少影响结果的关键信息，或用户明确要求先选择时，调用 ask_user_question；不要用正文中的‘回复 A/B’或‘说开始改’代替问题卡。用户已授权‘选完就改’时，工具返回回答后在同一轮继续完成修改，不再要求用户发一条消息。取消或未回答不等于同意，不执行依赖该回答的修改。只讨论的轮次仍然只读。",
+          },
+        ]
+      : assembly.sections,
     tools: filterUnavailableProduceTools(assembly.tools, allowed),
   };
 }
@@ -118,8 +124,7 @@ export function renderProduceSystem(assembly: ProduceAssembly): string {
     .join("\n\n");
 }
 
-export type ProduceRequestHeaderConfig = Pick<LlmCallConfig, "provider" | "model"> &
-  Partial<LlmCallConfig>;
+export type ProduceRequestHeaderConfig = Pick<LlmCallConfig, "provider" | "model"> & Partial<LlmCallConfig>;
 
 /**
  * Same JSON shape the agent loop appends as `request/header` (`canonicalHeader`).
