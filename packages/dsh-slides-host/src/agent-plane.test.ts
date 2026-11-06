@@ -118,8 +118,7 @@ async function harness() {
       { questions: QUESTIONS, agent: agent as never, signal } as AskUserQuestionRequest,
       () => Promise.resolve(NATIVE_ANSWER),
     ) as Promise<AskUserQuestionAnswer>;
-  const assemble = (agent: FakeAgent) =>
-    ctx.systemPrompt.assemble({ agent: agent as never, scope: agent as never });
+  const assemble = (agent: FakeAgent) => ctx.systemPrompt.assemble({ agent: agent as never, scope: agent as never });
   const execute = (agent: FakeAgent, name: string, args: Record<string, unknown> = {}) =>
     ctx.tools.execute({
       callId: ToolCallId(`t-${Math.random().toString(36).slice(2)}`),
@@ -173,12 +172,10 @@ describe("slides agent plane — legacy global wiring reproduces the leak", () =
         },
         { global: true, prepend: true },
       );
-      h.ctx.on(
-        "system-prompt/assemble",
-        async (_assembly: unknown, _context: unknown, next: () => Promise<never>) =>
-          patchProduceAssembly(await next()),
-        { global: true, prepend: true },
-      );
+      h.ctx.on("system-prompt/assemble", async (_assembly, _context, next) => patchProduceAssembly(await next()), {
+        global: true,
+        prepend: true,
+      });
 
       // A stale store binding is enough to claim ownership under the old code.
       h.store.openProject({
@@ -195,11 +192,17 @@ describe("slides agent plane — legacy global wiring reproduces the leak", () =
       const leaked = h.askQuestion(h.creator);
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(nativeAnsweredAt(h, h.creator.id), 0);
-      assert.equal(h.questions.list(h.creator.id).some((row) => row.status === "pending"), true);
+      assert.equal(
+        h.questions.list(h.creator.id).some((row) => row.status === "pending"),
+        true,
+      );
       leaked.catch(() => undefined);
 
       const assembly = await h.assemble(h.creator);
-      assert.equal(assembly.tools.some((tool) => tool.name === "web_search"), false);
+      assert.equal(
+        assembly.tools.some((tool) => tool.name === "web_search"),
+        false,
+      );
     } finally {
       await h.dispose();
     }
@@ -235,7 +238,10 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
       assert.equal(schemas.includes("bash"), true);
 
       const assembly = await h.assemble(h.creator);
-      assert.equal(assembly.tools.some((tool) => tool.name === "web_search"), true);
+      assert.equal(
+        assembly.tools.some((tool) => tool.name === "web_search"),
+        true,
+      );
       assert.equal(
         assembly.sections.every((section) => section.name !== "slides:conversation-interaction"),
         true,
@@ -273,7 +279,10 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
       assert.deepEqual(await ask, ANSWER_A);
 
       const assembly = await h.assemble(h.slidesA);
-      assert.equal(assembly.tools.some((tool) => tool.name === "web_search"), false);
+      assert.equal(
+        assembly.tools.some((tool) => tool.name === "web_search"),
+        false,
+      );
     } finally {
       await h.dispose();
     }
@@ -321,7 +330,10 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
         assert.match(String(error instanceof Error ? error.message : error), /abort/i);
         return true;
       });
-      assert.equal(h.questions.list(h.slidesA.id).every((row) => row.status !== "pending"), true);
+      assert.equal(
+        h.questions.list(h.slidesA.id).every((row) => row.status !== "pending"),
+        true,
+      );
     } finally {
       await h.dispose();
     }
@@ -386,18 +398,9 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
       const presets: AgentPresetProbe = {
         composedPreset: (ctx) => (ctx === h.scopeA.ctx ? "slides" : "standard"),
       };
-      assert.equal(
-        wireSlidesAgentPlaneForAgent({ ctx: h.scopeA.ctx }, h.deps, presets),
-        true,
-      );
-      assert.equal(
-        wireSlidesAgentPlaneForAgent({ ctx: h.scopeB.ctx }, h.deps, presets),
-        false,
-      );
-      assert.equal(
-        wireSlidesAgentPlaneForAgent({ ctx: h.creatorScope.ctx }, h.deps, presets),
-        false,
-      );
+      assert.equal(wireSlidesAgentPlaneForAgent({ ctx: h.scopeA.ctx }, h.deps, presets), true);
+      assert.equal(wireSlidesAgentPlaneForAgent({ ctx: h.scopeB.ctx }, h.deps, presets), false);
+      assert.equal(wireSlidesAgentPlaneForAgent({ ctx: h.creatorScope.ctx }, h.deps, presets), false);
 
       const schemasA = h.ctx.tools.schemas(h.slidesA as never).map((def) => def.name);
       assert.ok(schemasA.includes("open_project"));
@@ -415,18 +418,12 @@ describe("slides agent plane — scoped wiring owns only slides agents", () => {
     const standing = { current: "slides" };
     const presets: AgentPresetProbe = { composedPreset: () => standing.current };
     try {
-      assert.equal(
-        reconcileSlidesAgentPlane({ ctx: h.scopeA.ctx }, h.deps, presets),
-        true,
-      );
+      assert.equal(reconcileSlidesAgentPlane({ ctx: h.scopeA.ctx }, h.deps, presets), true);
       const opened = await h.execute(h.slidesA, "open_project", { title: "Deck A" });
       assert.equal(opened.isError, false);
 
       standing.current = "standard";
-      assert.equal(
-        reconcileSlidesAgentPlane({ ctx: h.scopeA.ctx }, h.deps, presets),
-        false,
-      );
+      assert.equal(reconcileSlidesAgentPlane({ ctx: h.scopeA.ctx }, h.deps, presets), false);
       const unknown = await h.execute(h.slidesA, "open_project", { title: "again" });
       assert.equal(unknown.isError, true);
       const bash = await h.execute(h.slidesA, "bash");
@@ -445,18 +442,38 @@ describe("Slides Work-entry guard", () => {
   it("rejects Work RPC prompts before the model; editor prompts and ordinary agents still run", async () => {
     const h = await harness();
     try {
-      h.store.openProject({ dshSessionId: h.slidesA.id, title: "guard", design: { kind: "self-directed" }, provider: { providerId: "pi-xai", modelId: "grok-4.6" } });
+      h.store.openProject({
+        dshSessionId: h.slidesA.id,
+        title: "guard",
+        design: { kind: "self-directed" },
+        provider: { providerId: "pi-xai", modelId: "grok-4.6" },
+      });
       wireSlidesAgentPlane(h.scopeA.ctx, h.deps);
       let modelSteps = 0;
       const step = (agent: FakeAgent, fromWork: boolean, includeOldWorkInput = false) => {
         // The API Session Controller adds this receipt to ordinary Work input.
-        const message = createUserMessage({ content: [{ type: "text", text: "edit the deck" }], source: { kind: "user", ...(fromWork ? { rpcId: "work-request" } : {}) } });
+        const message = createUserMessage({
+          content: [{ type: "text", text: "edit the deck" }],
+          source: { kind: "user", ...(fromWork ? { rpcId: "work-request" } : {}) },
+        });
         const messages = includeOldWorkInput
-          ? [createUserMessage({ content: [{ type: "text", text: "old Work input" }], source: { kind: "user", rpcId: "old-request" } }), message]
+          ? [
+              createUserMessage({
+                content: [{ type: "text", text: "old Work input" }],
+                source: { kind: "user", rpcId: "old-request" },
+              }),
+              message,
+            ]
           : [message];
-        return h.ctx.waterfall(scopeTarget(h.ctx, agent as never) as never,
-          "agent/pre-step", { agent, messages, turn: 1, step: 1, signal: new AbortController().signal } as never,
-          async () => { modelSteps++; return { kind: "enter" as const, messages: [message] }; });
+        return h.ctx.waterfall(
+          scopeTarget(h.ctx, agent as never) as never,
+          "agent/pre-step",
+          { agent, messages, turn: 1, step: 1, signal: new AbortController().signal } as never,
+          async () => {
+            modelSteps++;
+            return { kind: "enter" as const, messages: [message] };
+          },
+        );
       };
       await assert.rejects(step(h.slidesA, true), /请在演示文稿中继续/);
       assert.equal(modelSteps, 0);
@@ -464,6 +481,8 @@ describe("Slides Work-entry guard", () => {
       await step(h.slidesA, false, true);
       await step(h.creator, true);
       assert.equal(modelSteps, 3);
-    } finally { await h.dispose(); }
+    } finally {
+      await h.dispose();
+    }
   });
 });

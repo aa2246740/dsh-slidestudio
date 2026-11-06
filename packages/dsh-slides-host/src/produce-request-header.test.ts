@@ -71,6 +71,15 @@ function grokNativeAssembly(): ProduceAssembly {
 }
 
 describe("live produce request/header serialization", () => {
+  it("patches the prompt before DSH populates the tool list", () => {
+    const sections = [{ name: "deployment:persona", text: "Slide director." }];
+    for (const assembly of [{ sections }, { sections, tools: undefined }, { sections, tools: [] }]) {
+      const patched = patchProduceAssembly(assembly);
+      assert.deepEqual(patched.tools, []);
+      assert.deepEqual(patched.sections, sections);
+    }
+  });
+
   it("keeps dsh-oauth native-tools guidance and drops function-calling web_search", () => {
     const header = serializeProduceRequestHeader(grokNativeAssembly(), {
       provider: "pi-xai",
@@ -103,9 +112,18 @@ describe("live produce request/header serialization", () => {
 
   it("strips leaked function web_search without touching search_image", () => {
     const tools = stripProductWebSearchTools([OFFICIAL_WEB_SEARCH, SEARCH_IMAGE, GENERATE_IMAGE]);
-    assert.equal(tools.some((tool) => tool.name === "web_search"), false);
-    assert.equal(tools.some((tool) => tool.name === "search_image"), true);
-    assert.equal(tools.some((tool) => tool.name === "generate_image"), true);
+    assert.equal(
+      tools.some((tool) => tool.name === "web_search"),
+      false,
+    );
+    assert.equal(
+      tools.some((tool) => tool.name === "search_image"),
+      true,
+    );
+    assert.equal(
+      tools.some((tool) => tool.name === "generate_image"),
+      true,
+    );
   });
 
   it("leaves oauth native-tools guidance in patched sections", () => {
@@ -119,7 +137,10 @@ describe("live produce request/header serialization", () => {
       tools: [OFFICIAL_WEB_SEARCH, SEARCH_IMAGE],
     });
     assert.match(patched.sections[0]?.text ?? "", /Do not call web_search or web_fetch/);
-    assert.equal(patched.tools.some((tool) => tool.name === "web_search"), false);
+    assert.equal(
+      patched.tools.some((tool) => tool.name === "web_search"),
+      false,
+    );
   });
 });
 
@@ -127,8 +148,11 @@ it("adds native question guidance to existing sessions once without changing too
   const assembly = grokNativeAssembly();
   const allowed = new Set(["ask_user_question"]);
   const patched = patchProduceAssembly(patchProduceAssembly(assembly, allowed), allowed);
-  assert.equal(patched.sections.filter(section => section.name === "slides:conversation-interaction").length, 1);
+  assert.equal(patched.sections.filter((section) => section.name === "slides:conversation-interaction").length, 1);
   assert.match(renderProduceSystem(patched), /ask_user_question/);
-  assert.equal(patched.tools.some(tool => tool.name === "write_page"), false);
+  assert.equal(
+    patched.tools.some((tool) => tool.name === "write_page"),
+    false,
+  );
   assert.deepEqual(patchProduceAssembly(assembly).sections, assembly.sections);
 });
