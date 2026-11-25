@@ -1,30 +1,20 @@
-/**
- * Shared chart layout, scale, and text contract. The canvas SVG painters and
- * the native PPTX exporter both consume the helpers in this file so that a
- * chart's geometry, tick labels, number formatting, legend placement, and
- * font sizes are computed once instead of approximated twice.
- *
- * This module is served to the browser as `/runtime/chart-layout.js`; keep it
- * free of Node-only APIs and value-level imports from other modules (type-only
- * imports are erased at build time).
- */
+/** Shared chart layout for the canvas and the PPTX exporter. Served as `/runtime/chart-layout.js`; keep it free of Node-only APIs. */
 import type { ChartElement, ChartSeries } from "./types.js";
 
 export type Rect = Readonly<{ x: number; y: number; w: number; h: number }>;
 export type Point = Readonly<{ x: number; y: number }>;
 
 /** Palette shared by the canvas and the exporter. */
-export const CHART_PALETTE = [
-  "#2563EB",
-  "#F59E0B",
-  "#10B981",
-  "#EF4444",
-  "#8B5CF6",
-] as const;
+export const CHART_PALETTE = ["#2563EB", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6"] as const;
 
-/** Chart ink/grid on light vs dark chart surfaces. */
-export const CHART_INK = { light: "#626976", dark: "#CBD5E1" } as const;
-export const CHART_GRID = { light: "#E5E7EB", dark: "#475569" } as const;
+export {
+  CHART_GRID,
+  CHART_GRID_NEUTRAL,
+  CHART_INK,
+  CHART_INK_NEUTRAL,
+  chartChrome,
+  type ChartChrome,
+} from "./chart-chrome.js";
 
 /**
  * Chart text sizes in slide px (the same space `el.bounds` lives in). The
@@ -71,23 +61,14 @@ function seriesFill(series: ChartSeries | undefined): string | undefined {
  * fill, then the palette. `seriesCount` may exceed `series.length` when the
  * data table carries more value columns than declared series.
  */
-export function chartSwatch(
-  el: Pick<ChartElement, "colors" | "series">,
-  index: number,
-  seriesCount?: number,
-): string {
-  const dataSeriesCount = Math.max(
-    0,
-    ((el as ChartElement).data?.cols?.length ?? 1) - 1,
-  );
+export function chartSwatch(el: Pick<ChartElement, "colors" | "series">, index: number, seriesCount?: number): string {
+  const dataSeriesCount = Math.max(0, ((el as ChartElement).data?.cols?.length ?? 1) - 1);
   const effectiveCount = seriesCount ?? Math.max(el.series.length, dataSeriesCount);
   // Single-series: the canvas spreads `el.colors` across categories, so index
   // i addresses the i-th swatch; a missing explicit color falls back to the
   // colors[0] series color. Multi-series: index i addresses the i-th series.
   const explicit =
-    effectiveCount <= 1
-      ? (el.colors?.[index]?.trim() || el.colors?.[0]?.trim())
-      : el.colors?.[index]?.trim();
+    effectiveCount <= 1 ? el.colors?.[index]?.trim() || el.colors?.[0]?.trim() : el.colors?.[index]?.trim();
   if (explicit) return explicit;
   const direct = seriesFill(el.series[index]);
   if (direct) return direct;
@@ -134,13 +115,11 @@ function decimalsForStep(step: number): number {
 
 /**
  * Shared chart number format: thousands separators, `decimals` fraction
- * digits (explicit) or the minimal needed (omitted), optional +/− sign.
+ * digits (explicit) or the minimal needed (omitted). A negative value always
+ * keeps its minus sign (U+2212). `signed` also writes an explicit plus on a
+ * positive value, as waterfall deltas do.
  */
-export function formatChartValue(
-  value: number,
-  decimals?: number,
-  opts?: { signed?: boolean },
-): string {
+export function formatChartValue(value: number, decimals?: number, opts?: { signed?: boolean }): string {
   const v = Number(value) || 0;
   const absolute = Math.abs(v);
   const body =
@@ -152,8 +131,8 @@ export function formatChartValue(
           minimumFractionDigits: decimals,
           maximumFractionDigits: decimals,
         });
-  if (!opts?.signed || v === 0) return body;
-  return `${v > 0 ? "+" : "−"}${body}`;
+  if (v < 0) return `−${body}`;
+  return opts?.signed && v > 0 ? `+${body}` : body;
 }
 
 /** Excel number-format code matching formatChartValue (without sign flag). */
@@ -165,6 +144,24 @@ export function chartNumberFormatCode(decimals: number): string {
 /** `#,##0.00;-#,##0.00;;` hides zeros on both halves; used for combo labels. */
 export function chartZeroHiddenFormatCode(formatCode: string): string {
   return `${formatCode};-${formatCode};;`;
+}
+
+/**
+ * Whole-percent text of a percent-stacked share or tick. The canvas paints it on a percent axis
+ * and in segment labels; the exported "0%" axis format shows the same text.
+ */
+export function percentText(share: number): string {
+  return `${Math.round(share * 100)}%`;
+}
+
+/**
+ * The longest value-axis tick text a chart paints. A percent-stacked axis paints percentages, so
+ * its left reserve is sized from them, not from the number labels.
+ */
+export function widestTickText(scale: ChartScale, percent: boolean): string {
+  return scale.ticks
+    .map((tick) => (percent ? percentText(tick) : formatChartValue(tick, scale.tickDecimals)))
+    .reduce((best, label) => (label.length > best.length ? label : best), "0");
 }
 
 /* ------------------------------------------------------------------ */
@@ -202,10 +199,7 @@ function niceStep(roughStep: number): number {
  * `includeZero` is for bars/lines (the canvas draws a zero baseline);
  * floating-range charts (waterfall, scatter) pass `false`.
  */
-export function niceScale(
-  values: readonly number[],
-  opts?: { includeZero?: boolean; tickCount?: number },
-): ChartScale {
+export function niceScale(values: readonly number[], opts?: { includeZero?: boolean; tickCount?: number }): ChartScale {
   const tickCount = Math.max(2, Math.floor(opts?.tickCount ?? 5));
   const finite = values.filter((v) => Number.isFinite(v));
   if (!finite.length) {
@@ -254,10 +248,7 @@ export function niceScale(
  * Secondary axis of a combo chart: reuse the primary tick count so both
  * gridline rows align.
  */
-export function alignedSecondaryScale(
-  values: readonly number[],
-  primary: ChartScale,
-): ChartScale {
+export function alignedSecondaryScale(values: readonly number[], primary: ChartScale): ChartScale {
   return niceScale(values, {
     includeZero: true,
     tickCount: primary.ticks.length - 1,
@@ -287,9 +278,7 @@ const LEGEND_POSITION_ALIASES: Record<string, LegendPosition> = {
  * Resolve the PPTD `legend` field — `true`, `false`, `{show}`, `{position}`
  * or a mix — into a single show/position contract used by both renderers.
  */
-export function resolveChartLegend(
-  legend: ChartElement["legend"],
-): LegendSpec {
+export function resolveChartLegend(legend: ChartElement["legend"]): LegendSpec {
   if (legend === true) return { show: true, position: "right" };
   if (!legend || typeof legend !== "object") {
     return { show: false, position: "right" };
@@ -315,10 +304,7 @@ export function measureChartText(text: string, fontPx: number): number {
   let units = 0;
   for (const ch of Array.from(String(text))) {
     const cp = ch.codePointAt(0) ?? 0;
-    const wide =
-      cp >= 0x2e80 ||
-      (cp >= 0xff00 && cp <= 0xffef) ||
-      (cp >= 0x3000 && cp <= 0x303f);
+    const wide = cp >= 0x2e80 || (cp >= 0xff00 && cp <= 0xffef) || (cp >= 0x3000 && cp <= 0x303f);
     units += wide ? 1 : 0.56;
   }
   return units * fontPx * 1.1;
@@ -410,10 +396,7 @@ function legendRows(
  * the inner plot rect. Reserves are computed from actual label text so ticks,
  * legend and axis titles never overlap and stay inside the chart bounds.
  */
-export function chartLayout(
-  bounds: { w: number; h: number },
-  opts: ChartLayoutOptions,
-): ChartLayout {
+export function chartLayout(bounds: { w: number; h: number }, opts: ChartLayoutOptions): ChartLayout {
   const w = Math.max(40, bounds.w);
   const h = Math.max(40, bounds.h);
   let top = 10;
@@ -453,8 +436,7 @@ export function chartLayout(
     if (opts.legend.position === "bottom" || opts.legend.position === "top") {
       const laid = legendRows(items, Math.max(60, right - left - 8), fontPx);
       const areaH = laid.rows * (LEGEND_LINE_H + 2) + 4;
-      const y =
-        opts.legend.position === "bottom" ? bottom - areaH - 2 : top;
+      const y = opts.legend.position === "bottom" ? bottom - areaH - 2 : top;
       const area: Rect = {
         x: left + 4,
         y,
@@ -467,7 +449,12 @@ export function chartLayout(
         items: laid.positions.map((p, i) => ({
           name: items[i]!,
           swatch: { x: area.x + 4 + p.x, y: area.y + p.y + 2, w: LEGEND_SWATCH, h: LEGEND_SWATCH },
-          text: { x: area.x + 4 + p.x + LEGEND_SWATCH + 4, y: area.y + p.y, w: p.w + 4, h: LEGEND_LINE_H },
+          text: {
+            x: area.x + 4 + p.x + LEGEND_SWATCH + 4,
+            y: area.y + p.y,
+            w: p.w + 4,
+            h: LEGEND_LINE_H,
+          },
           textAnchor: { x: area.x + 4 + p.x + LEGEND_SWATCH + 4, y: area.y + p.y + fontPx },
         })),
       };
@@ -478,10 +465,7 @@ export function chartLayout(
       // either renderer so long names just widen the reserve (bounded).
       const itemWidths = items.map((name) => measureChartText(name, fontPx));
       const widestItem = Math.max(...itemWidths);
-      const colW = Math.min(
-        Math.max(56, right - left - 60),
-        LEGEND_SWATCH + 4 + widestItem + 12,
-      );
+      const colW = Math.min(Math.max(56, right - left - 60), LEGEND_SWATCH + 4 + widestItem + 12);
       const areaH = items.length * (LEGEND_LINE_H + 2) + 4;
       const x = opts.legend.position === "left" ? left + 4 : right - colW - 4;
       const y = Math.min(Math.max(top, top + (bottom - top - areaH) / 2), bottom - areaH);
@@ -519,10 +503,7 @@ export function chartLayout(
   const tickW = measureChartText(opts.widestTickLabel || "0", CHART_TEXT_PX.tick);
   left += tickW + 8;
   if (opts.hasSecondaryAxis) {
-    const secondaryW = measureChartText(
-      opts.widestSecondaryTickLabel || "0",
-      CHART_TEXT_PX.tick,
-    );
+    const secondaryW = measureChartText(opts.widestSecondaryTickLabel || "0", CHART_TEXT_PX.tick);
     right -= secondaryW + 8;
   }
 

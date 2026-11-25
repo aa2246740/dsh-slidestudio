@@ -4365,36 +4365,22 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
       return fs.createReadStream(full).pipe(res);
     }
 
-    if (req.method === "GET" && url.pathname === "/runtime/chart-semantics.js") {
-      const runtimeFile = path.join(
-        ROOT,
-        "packages/pptd-v2/dist/chart-semantics.js",
-      );
+    if (req.method === "GET" && url.pathname.startsWith("/runtime/")) {
+      const name = url.pathname.slice("/runtime/".length);
+      if (!new Set(["chart-semantics.js", "chart-layout.js", "chart-chrome.js", "chart-columns.js", "chart-waterfall.js"]).has(name)) {
+        res.writeHead(404);
+        return res.end("not found");
+      }
+      const runtimeFile = path.join(ROOT, "packages/pptd-v2/dist", name);
       if (!fs.existsSync(runtimeFile)) {
         return json(res, 503, {
-          error: "chart semantics runtime missing; run npm run build:native",
+          error: `${name} runtime missing; run npm run build:native`,
         });
       }
       res.writeHead(200, {
         "Content-Type": "text/javascript; charset=utf-8",
         "Cache-Control": "no-store",
-      });
-      return fs.createReadStream(runtimeFile).pipe(res);
-    }
-
-    if (req.method === "GET" && url.pathname === "/runtime/chart-layout.js") {
-      const runtimeFile = path.join(
-        ROOT,
-        "packages/pptd-v2/dist/chart-layout.js",
-      );
-      if (!fs.existsSync(runtimeFile)) {
-        return json(res, 503, {
-          error: "chart layout runtime missing; run npm run build:native",
-        });
-      }
-      res.writeHead(200, {
-        "Content-Type": "text/javascript; charset=utf-8",
-        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
       });
       return fs.createReadStream(runtimeFile).pipe(res);
     }

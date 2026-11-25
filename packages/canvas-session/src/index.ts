@@ -7,17 +7,12 @@ import path from "node:path";
 import {
   loadProject,
   saveProject,
-  fontCss,
   canonicalFillIssues,
   canonicalTextStylePatchIssues,
-  resolveTextStyle,
   parseRichText,
+  readableColor,
   serializeRichText,
   applyRangeStyle,
-  toRgbHex,
-  toCssColor,
-  elementFillPaint,
-  type RichTextRun,
   type RangeStylePatch,
   type Bounds,
   type Fill,
@@ -27,7 +22,6 @@ import {
   type ShapeElement,
   type ImageElement,
   type ChartElement,
-  type ChartSeries,
   type TableElement,
   type IconElement,
   type LineElement,
@@ -39,97 +33,37 @@ import {
   type SmartArtMeta,
   type SmartArtLayout,
   shapeDefaults,
-  shapePath,
-  shapeGeometry,
-  type AdjustHandle,
+  probeImageSize,
+  setOwnPageBackground,
+  type Page,
 } from "@open-slidestudio/pptd-v2";
+import { assertWritableColor, assertWritableFill, assertWritableThemeColor } from "./color-write.js";
+import { wholeTokenRange } from "./field-range.js";
+import { assertShadowValid } from "./shadow-model.js";
+import { connectorPairs, defaultSmartArtLabels, nodePositions } from "./smartart-geometry.js";
+import { applyShapeKind, assertShapeKind } from "./shape-model.js";
+import { insertedChartFill } from "./page-surface.js";
+import { assertControl, clampPageIndex, currentPage, type CanvasSession, type Selection } from "./session-model.js";
+import { pushUndo, undo, redo } from "./undo-stack.js";
+import { assertNoGraphicsOnLayout, assertPageSurface } from "./layout-surface.js";
 
-export type Selection =
-  | { kind: "none" }
-  | { kind: "page"; pageIndex: number }
-  | { kind: "element"; pageIndex: number; elementId: string }
-  | { kind: "multi"; pageIndex: number; elementIds: string[] };
-
-export type CanvasSession = {
-  project: PptdProject;
-  pageIndex: number;
-  selection: Selection;
-  /** Oracle-backed control ids that may be invoked (OOP-29/30). */
-  allowedControlIds: Set<string>;
-  /** JSON document + view snapshots for undo (max 50). */
-  undoStack: string[];
-  redoStack: string[];
-  /** S1 chrome — UI only, not PPTD. */
-  zoomPercent: number;
-  pageRailOpen: boolean;
-  notesOpen: boolean;
-  presenting: boolean;
-  /** In-memory copy buffer (Cmd+C / Cmd+V). Not persisted. */
-  clipboard: PptdElement[];
-};
-
-type CanvasSessionSnapshot = {
-  rootDir: string;
-  manifestPath: string;
-  presentation: PptdProject["presentation"];
-  pages: PptdProject["pages"];
-  pageIndex?: number;
-  selection?: Selection;
-};
-
-function cloneSession(session: CanvasSession): string {
-  const { project } = session;
-  return JSON.stringify({
-    rootDir: project.rootDir,
-    manifestPath: project.manifestPath,
-    presentation: project.presentation,
-    pages: project.pages,
-    pageIndex: session.pageIndex,
-    selection: session.selection,
-  });
-}
-
-function normalizedSelection(
-  pages: PptdProject["pages"],
-  pageIndex: number,
-  selection: Selection,
-): Selection {
-  if (selection.kind === "none") return selection;
-  if (selection.pageIndex !== pageIndex) return { kind: "none" };
-  const page = pages[pageIndex]?.page;
-  if (!page) return { kind: "none" };
-  if (selection.kind === "page") return selection;
-  if (selection.kind === "element") {
-    return page.elements.some((element) => element.elementId === selection.elementId)
-      ? selection
-      : { kind: "none" };
-  }
-  const ids = [...new Set(selection.elementIds)].filter((id) =>
-    page.elements.some((element) => element.elementId === id));
-  if (ids.length === 0) return { kind: "none" };
-  if (ids.length === 1) {
-    return { kind: "element", pageIndex, elementId: ids[0]! };
-  }
-  return { kind: "multi", pageIndex, elementIds: ids };
-}
-
-function restoreSession(session: CanvasSession, snap: string): void {
-  const data = JSON.parse(snap) as CanvasSessionSnapshot;
-  session.project.presentation = data.presentation;
-  session.project.pages = data.pages;
-  session.pageIndex = clampPageIndex(data.pageIndex, data.pages.length);
-  session.selection = normalizedSelection(
-    data.pages,
-    session.pageIndex,
-    data.selection ?? { kind: "none" },
-  );
-}
-
-function pushUndo(session: CanvasSession): void {
-  session.undoStack.push(cloneSession(session));
-  if (session.undoStack.length > 50) session.undoStack.shift();
-  session.redoStack = [];
-}
+export { currentPage, pageCount, type CanvasSession, type EditSurface, type Selection } from "./session-model.js";
+export { redo, undo, undoLayoutMark, type LayoutEditMark } from "./undo-stack.js";
+export {
+  applyPageLayout,
+  createLayout,
+  deleteLayout,
+  enterLayout,
+  enterMaster,
+  exitLayout,
+  insertPageNumber,
+  layoutPanel,
+  renameLayout,
+  selectLayoutSurface,
+  type LayoutPanel,
+  type LayoutTarget,
+} from "./layout-surface.js";
+export { renderAllPages, renderModel, type RenderElement } from "./render-model.js";
 
 export type OpenSessionOpts = {
   allowedControlIds?: string[];
@@ -139,15 +73,7 @@ export type OpenSessionOpts = {
   pageRailOpen?: boolean;
 };
 
-function clampPageIndex(index: number | undefined, count: number): number {
-  if (index == null || !Number.isInteger(index) || count <= 0) return 0;
-  return Math.max(0, Math.min(index, count - 1));
-}
-
-export function openSession(
-  source: string,
-  opts: OpenSessionOpts = {},
-): CanvasSession {
+export function openSession(source: string, opts: OpenSessionOpts = {}): CanvasSession {
   const project = loadProject(source);
   return {
     project,
@@ -161,46 +87,33 @@ export function openSession(
     notesOpen: false,
     clipboard: [],
     presenting: false,
+    surface: { kind: "page" },
   };
-}
-
-export function pageCount(session: CanvasSession): number {
-  return session.project.pages.length;
-}
-
-export function currentPage(session: CanvasSession) {
-  const loaded = session.project.pages[session.pageIndex];
-  if (!loaded) {
-    const count = session.project.pages.length;
-    throw new Error(
-      count === 0
-        ? "project has no pages — add a page first"
-        : `no page at index ${session.pageIndex} (project has ${count} pages)`,
-    );
-  }
-  return loaded.page;
 }
 
 export function goToPage(session: CanvasSession, index: number): void {
   if (!Number.isInteger(index) || index < 0 || index >= session.project.pages.length) {
     throw new Error(`page index out of range: ${index}`);
   }
+  // Leaving the layout surface: a page change always returns to page mode.
+  session.surface = { kind: "page" };
   session.pageIndex = index;
   session.selection = { kind: "none" };
 }
 
-export function selectElement(
-  session: CanvasSession,
-  elementId: string,
-  skipGroup = false,
-): PptdElement {
+/** A master or layout copy is drawn on the page but never picked there; it is edited in its layout. */
+const INHERITED_NOT_SELECTABLE = "版式和母版的元素只能在版式中修改，不能在页面上选中";
+
+export function selectElement(session: CanvasSession, elementId: string, skipGroup = false): PptdElement {
   const page = currentPage(session);
   const el = page.elements.find((e) => e.elementId === elementId);
   if (!el) throw new Error(`element not found: ${elementId}`);
+  if (el.inherited !== undefined) throw new Error(INHERITED_NOT_SELECTABLE);
   const gid = (el as { groupId?: string }).groupId;
   if (gid && !skipGroup) {
+    // A layout's group may be named like the page's; its copies are never part of the selection.
     const ids = page.elements
-      .filter((e) => (e as { groupId?: string }).groupId === gid)
+      .filter((e) => e.inherited === undefined && (e as { groupId?: string }).groupId === gid)
       .map((e) => e.elementId);
     if (ids.length > 1) {
       session.selection = { kind: "multi", pageIndex: session.pageIndex, elementIds: ids };
@@ -213,14 +126,6 @@ export function selectElement(
     elementId,
   };
   return el;
-}
-
-function assertControl(session: CanvasSession, controlId: string): void {
-  if (!session.allowedControlIds.has(controlId)) {
-    throw new Error(
-      `control not allowed (dead-button ban / missing oracle row): ${controlId}`,
-    );
-  }
 }
 
 function selectedElement(session: CanvasSession): PptdElement {
@@ -242,17 +147,18 @@ export function getSelectedElement(session: CanvasSession): PptdElement | null {
   return els.length === 1 ? els[0]! : null;
 }
 
+/** The selected elements every command works on. A master or layout copy is never one of them. */
 function selectedElements(session: CanvasSession): PptdElement[] {
   const sel = session.selection;
   const page = currentPage(session);
   if (sel.kind === "element" && sel.pageIndex === session.pageIndex) {
     const el = page.elements.find((e) => e.elementId === sel.elementId);
-    return el ? [el] : [];
+    return el && el.inherited === undefined ? [el] : [];
   }
   if (sel.kind === "multi" && sel.pageIndex === session.pageIndex) {
     return sel.elementIds
       .map((id) => page.elements.find((e) => e.elementId === id))
-      .filter((e): e is PptdElement => Boolean(e));
+      .filter((e): e is PptdElement => e !== undefined && e.inherited === undefined);
   }
   return [];
 }
@@ -261,11 +167,11 @@ export function clearSelection(session: CanvasSession): void {
   session.selection = { kind: "none" };
 }
 
-/** S3: Tab / Shift+Tab cycle through selectable elements (hidden skipped). */
+/** S3: Tab / Shift+Tab cycle through selectable elements (hidden and layout copies skipped). */
 export function tabSelect(session: CanvasSession, controlId: string, dir: 1 | -1): void {
   assertControl(session, controlId);
   const page = currentPage(session);
-  const pickable = page.elements.filter((e) => !(e as { hidden?: boolean }).hidden);
+  const pickable = page.elements.filter((e) => !(e as { hidden?: boolean }).hidden && e.inherited === undefined);
   if (!pickable.length) return;
   const cur = selectedElements(session)[0];
   if (!cur) {
@@ -285,14 +191,9 @@ export function tabSelect(session: CanvasSession, controlId: string, dir: 1 | -1
   selectElement(session, pickable[nextIdx]!.elementId, true);
 }
 
-export function selectMany(
-  session: CanvasSession,
-  elementIds: string[],
-): void {
+export function selectMany(session: CanvasSession, elementIds: string[]): void {
   const page = currentPage(session);
-  const ids = elementIds.filter((id) =>
-    page.elements.some((e) => e.elementId === id),
-  );
+  const ids = elementIds.filter((id) => page.elements.some((e) => e.elementId === id && e.inherited === undefined));
   if (ids.length === 0) {
     session.selection = { kind: "none" };
     return;
@@ -313,11 +214,7 @@ export function selectMany(
 }
 
 /** Text content edit — requires oracle control id, e.g. element.text.content.set */
-export function setSelectedText(
-  session: CanvasSession,
-  controlId: string,
-  text: string,
-): void {
+export function setSelectedText(session: CanvasSession, controlId: string, text: string): void {
   assertControl(session, controlId);
   if (typeof text !== "string") {
     throw new TypeError("text must be a string");
@@ -336,11 +233,7 @@ export function setSelectedText(
  * Replace selected text HTML after a parse→serialize whitelist sanitizer.
  * Control: element.text.content.set
  */
-export function setSelectedRichText(
-  session: CanvasSession,
-  controlId: string,
-  html: string,
-): void {
+export function setSelectedRichText(session: CanvasSession, controlId: string, html: string): void {
   assertControl(session, controlId);
   if (typeof html !== "string") {
     throw new TypeError("rich text must be a string");
@@ -349,8 +242,10 @@ export function setSelectedRichText(
   if (el.elementType !== "text") {
     throw new Error("selected element is not text");
   }
+  const runs = parseRichText(html);
+  for (const run of runs) assertWritableColor(run.color, session.project.presentation.theme);
   pushUndo(session);
-  (el as TextElement).content.text = serializeRichText(parseRichText(html));
+  (el as TextElement).content.text = serializeRichText(runs);
 }
 
 /**
@@ -369,20 +264,19 @@ export function setSelectedTextRangeStyle(
   if (el.elementType !== "text") {
     throw new Error("selected element is not text");
   }
+  assertWritableColor(patch.color, session.project.presentation.theme);
   pushUndo(session);
   const content = (el as TextElement).content;
-  const runs = applyRangeStyle(parseRichText(content.text ?? ""), start, end, patch);
-  content.text = serializeRichText(runs);
+  const stored = parseRichText(content.text ?? "");
+  const [from, to] =
+    content.field === "pageNumber" ? wholeTokenRange(stored.map((run) => run.text).join(""), start, end) : [start, end];
+  content.text = serializeRichText(applyRangeStyle(stored, from, to, patch));
 }
 
 export type { RangeStylePatch };
 
 /** Toggle bold on selected text — element.text.toolbar.bold.toggle */
-export function setSelectedBold(
-  session: CanvasSession,
-  controlId: string,
-  bold: boolean,
-): void {
+export function setSelectedBold(session: CanvasSession, controlId: string, bold: boolean): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "text") {
@@ -420,9 +314,7 @@ export function setSelectedBounds(
   // only a legacy heuristic: two selected elements may share a size, and then
   // the first match would move the group by the wrong delta.
   const anchor =
-    (anchorElementId
-      ? targets.find((e) => e.elementId === anchorElementId)
-      : undefined) ??
+    (anchorElementId ? targets.find((e) => e.elementId === anchorElementId) : undefined) ??
     targets.find((e) => e.bounds[2] === bounds[2] && e.bounds[3] === bounds[3]) ??
     targets[0]!;
   const dx = bounds[0] - anchor.bounds[0];
@@ -440,24 +332,6 @@ export function setSelectedBounds(
   retargetConnectors(session);
 }
 
-export function undo(session: CanvasSession, controlId = "chrome.history.undo"): boolean {
-  assertControl(session, controlId);
-  const snap = session.undoStack.pop();
-  if (!snap) return false;
-  session.redoStack.push(cloneSession(session));
-  restoreSession(session, snap);
-  return true;
-}
-
-export function redo(session: CanvasSession, controlId = "chrome.history.redo"): boolean {
-  assertControl(session, controlId);
-  const snap = session.redoStack.pop();
-  if (!snap) return false;
-  session.undoStack.push(cloneSession(session));
-  restoreSession(session, snap);
-  return true;
-}
-
 export function persist(session: CanvasSession): void {
   saveProject(session.project);
 }
@@ -466,54 +340,30 @@ const ZOOM_MIN = 25;
 const ZOOM_MAX = 200;
 const ZOOM_STEP = 10;
 
-export function setZoomPercent(
-  session: CanvasSession,
-  controlId: string,
-  percent: number,
-): void {
+export function setZoomPercent(session: CanvasSession, controlId: string, percent: number): void {
   assertControl(session, controlId);
   if (typeof percent !== "number" || !Number.isFinite(percent)) {
     throw new Error("zoom percent must be a finite number");
   }
-  session.zoomPercent = Math.min(
-    ZOOM_MAX,
-    Math.max(ZOOM_MIN, Math.round(percent)),
-  );
+  session.zoomPercent = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(percent)));
 }
 
-export function zoomBy(
-  session: CanvasSession,
-  controlId: string,
-  direction: "in" | "out",
-): void {
-  const next =
-    session.zoomPercent + (direction === "in" ? ZOOM_STEP : -ZOOM_STEP);
+export function zoomBy(session: CanvasSession, controlId: string, direction: "in" | "out"): void {
+  const next = session.zoomPercent + (direction === "in" ? ZOOM_STEP : -ZOOM_STEP);
   setZoomPercent(session, controlId, next);
 }
 
-export function setPageRailOpen(
-  session: CanvasSession,
-  controlId: string,
-  open: boolean,
-): void {
+export function setPageRailOpen(session: CanvasSession, controlId: string, open: boolean): void {
   assertControl(session, controlId);
   session.pageRailOpen = open;
 }
 
-export function setNotesOpen(
-  session: CanvasSession,
-  controlId: string,
-  open: boolean,
-): void {
+export function setNotesOpen(session: CanvasSession, controlId: string, open: boolean): void {
   assertControl(session, controlId);
   session.notesOpen = open;
 }
 
-export function setPresenting(
-  session: CanvasSession,
-  controlId: string,
-  on: boolean,
-): void {
+export function setPresenting(session: CanvasSession, controlId: string, on: boolean): void {
   assertControl(session, controlId);
   session.presenting = on;
 }
@@ -530,29 +380,25 @@ function uniquePagePath(session: CanvasSession, hint: string): string {
 
 export function addBlankPage(session: CanvasSession, controlId: string): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "新增页面");
+  const layoutId = session.project.pages[session.pageIndex]?.page.layoutId;
   pushUndo(session);
   const n = session.project.pages.length + 1;
-  const path = uniquePagePath(
-    session,
-    `pages/${String(n).padStart(2, "0")}_blank.page`,
-  );
-  const page = {
-    pageType: "content",
-    background: { type: "solid" as const, color: "#FFFFFF" },
-    elements: [],
-  };
+  const path = uniquePagePath(session, `pages/${String(n).padStart(2, "0")}_blank.page`);
+  // A page that uses a layout takes the layout's background, so it sets none of its own.
+  const page: Page =
+    layoutId === undefined
+      ? { pageType: "content", background: { type: "solid", color: "#FFFFFF" }, elements: [] }
+      : { pageType: "content", layoutId, elements: [] };
   session.project.pages.push({ path, page });
   session.project.presentation.pages.push(path);
   session.pageIndex = session.project.pages.length - 1;
   session.selection = { kind: "none" };
 }
 
-export function deletePage(
-  session: CanvasSession,
-  controlId: string,
-  index = session.pageIndex,
-): void {
+export function deletePage(session: CanvasSession, controlId: string, index = session.pageIndex): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "删除页面");
   if (session.project.pages.length <= 1) {
     throw new Error("cannot delete the last page");
   }
@@ -566,19 +412,13 @@ export function deletePage(
   session.selection = { kind: "none" };
 }
 
-export function duplicatePage(
-  session: CanvasSession,
-  controlId: string,
-  index = session.pageIndex,
-): void {
+export function duplicatePage(session: CanvasSession, controlId: string, index = session.pageIndex): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "复制页面");
   const src = session.project.pages[index];
   if (!src) throw new Error(`page index out of range: ${index}`);
   pushUndo(session);
-  const path = uniquePagePath(
-    session,
-    src.path.replace(/\.page$/i, "_copy.page"),
-  );
+  const path = uniquePagePath(session, src.path.replace(/\.page$/i, "_copy.page"));
   const page = JSON.parse(JSON.stringify(src.page)) as typeof src.page;
   session.project.pages.splice(index + 1, 0, { path, page });
   session.project.presentation.pages.splice(index + 1, 0, path);
@@ -586,13 +426,9 @@ export function duplicatePage(
   session.selection = { kind: "none" };
 }
 
-export function reorderPages(
-  session: CanvasSession,
-  controlId: string,
-  fromIndex: number,
-  toIndex: number,
-): void {
+export function reorderPages(session: CanvasSession, controlId: string, fromIndex: number, toIndex: number): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "调整页面顺序");
   const last = session.project.pages.length - 1;
   if (
     !Number.isInteger(fromIndex) ||
@@ -648,9 +484,7 @@ function cloneElementsForInsert(
       .filter((v): v is string => typeof v === "string" && v.length > 0),
   );
   const usedSmartArt = new Set(
-    page.elements
-      .map((e) => e.smartArt?.id)
-      .filter((v): v is string => typeof v === "string" && v.length > 0),
+    page.elements.map((e) => e.smartArt?.id).filter((v): v is string => typeof v === "string" && v.length > 0),
   );
   const idMap = new Map<string, string>();
   for (const el of elements) {
@@ -719,12 +553,7 @@ function clampRectToSlide(x: number, y: number, w: number, h: number, cw: number
  * Cascade insert origin: +24px per insert, wrap to a new column at the slide edge.
  * `n` is the 0-based insert slot (typically `page.elements.length`).
  */
-function cascadeInsert(
-  session: CanvasSession,
-  n: number,
-  boxW = 320,
-  boxH = 80,
-): Bounds {
+function cascadeInsert(session: CanvasSession, n: number, boxW = 320, boxH = 80): Bounds {
   const [cw, ch] = slideSize(session);
   const slot = Number.isInteger(n) && n > 0 ? n : 0;
   const maxX = Math.max(0, cw - boxW);
@@ -736,10 +565,7 @@ function cascadeInsert(
       Math.floor(Math.max(0, maxX - CASCADE_ORIGIN) / CASCADE_STEP) + 1,
     ),
   );
-  const maxCols = Math.max(
-    1,
-    Math.floor(Math.max(0, maxX - CASCADE_ORIGIN) / CASCADE_STEP) + 1,
-  );
+  const maxCols = Math.max(1, Math.floor(Math.max(0, maxX - CASCADE_ORIGIN) / CASCADE_STEP) + 1);
   const col = Math.floor(slot / rows) % maxCols;
   const row = slot % rows;
   const x = CASCADE_ORIGIN + col * CASCADE_STEP + row * CASCADE_STEP;
@@ -749,11 +575,7 @@ function cascadeInsert(
 
 export const MAX_INSERT_TEXT_LENGTH = 20_000;
 
-export function insertText(
-  session: CanvasSession,
-  controlId: string,
-  initialText: unknown = "双击编辑文本",
-): string {
+export function insertText(session: CanvasSession, controlId: string, initialText: unknown = "双击编辑文本"): string {
   assertControl(session, controlId);
   if (typeof initialText !== "string") {
     throw new TypeError("insert text must be a string");
@@ -775,11 +597,7 @@ export function insertText(
   return id;
 }
 
-export function insertShape(
-  session: CanvasSession,
-  controlId: string,
-  shapeName = "roundRect",
-): string {
+export function insertShape(session: CanvasSession, controlId: string, shapeName = "roundRect"): string {
   assertControl(session, controlId);
   pushUndo(session);
   const id = nextElementId(session, "shape");
@@ -802,11 +620,7 @@ const PLACEHOLDER_PNG = Buffer.from(
   "base64",
 );
 
-export function insertImage(
-  session: CanvasSession,
-  controlId: string,
-  src?: string,
-): string {
+export function insertImage(session: CanvasSession, controlId: string, src?: string): string {
   assertControl(session, controlId);
   pushUndo(session);
   let rel = src;
@@ -820,7 +634,7 @@ export function insertImage(
   const id = nextElementId(session, "image");
   let bounds: Bounds = [80, 80, 360, 200];
   if (src) {
-    const dim = readImageSize(path.join(session.project.rootDir, rel));
+    const dim = readPictureSize(path.join(session.project.rootDir, rel));
     if (dim) {
       const maxW = 640;
       const scale = Math.min(1, maxW / dim[0]);
@@ -839,74 +653,16 @@ export function insertImage(
   return id;
 }
 
-function readPngSize(file: string): [number, number] | null {
+/** Natural size of a picture file read from its bytes; undefined when it is missing or not an image. */
+function readPictureSize(file: string): [number, number] | undefined {
+  let bytes: Buffer;
   try {
-    const buf = fs.readFileSync(file);
-    if (buf.length < 24 || buf.toString("ascii", 1, 4) !== "PNG") return null;
-    return [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+    bytes = fs.readFileSync(file);
   } catch {
-    return null;
+    return undefined;
   }
-}
-
-function readJpegSize(file: string): [number, number] | null {
-  try {
-    const buf = fs.readFileSync(file);
-    if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
-    let off = 2;
-    while (off < buf.length - 9) {
-      if (buf[off] !== 0xff) {
-        off++;
-        continue;
-      }
-      const marker = buf[off + 1]!;
-      const len = buf.readUInt16BE(off + 2);
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return [buf.readUInt16BE(off + 7), buf.readUInt16BE(off + 5)];
-      }
-      off += 2 + len;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function readGifSize(file: string): [number, number] | null {
-  try {
-    const buf = fs.readFileSync(file);
-    if (buf.length < 10 || buf.toString("ascii", 0, 3) !== "GIF") return null;
-    return [buf.readUInt16LE(6), buf.readUInt16LE(8)];
-  } catch {
-    return null;
-  }
-}
-
-function readWebpSize(file: string): [number, number] | null {
-  try {
-    const buf = fs.readFileSync(file);
-    if (buf.length < 30 || buf.toString("ascii", 0, 4) !== "RIFF") return null;
-    const kind = buf.toString("ascii", 12, 16);
-    if (kind === "VP8X") {
-      return [1 + buf.readUIntLE(24, 3), 1 + buf.readUIntLE(27, 3)];
-    }
-    if (kind === "VP8L") {
-      const b = buf.readUInt32LE(21);
-      return [(b & 0x3fff) + 1, ((b >> 14) & 0x3fff) + 1];
-    }
-    return [buf.readUInt16LE(26), buf.readUInt16LE(28)];
-  } catch {
-    return null;
-  }
-}
-
-function readImageSize(file: string): [number, number] | null {
-  const lower = file.toLowerCase();
-  if (lower.endsWith(".png")) return readPngSize(file);
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return readJpegSize(file);
-  if (lower.endsWith(".gif")) return readGifSize(file);
-  if (lower.endsWith(".webp")) return readWebpSize(file);
-  return null;
+  const dim = probeImageSize(bytes);
+  return dim ? [dim.w, dim.h] : undefined;
 }
 
 function parseRebuildLabels(prompt?: string): { labels: string[]; ocr: boolean } {
@@ -970,19 +726,14 @@ function smartArtOf(el: PptdElement): SmartArtMeta | undefined {
   return (el as { smartArt?: SmartArtMeta }).smartArt;
 }
 
+/** Theme colours copied into new elements, read as #RRGGBB (an older theme may store six digits without #). */
 function themeAccent(session: CanvasSession): { accent: string; ink: string; paper: string } {
   const theme = session.project.presentation.theme?.colors ?? {};
   return {
-    accent: String(theme.primary || "#2563EB"),
-    ink: String(theme.text || "#111111"),
+    accent: readableColor(String(theme.primary || "#2563EB")),
+    ink: readableColor(String(theme.text || "#111111")),
     paper: "#FFFFFF",
   };
-}
-
-function defaultSmartArtLabels(layout: SmartArtLayout): string[] {
-  if (layout === "cycle") return ["发现", "验证", "迭代", "发布"];
-  if (layout === "hierarchy") return ["目标", "路径 A", "路径 B", "路径 C"];
-  return ["输入", "处理", "输出"];
 }
 
 function smartArtNodes(
@@ -1003,45 +754,6 @@ function smartArtNodes(
     })
     .filter((x): x is { node: ShapeElement; label: TextElement; index: number } => Boolean(x))
     .sort((a, b) => a.index - b.index);
-}
-
-function nodePositions(layout: SmartArtLayout, count: number, origin: [number, number]): Bounds[] {
-  const [ox, oy] = origin;
-  const w = 168;
-  const h = 72;
-  if (layout === "cycle") {
-    const cx = ox + 220;
-    const cy = oy + 160;
-    const r = 150;
-    return Array.from({ length: count }, (_, i) => {
-      const a = (Math.PI * 2 * i) / count - Math.PI / 2;
-      return [cx + Math.cos(a) * r - w / 2, cy + Math.sin(a) * r - h / 2, w, h] as Bounds;
-    });
-  }
-  if (layout === "hierarchy") {
-    const out: Bounds[] = [[ox + 180, oy, w, h]];
-    const child = Math.max(1, count - 1);
-    const gap = 28;
-    const total = child * w + Math.max(0, child - 1) * gap;
-    const start = ox + 220 - total / 2;
-    for (let i = 0; i < child; i++) {
-      out.push([start + i * (w + gap), oy + 140, w, h]);
-    }
-    return out.slice(0, count);
-  }
-  const gap = 56;
-  return Array.from({ length: count }, (_, i) => [ox + i * (w + gap), oy, w, h] as Bounds);
-}
-
-function connectorPairs(layout: SmartArtLayout, count: number): [number, number][] {
-  if (count < 2) return [];
-  if (layout === "cycle") {
-    return Array.from({ length: count }, (_, i) => [i, (i + 1) % count] as [number, number]);
-  }
-  if (layout === "hierarchy") {
-    return Array.from({ length: count - 1 }, (_, i) => [0, i + 1] as [number, number]);
-  }
-  return Array.from({ length: count - 1 }, (_, i) => [i, i + 1] as [number, number]);
 }
 
 function makeSmartArtNode(
@@ -1091,9 +803,7 @@ function relayoutSmartArt(session: CanvasSession, id: string, layout?: SmartArtL
     : [Math.min(...pairs.map((p) => p.node.bounds[0])), Math.min(...pairs.map((p) => p.node.bounds[1]))];
   const boxes = nodePositions(currentLayout, pairs.length, anchor);
   const { accent } = themeAccent(session);
-  page.elements = page.elements.filter(
-    (e) => !(smartArtOf(e)?.id === id && smartArtOf(e)?.role === "connector"),
-  );
+  page.elements = page.elements.filter((e) => !(smartArtOf(e)?.id === id && smartArtOf(e)?.role === "connector"));
   pairs.forEach((p, i) => {
     const wasPinned = Boolean(p.node.smartArt?.pinned);
     const box = wasPinned ? p.node.bounds : boxes[i]!;
@@ -1162,8 +872,8 @@ export function rebuildSelectedImage(
   const page = currentPage(session);
   const [x, y, w, h] = img.bounds;
   const theme = session.project.presentation.theme?.colors ?? {};
-  const accent = theme.primary || "#2563EB";
-  const ink = theme.text || "#111111";
+  const accent = readableColor(theme.primary || "#2563EB");
+  const ink = readableColor(theme.text || "#111111");
   const { labels, ocr } = parseRebuildLabels(prompt);
   const created: string[] = [];
 
@@ -1260,19 +970,13 @@ export const MAX_INSERT_TABLE_SIZE = 6;
 function assertInsertTableSize(value: number, label: "rows" | "columns"): void {
   if (!Number.isInteger(value)) throw new Error(`insert table ${label} must be an integer`);
   if (value < MIN_INSERT_TABLE_SIZE || value > MAX_INSERT_TABLE_SIZE) {
-    throw new Error(
-      `insert table ${label} must be between ${MIN_INSERT_TABLE_SIZE} and ${MAX_INSERT_TABLE_SIZE}`,
-    );
+    throw new Error(`insert table ${label} must be between ${MIN_INSERT_TABLE_SIZE} and ${MAX_INSERT_TABLE_SIZE}`);
   }
 }
 
-export function insertTable(
-  session: CanvasSession,
-  controlId: string,
-  rows = 2,
-  columns = 2,
-): string {
+export function insertTable(session: CanvasSession, controlId: string, rows = 2, columns = 2): string {
   assertControl(session, controlId);
+  assertNoGraphicsOnLayout(session);
   // Validate the complete request before adding an undo snapshot or changing
   // selection/project state. The insert is one atomic canvas mutation.
   assertInsertTableSize(rows, "rows");
@@ -1281,13 +985,15 @@ export function insertTable(
   const id = nextElementId(session, "table");
   const headerFill: Fill = { type: "solid", color: "#F3F4F6" };
   const tableRows: TableElement["rows"] = Array.from({ length: rows }, (_, rowIndex) =>
-    Array.from({ length: columns }, (_, columnIndex) => rowIndex === 0
-      ? {
-          text: `列 ${String.fromCharCode("A".charCodeAt(0) + columnIndex)}`,
-          bold: true,
-          fill: { ...headerFill },
-        }
-      : { text: "—" }),
+    Array.from({ length: columns }, (_, columnIndex) =>
+      rowIndex === 0
+        ? {
+            text: `列 ${String.fromCharCode("A".charCodeAt(0) + columnIndex)}`,
+            bold: true,
+            fill: { ...headerFill },
+          }
+        : { text: "—" },
+    ),
   );
   const el: TableElement = {
     elementId: id,
@@ -1301,36 +1007,16 @@ export function insertTable(
   return id;
 }
 
-function copiedSolidFill(fill: unknown): Fill | undefined {
-  if (!fill || typeof fill !== "object") return undefined;
-  if (!("type" in fill) || fill.type !== "solid") return undefined;
-  if (!("color" in fill) || typeof fill.color !== "string") return undefined;
-  return { type: "solid", color: fill.color };
-}
-
-function insertedChartBackground(session: CanvasSession): Fill {
-  const page = currentPage(session);
-  const [slideWidth, slideHeight] = session.project.presentation.size;
-  const backdrop = page.elements.find((element) => {
-    if (element.elementType !== "shape") return false;
-    const [x, y, width, height] = element.bounds;
-    return x <= 0 && y <= 0 && width >= slideWidth && height >= slideHeight;
-  });
-  const backdropFill = backdrop && "fill" in backdrop
-    ? copiedSolidFill(backdrop.fill)
-    : undefined;
-  return backdropFill ?? copiedSolidFill(page.background) ?? { type: "solid", color: "#FFFFFF" };
-}
-
 export function insertChart(session: CanvasSession, controlId: string): string {
   assertControl(session, controlId);
+  assertNoGraphicsOnLayout(session);
   pushUndo(session);
   const id = nextElementId(session, "chart");
   const el: ChartElement = {
     elementId: id,
     elementType: "chart",
     bounds: [80, 140, 640, 280],
-    background: insertedChartBackground(session),
+    background: insertedChartFill(currentPage(session), session.project.presentation.size),
     title: "示例数据",
     data: {
       cols: ["类目", "数值"],
@@ -1366,11 +1052,7 @@ export function insertLine(session: CanvasSession, controlId: string): string {
   return id;
 }
 
-export function insertIcon(
-  session: CanvasSession,
-  controlId: string,
-  iconName = "fas:star",
-): string {
+export function insertIcon(session: CanvasSession, controlId: string, iconName = "fas:star"): string {
   assertControl(session, controlId);
   pushUndo(session);
   const id = nextElementId(session, "icon");
@@ -1394,6 +1076,7 @@ export function insertSmartArt(
   labels?: string[],
 ): string {
   assertControl(session, controlId);
+  assertNoGraphicsOnLayout(session);
   pushUndo(session);
   const id = `sa${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
   const texts = (labels?.length ? labels : defaultSmartArtLabels(layout)).slice(0, 8);
@@ -1422,9 +1105,7 @@ export function insertSmartArt(
   const anchor: [number, number] = [ox, oy];
   const afterBoxes = nodePositions(layout, texts.length, anchor);
   const pairs = smartArtNodes(page, id);
-  page.elements = page.elements.filter(
-    (e) => !(smartArtOf(e)?.id === id && smartArtOf(e)?.role === "connector"),
-  );
+  page.elements = page.elements.filter((e) => !(smartArtOf(e)?.id === id && smartArtOf(e)?.role === "connector"));
   pairs.forEach((p, i) => {
     const box = afterBoxes[i]!;
     p.node.bounds = box;
@@ -1506,11 +1187,7 @@ export function deleteSmartArtNode(session: CanvasSession, controlId: string): v
   };
 }
 
-export function setSmartArtLayout(
-  session: CanvasSession,
-  controlId: string,
-  layout: SmartArtLayout,
-): void {
+export function setSmartArtLayout(session: CanvasSession, controlId: string, layout: SmartArtLayout): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   const meta = smartArtOf(el);
@@ -1528,11 +1205,7 @@ function assertUnlocked(els: PptdElement[]): void {
   }
 }
 
-export function setSelectedLocked(
-  session: CanvasSession,
-  controlId: string,
-  locked: boolean,
-): void {
+export function setSelectedLocked(session: CanvasSession, controlId: string, locked: boolean): void {
   assertControl(session, controlId);
   const els = selectedElements(session);
   if (!els.length) throw new Error("no element selected");
@@ -1540,11 +1213,7 @@ export function setSelectedLocked(
   for (const el of els) (el as { locked?: boolean }).locked = locked;
 }
 
-export function setSelectedHidden(
-  session: CanvasSession,
-  controlId: string,
-  hidden: boolean,
-): void {
+export function setSelectedHidden(session: CanvasSession, controlId: string, hidden: boolean): void {
   assertControl(session, controlId);
   const els = selectedElements(session);
   if (!els.length) throw new Error("no element selected");
@@ -1552,15 +1221,15 @@ export function setSelectedHidden(
   for (const el of els) (el as { hidden?: boolean }).hidden = hidden;
 }
 
-export function setSelectedShadow(
-  session: CanvasSession,
-  controlId: string,
-  shadow: ElementShadow | null,
-): void {
+export function setSelectedShadow(session: CanvasSession, controlId: string, shadow: ElementShadow | null): void {
   assertControl(session, controlId);
   const els = selectedElements(session);
   if (!els.length) throw new Error("no element selected");
   assertUnlocked(els);
+  if (shadow) {
+    assertShadowValid(shadow);
+    assertWritableColor(shadow.color, session.project.presentation.theme);
+  }
   pushUndo(session);
   for (const el of els) {
     if (shadow) (el as { shadow?: ElementShadow }).shadow = { ...shadow };
@@ -1591,7 +1260,7 @@ export function ungroupSelected(session: CanvasSession, controlId: string): void
   pushUndo(session);
   const ids = new Set(els.map((e) => (e as { groupId?: string }).groupId).filter(Boolean));
   for (const el of currentPage(session).elements) {
-    if (ids.has((el as { groupId?: string }).groupId)) {
+    if (el.inherited === undefined && ids.has((el as { groupId?: string }).groupId)) {
       delete (el as { groupId?: string }).groupId;
     }
   }
@@ -1637,7 +1306,10 @@ export function duplicateSelected(session: CanvasSession, controlId: string): vo
       if (mapped) page.animations.push({ ...anim, elementId: mapped });
     }
   }
-  selectMany(session, copies.map((c) => c.elementId));
+  selectMany(
+    session,
+    copies.map((c) => c.elementId),
+  );
 }
 
 export function copySelected(session: CanvasSession): number {
@@ -1649,6 +1321,7 @@ export function copySelected(session: CanvasSession): number {
 export function pasteClipboard(session: CanvasSession, controlId: string): void {
   assertControl(session, controlId);
   if (!session.clipboard.length) throw new Error("clipboard empty");
+  assertNoGraphicsOnLayout(session, session.clipboard);
   pushUndo(session);
   const page = currentPage(session);
   const { copies, idMap } = cloneElementsForInsert(page, session.clipboard);
@@ -1659,7 +1332,10 @@ export function pasteClipboard(session: CanvasSession, controlId: string): void 
       if (mapped) page.animations.push({ ...anim, elementId: mapped });
     }
   }
-  selectMany(session, copies.map((c) => c.elementId));
+  selectMany(
+    session,
+    copies.map((c) => c.elementId),
+  );
 }
 
 export function arrangeSelected(
@@ -1734,11 +1410,7 @@ export function alignSelected(
   }
 }
 
-export function distributeSelected(
-  session: CanvasSession,
-  controlId: string,
-  axis: "h" | "v",
-): void {
+export function distributeSelected(session: CanvasSession, controlId: string, axis: "h" | "v"): void {
   assertControl(session, controlId);
   const els = [...selectedElements(session)];
   if (els.length < 3) throw new Error("distribute needs 3+ elements");
@@ -1771,11 +1443,7 @@ export function distributeSelected(
   }
 }
 
-export function flipSelected(
-  session: CanvasSession,
-  controlId: string,
-  axis: "h" | "v",
-): void {
+export function flipSelected(session: CanvasSession, controlId: string, axis: "h" | "v"): void {
   assertControl(session, controlId);
   const els = selectedElements(session);
   if (!els.length) throw new Error("no element selected");
@@ -1788,11 +1456,7 @@ export function flipSelected(
   }
 }
 
-export function setSelectedRotation(
-  session: CanvasSession,
-  controlId: string,
-  degrees: number,
-): void {
+export function setSelectedRotation(session: CanvasSession, controlId: string, degrees: number): void {
   assertControl(session, controlId);
   if (typeof degrees !== "number" || !Number.isFinite(degrees)) {
     throw new Error("rotation degrees must be a finite number");
@@ -1804,11 +1468,7 @@ export function setSelectedRotation(
   for (const el of els) el.rotation = ((degrees % 360) + 360) % 360;
 }
 
-export function setSelectedOpacity(
-  session: CanvasSession,
-  controlId: string,
-  opacity: number,
-): void {
+export function setSelectedOpacity(session: CanvasSession, controlId: string, opacity: number): void {
   assertControl(session, controlId);
   if (typeof opacity !== "number" || !Number.isFinite(opacity)) {
     throw new Error("opacity must be a finite number");
@@ -1847,17 +1507,15 @@ function assertSafeTextHref(href: unknown): void {
   }
 }
 
-export function setSelectedTextStyle(
-  session: CanvasSession,
-  controlId: string,
-  patch: TextStylePatch,
-): void {
+export function setSelectedTextStyle(session: CanvasSession, controlId: string, patch: TextStylePatch): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "text") throw new Error("selected element is not text");
   if (Object.prototype.hasOwnProperty.call(patch, "href")) assertSafeTextHref(patch.href);
   const issues = canonicalTextStylePatchIssues(patch);
   if (issues.length) throw new Error(`invalid text style patch: ${issues.join("; ")}`);
+  assertWritableColor(patch.color, session.project.presentation.theme);
+  assertWritableColor(patch.backgroundColor, session.project.presentation.theme);
   pushUndo(session);
   const content = (el as TextElement).content as Record<string, unknown>;
   for (const [key, value] of Object.entries(patch)) {
@@ -1866,44 +1524,29 @@ export function setSelectedTextStyle(
   }
 }
 
-export function setSelectedFill(
-  session: CanvasSession,
-  controlId: string,
-  colorOrFill: string | Fill,
-): void {
+export function setSelectedFill(session: CanvasSession, controlId: string, colorOrFill: string | Fill): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
-  const fill: Fill =
-    typeof colorOrFill === "string"
-      ? { type: "solid", color: colorOrFill }
-      : colorOrFill;
+  const fill: Fill = typeof colorOrFill === "string" ? { type: "solid", color: colorOrFill } : colorOrFill;
   const fillIssues = canonicalFillIssues(fill);
   if (fillIssues.length) throw new Error(`invalid fill: ${fillIssues.join("; ")}`);
+  assertWritableFill(fill, session.project.presentation.theme);
   pushUndo(session);
   if (el.elementType === "shape") (el as ShapeElement).fill = fill;
   else if (el.elementType === "icon") (el as IconElement).fill = fill;
   else throw new Error("selected element has no fill");
 }
 
-export function setSelectedShapeName(
-  session: CanvasSession,
-  controlId: string,
-  shapeName: string,
-): void {
+export function setSelectedShapeName(session: CanvasSession, controlId: string, shapeName: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "shape") throw new Error("selected element is not shape");
+  assertShapeKind(el as ShapeElement, shapeName);
   pushUndo(session);
-  (el as ShapeElement).shapeName = shapeName;
-  const defs = shapeDefaults(shapeName);
-  if (defs.length) (el as ShapeElement).adjustments = defs;
+  applyShapeKind(el as ShapeElement, shapeName);
 }
 
-export function setSelectedAdjustments(
-  session: CanvasSession,
-  controlId: string,
-  adjustments: number[],
-): void {
+export function setSelectedAdjustments(session: CanvasSession, controlId: string, adjustments: number[]): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "shape") throw new Error("selected element is not shape");
@@ -1921,16 +1564,13 @@ export function setSelectedBorder(
   if (el.elementType !== "shape" && el.elementType !== "line") {
     throw new Error("selected element has no border");
   }
+  assertWritableColor(border.color, session.project.presentation.theme);
   pushUndo(session);
   const cur = (el as ShapeElement | LineElement).border ?? {};
   (el as ShapeElement | LineElement).border = { ...cur, ...border };
 }
 
-export function setImageSrc(
-  session: CanvasSession,
-  controlId: string,
-  src: string,
-): void {
+export function setImageSrc(session: CanvasSession, controlId: string, src: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "image") throw new Error("selected element is not image");
@@ -1938,11 +1578,7 @@ export function setImageSrc(
   (el as ImageElement).src = src;
 }
 
-export function setIconName(
-  session: CanvasSession,
-  controlId: string,
-  iconName: string,
-): void {
+export function setIconName(session: CanvasSession, controlId: string, iconName: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "icon") throw new Error("selected element is not icon");
@@ -1962,11 +1598,7 @@ export function setLineArrow(
   (el as LineElement).arrow = arrow;
 }
 
-export function setImageCrop(
-  session: CanvasSession,
-  controlId: string,
-  crop: ImageCrop,
-): void {
+export function setImageCrop(session: CanvasSession, controlId: string, crop: ImageCrop): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "image") throw new Error("selected element is not image");
@@ -1974,11 +1606,7 @@ export function setImageCrop(
   (el as ImageElement).crop = crop;
 }
 
-export function setImageCropShape(
-  session: CanvasSession,
-  controlId: string,
-  cropShape: ShapeDef | undefined,
-): void {
+export function setImageCropShape(session: CanvasSession, controlId: string, cropShape: ShapeDef | undefined): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "image") throw new Error("selected element is not image");
@@ -1986,11 +1614,7 @@ export function setImageCropShape(
   (el as ImageElement).cropShape = cropShape;
 }
 
-export function setLineCurve(
-  session: CanvasSession,
-  controlId: string,
-  curve: "sharp" | "round" | "smooth",
-): void {
+export function setLineCurve(session: CanvasSession, controlId: string, curve: "sharp" | "round" | "smooth"): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "line") throw new Error("selected element is not line");
@@ -1999,11 +1623,7 @@ export function setLineCurve(
 }
 
 /** AC-07: SmartArt edge label (frame 14 italic captions). */
-export function setLineLabel(
-  session: CanvasSession,
-  controlId: string,
-  label: string | null,
-): void {
+export function setLineLabel(session: CanvasSession, controlId: string, label: string | null): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "line") throw new Error("selected element is not line");
@@ -2012,11 +1632,7 @@ export function setLineLabel(
   else delete (el as LineElement).label;
 }
 
-export function setLinePoints(
-  session: CanvasSession,
-  controlId: string,
-  points: string,
-): void {
+export function setLinePoints(session: CanvasSession, controlId: string, points: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "line") throw new Error("selected element is not line");
@@ -2024,11 +1640,7 @@ export function setLinePoints(
   (el as LineElement).points = points;
 }
 
-export function setImageFit(
-  session: CanvasSession,
-  controlId: string,
-  mode: "fill" | "contain" | "cover",
-): void {
+export function setImageFit(session: CanvasSession, controlId: string, mode: "fill" | "contain" | "cover"): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "image") throw new Error("selected element is not image");
@@ -2115,11 +1727,7 @@ export function addTableCol(session: CanvasSession, controlId: string, after = -
   }
 }
 
-export function deleteTableRow(
-  session: CanvasSession,
-  controlId: string,
-  row = -1,
-): void {
+export function deleteTableRow(session: CanvasSession, controlId: string, row = -1): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "table") throw new Error("selected element is not table");
@@ -2155,11 +1763,7 @@ export function deleteTableRow(
   }
 }
 
-export function deleteTableCol(
-  session: CanvasSession,
-  controlId: string,
-  col = -1,
-): void {
+export function deleteTableCol(session: CanvasSession, controlId: string, col = -1): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "table") throw new Error("selected element is not table");
@@ -2224,11 +1828,10 @@ export function mergeTableCells(
       if (rowSpan === 1 && colSpan === 1) continue;
       const existingBottom = row + rowSpan - 1;
       const existingRight = col + colSpan - 1;
-      const intersects = Math.max(top, row) <= Math.min(bottom, existingBottom)
-        && Math.max(left, col) <= Math.min(right, existingRight);
+      const intersects =
+        Math.max(top, row) <= Math.min(bottom, existingBottom) && Math.max(left, col) <= Math.min(right, existingRight);
       if (!intersects) continue;
-      const fullyContained = row >= top && col >= left
-        && existingBottom <= bottom && existingRight <= right;
+      const fullyContained = row >= top && col >= left && existingBottom <= bottom && existingRight <= right;
       if (!fullyContained) {
         throw new Error(`merge range partially overlaps merged cell ${row},${col}`);
       }
@@ -2258,15 +1861,12 @@ export function setTableCellFill(
   if (el.elementType !== "table") throw new Error("selected element is not table");
   const cell = (el as TableElement).rows[row]?.[col];
   if (!cell) throw new Error(`no cell ${row},${col}`);
+  assertWritableColor(color, session.project.presentation.theme);
   pushUndo(session);
   cell.fill = { type: "solid", color };
 }
 
-export function setChartData(
-  session: CanvasSession,
-  controlId: string,
-  data: ChartElement["data"],
-): void {
+export function setChartData(session: CanvasSession, controlId: string, data: ChartElement["data"]): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2274,11 +1874,7 @@ export function setChartData(
   (el as ChartElement).data = data;
 }
 
-export function setChartType(
-  session: CanvasSession,
-  controlId: string,
-  type: string,
-): void {
+export function setChartType(session: CanvasSession, controlId: string, type: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2288,11 +1884,7 @@ export function setChartType(
   else chart.series[0].type = type;
 }
 
-export function setChartTitle(
-  session: CanvasSession,
-  controlId: string,
-  title: string,
-): void {
+export function setChartTitle(session: CanvasSession, controlId: string, title: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2300,11 +1892,7 @@ export function setChartTitle(
   (el as ChartElement).title = title;
 }
 
-export function setChartLegend(
-  session: CanvasSession,
-  controlId: string,
-  legend: boolean,
-): void {
+export function setChartLegend(session: CanvasSession, controlId: string, legend: boolean): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2312,17 +1900,10 @@ export function setChartLegend(
   const current = (el as ChartElement).legend;
   // Preserve an authored legend position: only flip `show`.
   (el as ChartElement).legend =
-    current && typeof current === "object"
-      ? { ...(current as Record<string, unknown>), show: legend }
-      : legend;
+    current && typeof current === "object" ? { ...(current as Record<string, unknown>), show: legend } : legend;
 }
 
-export function setChartSeriesFill(
-  session: CanvasSession,
-  controlId: string,
-  index: number,
-  color: string,
-): void {
+export function setChartSeriesFill(session: CanvasSession, controlId: string, index: number, color: string): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2333,11 +1914,10 @@ export function setChartSeriesFill(
   if (!Number.isInteger(index) || index < 0 || index >= count) {
     throw new Error(`chart series index out of range: ${index} (have ${count})`);
   }
+  assertWritableColor(color, session.project.presentation.theme);
   pushUndo(session);
   if (pie) {
-    const colors = chart.colors
-      ? [...chart.colors]
-      : Array.from({ length: count }, () => "#2563EB");
+    const colors = chart.colors ? [...chart.colors] : Array.from({ length: count }, () => "#2563EB");
     while (colors.length < count) colors.push("#2563EB");
     colors[index] = color;
     chart.colors = colors;
@@ -2346,11 +1926,7 @@ export function setChartSeriesFill(
   chart.series[index]!.fill = color;
 }
 
-export function setChartLabels(
-  session: CanvasSession,
-  controlId: string,
-  labels: boolean,
-): void {
+export function setChartLabels(session: CanvasSession, controlId: string, labels: boolean): void {
   assertControl(session, controlId);
   const el = mutableElement(session);
   if (el.elementType !== "chart") throw new Error("selected element is not chart");
@@ -2371,61 +1947,43 @@ export function setChartAxis(
   chart.axis = { ...(chart.axis ?? {}), ...axis };
 }
 
-export function setPageBackground(
-  session: CanvasSession,
-  controlId: string,
-  colorOrFill: string | Fill,
-): void {
+export function setPageBackground(session: CanvasSession, controlId: string, colorOrFill: string | Fill): void {
   assertControl(session, controlId);
+  const fill: Fill = typeof colorOrFill === "string" ? { type: "solid", color: colorOrFill } : colorOrFill;
+  assertWritableFill(fill, session.project.presentation.theme);
   pushUndo(session);
-  currentPage(session).background =
-    typeof colorOrFill === "string"
-      ? { type: "solid", color: colorOrFill }
-      : colorOrFill;
+  // A page's background becomes its own, so a later layout refresh does not overwrite it.
+  if (session.surface.kind === "page") setOwnPageBackground(currentPage(session), fill);
+  else currentPage(session).background = fill;
 }
 
-export function setThemeColor(
-  session: CanvasSession,
-  controlId: string,
-  key: string,
-  color: string,
-): void {
+export function setThemeColor(session: CanvasSession, controlId: string, key: string, color: string): void {
   assertControl(session, controlId);
   const token = key.replace(/^\$/, "").trim();
   if (!token) throw new Error("theme color key required");
+  assertWritableThemeColor(token, color);
   pushUndo(session);
   const theme = session.project.presentation.theme ?? (session.project.presentation.theme = {});
   theme.colors = { ...(theme.colors ?? {}), [token]: color };
 }
 
-export function setPageNotes(
-  session: CanvasSession,
-  controlId: string,
-  notes: string,
-): void {
+export function setPageNotes(session: CanvasSession, controlId: string, notes: string): void {
   setPageNotesAt(session, controlId, session.pageIndex, notes);
 }
 
-export function setPageNotesAt(
-  session: CanvasSession,
-  controlId: string,
-  pageIndex: number,
-  notes: string,
-): void {
+export function setPageNotesAt(session: CanvasSession, controlId: string, pageIndex: number, notes: string): void {
   assertControl(session, controlId);
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= session.project.pages.length) {
     throw new Error(`page index out of range: ${pageIndex}`);
   }
+  assertPageSurface(session, "编辑备注");
   pushUndo(session);
   session.project.pages[pageIndex]!.page.notes = notes;
 }
 
-export function setElementAnimation(
-  session: CanvasSession,
-  controlId: string,
-  kind: string,
-): void {
+export function setElementAnimation(session: CanvasSession, controlId: string, kind: string): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "设置动画");
   const el = mutableElement(session);
   pushUndo(session);
   const page = currentPage(session);
@@ -2445,12 +2003,9 @@ export function setElementAnimation(
   page.animations = next;
 }
 
-export function setPageAnimations(
-  session: CanvasSession,
-  controlId: string,
-  animations: Animation[],
-): void {
+export function setPageAnimations(session: CanvasSession, controlId: string, animations: Animation[]): void {
   assertControl(session, controlId);
+  assertPageSurface(session, "设置动画");
   pushUndo(session);
   currentPage(session).animations = animations;
 }
@@ -2518,7 +2073,11 @@ export function applyNaturalRefine(
       page.background = { type: "solid", color: hex };
       applied.push(`background:${name}`);
     }
-    if (!text.includes("背景") && (text.includes("字") || text.includes("文字") || text.includes("标题")) && text.includes(name)) {
+    if (
+      !text.includes("背景") &&
+      (text.includes("字") || text.includes("文字") || text.includes("标题")) &&
+      text.includes(name)
+    ) {
       const rec = largestText(session);
       if (rec) {
         rec.content.color = hex;
@@ -2590,305 +2149,4 @@ export function applyNaturalRefine(
   }
   if (applied.length === 0) throw new Error("refine did not match a page edit");
   return { applied };
-}
-
-function fillCss(
-  fill: Fill | undefined,
-  theme: PptdProject["presentation"]["theme"],
-  elementType = "shape",
-): string | undefined {
-  const loose = fill as unknown as {
-    type?: string;
-    color?: string;
-    src?: string;
-    angle?: number;
-    stops?: { position: number; color: string }[];
-  } | undefined;
-  if (loose && (!loose.type || loose.type === "solid") && typeof loose.color === "string") {
-    return toCssColor(loose.color, theme);
-  }
-  if (loose?.type === "gradient" && loose.stops?.length) {
-    // PPTD follows the Kimi contract: 0° is left→right and angles increase
-    // clockwise. CSS starts at bottom→top, so the same vector is +90°.
-    const pptdAngle = loose.angle ?? 0;
-    const cssAngle = ((pptdAngle + 90) % 360 + 360) % 360;
-    const stops = loose.stops
-      .map((s) => `${toCssColor(s.color, theme)} ${Math.round(s.position * 100)}%`)
-      .join(", ");
-    return `linear-gradient(${cssAngle}deg, ${stops})`;
-  }
-  if (loose?.type === "image" && loose.src) {
-    return `url(${JSON.stringify(loose.src)})`;
-  }
-  const paint = elementFillPaint(elementType, fill, undefined, theme);
-  if (paint.type === "none") return undefined;
-  return paint.hex;
-}
-
-export type RenderElement = {
-  id: string;
-  type: string;
-  bounds: Bounds;
-  rotation: number;
-  opacity: number;
-  flipH?: boolean;
-  flipV?: boolean;
-  text?: string;
-  bold?: boolean;
-  italic?: boolean;
-  color?: string;
-  fontSize?: number;
-  /** CSS font stack from the resolved {latin, ea} pair. */
-  fontFamily?: string;
-  /** Latin face of the pair, for the font menu. */
-  fontLatin?: string;
-  /** East Asian face of the pair, for the font menu. */
-  fontEastAsian?: string;
-  letterSpacing?: number;
-  lineHeight?: number;
-  align?: [string, string];
-  list?: "bullet" | "number";
-  href?: string;
-  wrap?: boolean;
-  runs?: RichTextRun[];
-  shapeName?: string;
-  adjustments?: number[];
-  pathD?: string;
-  fillCss?: string;
-  border?: { style?: string; width?: number; color?: string };
-  src?: string;
-  fit?: string;
-  crop?: { left?: number; top?: number; right?: number; bottom?: number };
-  cropShape?: { shapeName: string; adjustments?: number[] };
-  lineCurve?: string;
-  table?: boolean;
-  tableRows?: { text: string; bold?: boolean; color?: string; fill?: string; rowSpan?: number; colSpan?: number; align?: [string, string] }[][];
-  columnWidths?: number[];
-  chart?: boolean;
-  chartTitle?: string;
-  chartType?: string;
-  chartData?: { cols: string[]; rows: (number | string | null)[][] };
-  chartSeries?: ChartSeries[];
-  chartLegend?: boolean | Record<string, unknown>;
-  chartBackgroundCss?: string;
-  chartColors?: string[];
-  line?: boolean;
-  linePoints?: string;
-  connects?: [string, string];
-  icon?: boolean;
-  iconName?: string;
-  underline?: boolean;
-  backgroundColor?: string;
-  lineArrow?: [string | null, string | null];
-  lineLabel?: string;
-  animation?: string;
-  pathStroke?: string;
-  adjustHandles?: AdjustHandle[];
-  locked?: boolean;
-  hidden?: boolean;
-  groupId?: string;
-  smartArt?: SmartArtMeta;
-  shadow?: { blur?: number; color?: string; offsetX?: number; offsetY?: number };
-  chartLabels?: boolean;
-  chartAxis?: { x?: string; y?: string; secondaryY?: string };
-};
-
-/** Snapshot for thumbnails / play / native DOM canvas: pure data, no DOM. */
-export function renderModel(session: CanvasSession) {
-  const page = currentPage(session);
-  const size = session.project.presentation.size;
-  const theme = session.project.presentation.theme;
-  const bg = page.background as
-    | { type?: string; color?: string; src?: string }
-    | undefined;
-
-  let backgroundCss = "#ffffff";
-  let backgroundImage: string | undefined;
-  if (bg) {
-    if (bg.type === "image" && bg.src) {
-      backgroundImage = bg.src;
-      backgroundCss = "#111111";
-    } else if (bg.type === "solid" || (!bg.type && bg.color)) {
-      backgroundCss = toRgbHex(bg.color, theme, "#ffffff");
-    } else if (bg.type === "gradient") {
-      backgroundCss = fillCss(page.background, theme) ?? "#ffffff";
-    }
-  }
-  const backdrop = page.elements.find((element) => {
-    if (element.elementType !== "shape") return false;
-    const [x, y, width, height] = element.bounds;
-    return x <= 0 && y <= 0 && width >= size[0] && height >= size[1];
-  });
-  if (backdrop?.elementType === "shape") {
-    backgroundCss = fillCss((backdrop as ShapeElement).fill, theme) ?? backgroundCss;
-  }
-
-  const elements: RenderElement[] = page.elements.map((e) => {
-    const base: RenderElement = {
-      id: e.elementId,
-      type: e.elementType,
-      bounds: e.bounds as Bounds,
-      rotation: e.rotation ?? 0,
-      opacity: e.opacity ?? 1,
-      flipH: Boolean((e as { flipH?: boolean }).flipH),
-      flipV: Boolean((e as { flipV?: boolean }).flipV),
-      locked: Boolean((e as { locked?: boolean }).locked),
-      hidden: Boolean((e as { hidden?: boolean }).hidden),
-      groupId: (e as { groupId?: string }).groupId,
-      smartArt: (e as { smartArt?: SmartArtMeta }).smartArt,
-      shadow: (e as { shadow?: ElementShadow }).shadow,
-    };
-    if (e.elementType === "text") {
-      const st = resolveTextStyle((e as TextElement).content ?? { text: "" }, theme);
-      return {
-        ...base,
-        text: st.text,
-        bold: st.bold,
-        italic: st.italic,
-        color: st.color,
-        fontSize: st.fontSize,
-        fontFamily: fontCss(st.fontFamily),
-        fontLatin: st.fontFamily.latin,
-        fontEastAsian: st.fontFamily.ea,
-        letterSpacing: st.letterSpacing,
-        lineHeight: st.lineHeight,
-        align: st.align,
-        underline: st.underline,
-        backgroundColor: st.backgroundColor,
-        list: st.list,
-        href: st.href,
-        wrap: st.wrap,
-        runs: st.runs.map((r) => ({
-          ...r,
-          color: r.color ? toCssColor(r.color, theme) : undefined,
-        })),
-      };
-    }
-    if (e.elementType === "shape") {
-      const sh = e as ShapeElement;
-      const geom = shapeGeometry(sh.shapeName, sh.adjustments);
-      return {
-        ...base,
-        shapeName: sh.shapeName,
-        adjustments: sh.adjustments,
-        pathD: geom.fill || shapePath(sh.shapeName, sh.adjustments),
-        pathStroke: geom.stroke || undefined,
-        adjustHandles: geom.handles,
-        fillCss: fillCss(sh.fill, theme),
-        border: sh.border,
-      };
-    }
-    if (e.elementType === "image") {
-      const im = e as ImageElement;
-      return {
-        ...base,
-        src: im.src,
-        fit: im.fit?.mode,
-        crop: im.crop,
-        cropShape: im.cropShape,
-      };
-    }
-    if (e.elementType === "table") {
-      const tb = e as TableElement;
-      return {
-        ...base,
-        table: true,
-        columnWidths: tb.columnWidths,
-        tableRows: tb.rows.map((row) =>
-          row.map((c) => ({
-            text: c.text ?? "",
-            bold: c.bold,
-            color: c.color ? String(c.color) : undefined,
-            fill: c.fill && "color" in c.fill ? String(c.fill.color) : undefined,
-            rowSpan: c.rowSpan,
-            colSpan: c.colSpan,
-            align: c.align,
-          })),
-        ),
-      };
-    }
-    if (e.elementType === "chart") {
-      const ch = e as ChartElement;
-      return {
-        ...base,
-        chart: true,
-        chartTitle: typeof ch.title === "string" ? ch.title : ch.title?.text,
-        chartType: ch.series[0]?.type ?? "bar",
-        chartData: ch.data,
-        chartSeries: ch.series,
-        chartLegend: ch.legend,
-        chartBackgroundCss: fillCss(ch.background, theme),
-        chartLabels: ch.labels !== false,
-        chartAxis: ch.axis,
-        chartColors: ch.colors?.length
-          ? [...ch.colors]
-          : ch.series.map((s) =>
-              typeof s.fill === "string"
-                ? s.fill
-                : s.fill && "color" in s.fill
-                  ? String(s.fill.color)
-                  : "",
-            ),
-      };
-    }
-    if (e.elementType === "line") {
-      const ln = e as LineElement;
-      return {
-        ...base,
-        line: true,
-        linePoints: ln.points,
-        lineCurve: ln.curve || "round",
-        border: ln.border,
-        lineArrow: ln.arrow ?? [null, null],
-        lineLabel: ln.label,
-        connects: ln.connects,
-      };
-    }
-    if (e.elementType === "icon") {
-      const ic = e as IconElement;
-      return {
-        ...base,
-        icon: true,
-        iconName: ic.iconName,
-        fillCss: fillCss(ic.fill, theme, "icon"),
-      };
-    }
-    return base;
-  });
-
-  return {
-    title: session.project.presentation.title ?? "Untitled",
-    rootDir: session.project.rootDir,
-    size,
-    pageIndex: session.pageIndex,
-    pageCount: pageCount(session),
-    pagePaths: session.project.pages.map((p) => p.path),
-    background: page.background,
-    backgroundCss,
-    backgroundImage,
-    elements,
-    selection: session.selection,
-    canUndo: session.undoStack.length > 0,
-    canRedo: session.redoStack.length > 0,
-    allowedControlIds: [...session.allowedControlIds],
-    zoomPercent: session.zoomPercent,
-    pageRailOpen: session.pageRailOpen,
-    notesOpen: session.notesOpen,
-    presenting: session.presenting,
-    notes: page.notes ?? "",
-    themeColors: theme?.colors ?? {},
-    animations: page.animations ?? [],
-  };
-}
-
-/** List all pages' render models for thumbnails (read-only projection). */
-export function renderAllPages(session: CanvasSession) {
-  const saved = session.pageIndex;
-  const out = [];
-  for (let i = 0; i < session.project.pages.length; i++) {
-    session.pageIndex = i;
-    out.push(renderModel(session));
-  }
-  session.pageIndex = saved;
-  return out;
 }

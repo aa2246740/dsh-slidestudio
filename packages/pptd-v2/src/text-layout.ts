@@ -35,7 +35,8 @@ export function footerZoneTopForSlide(slideHeight: number): number {
   return Math.max(0, slideHeight - (reserve / 540) * slideHeight);
 }
 
-const LEGACY_FOOTER_ID = /(?:^|[-_])(foot(?:er)?|page(?:num|number)?|source(?:s|note)?|guillemets|disc(?:laimer)?|legal|confidential)(?:[-_]|$)|页脚|页码|来源|免责声明/i;
+const LEGACY_FOOTER_ID =
+  /(?:^|[-_])(foot(?:er)?|page(?:num|number)?|source(?:s|note)?|guillemets|disc(?:laimer)?|legal|confidential)(?:[-_]|$)|页脚|页码|来源|免责声明/i;
 
 /**
  * Preserve the explicit role first. For older OpenKimi PPTD, recognize only

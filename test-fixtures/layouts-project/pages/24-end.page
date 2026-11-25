@@ -1,0 +1,17 @@
+pageType: content
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 80
+      - 200
+      - 800
+      - 80
+    content:
+      text: 结束页
+      fontSize: 40
+      bold: true
+      color: "#111827"
+      align:
+        - left
+        - middle

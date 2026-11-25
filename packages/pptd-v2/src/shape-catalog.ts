@@ -1,1650 +1,1251 @@
 /** Official PPTD shape catalog from open-kimi shapes.md (177 names). */
-export type ShapeInfo = { name: string; title: string; group: string; adjLabel: string; defaults: number[] };
+export type ShapeInfo = {
+  name: string;
+  title: string;
+  group: string;
+  adjLabel: string;
+  defaults: number[];
+};
 export const SHAPE_CATALOG: ShapeInfo[] = [
   {
-    "name": "rect",
-    "title": "Rectangle",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "roundRect",
-    "title": "Rounded rectangle",
-    "group": "Basic Shapes",
-    "adjLabel": "[corner radius]",
-    "defaults": [
-      16667
-    ]
-  },
-  {
-    "name": "ellipse",
-    "title": "Ellipse",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "triangle",
-    "title": "Triangle",
-    "group": "Basic Shapes",
-    "adjLabel": "[horizontal position of apex]",
-    "defaults": [
-      50000
-    ]
-  },
-  {
-    "name": "rtTriangle",
-    "title": "Right triangle",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "parallelogram",
-    "title": "Parallelogram",
-    "group": "Basic Shapes",
-    "adjLabel": "[slant offset]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "trapezoid",
-    "title": "Trapezoid",
-    "group": "Basic Shapes",
-    "adjLabel": "[top edge inset]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "nonIsoscelesTrapezoid",
-    "title": "Non-isosceles trapezoid",
-    "group": "Basic Shapes",
-    "adjLabel": "[left offset, right offset]",
-    "defaults": [
-      25000,
-      25000
-    ]
-  },
-  {
-    "name": "diamond",
-    "title": "Diamond",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "pentagon",
-    "title": "Regular pentagon",
-    "group": "Basic Shapes",
-    "adjLabel": "[horizontal factor, vertical factor]",
-    "defaults": [
-      105146,
-      110557
-    ]
-  },
-  {
-    "name": "hexagon",
-    "title": "Hexagon",
-    "group": "Basic Shapes",
-    "adjLabel": "[inset offset, vertical factor]",
-    "defaults": [
-      25000,
-      115470
-    ]
-  },
-  {
-    "name": "heptagon",
-    "title": "Heptagon",
-    "group": "Basic Shapes",
-    "adjLabel": "[horizontal factor, vertical factor]",
-    "defaults": [
-      102572,
-      105210
-    ]
-  },
-  {
-    "name": "octagon",
-    "title": "Octagon",
-    "group": "Basic Shapes",
-    "adjLabel": "[corner cut size]",
-    "defaults": [
-      29289
-    ]
-  },
-  {
-    "name": "decagon",
-    "title": "Decagon",
-    "group": "Basic Shapes",
-    "adjLabel": "[vertical factor]",
-    "defaults": [
-      105146
-    ]
-  },
-  {
-    "name": "dodecagon",
-    "title": "Dodecagon",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "plus",
-    "title": "Plus sign",
-    "group": "Basic Shapes",
-    "adjLabel": "[arm width ratio]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "homePlate",
-    "title": "Five-sided arrow",
-    "group": "Basic Shapes",
-    "adjLabel": "[arrowhead tip offset]",
-    "defaults": [
-      50000
-    ]
-  },
-  {
-    "name": "chevron",
-    "title": "V-shaped arrow",
-    "group": "Basic Shapes",
-    "adjLabel": "[V tip offset]",
-    "defaults": [
-      50000
-    ]
-  },
-  {
-    "name": "pie",
-    "title": "Pie",
-    "group": "Basic Shapes",
-    "adjLabel": "[start angle°, end angle°]",
-    "defaults": [
-      0,
-      16200000
-    ]
-  },
-  {
-    "name": "pieWedge",
-    "title": "Pie wedge",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "arc",
-    "title": "Arc",
-    "group": "Basic Shapes",
-    "adjLabel": "[start angle°, end angle°]",
-    "defaults": [
-      16200000,
-      0
-    ]
-  },
-  {
-    "name": "chord",
-    "title": "Chord",
-    "group": "Basic Shapes",
-    "adjLabel": "[start angle°, end angle°]",
-    "defaults": [
-      2700000,
-      16200000
-    ]
-  },
-  {
-    "name": "blockArc",
-    "title": "Block arc",
-    "group": "Basic Shapes",
-    "adjLabel": "[start angle°, end angle°, thickness]",
-    "defaults": [
-      10800000,
-      0,
-      25000
-    ]
-  },
-  {
-    "name": "teardrop",
-    "title": "Teardrop",
-    "group": "Basic Shapes",
-    "adjLabel": "[tail extension ratio]",
-    "defaults": [
-      100000
-    ]
-  },
-  {
-    "name": "frame",
-    "title": "Frame",
-    "group": "Basic Shapes",
-    "adjLabel": "[border thickness]",
-    "defaults": [
-      12500
-    ]
-  },
-  {
-    "name": "halfFrame",
-    "title": "Half frame",
-    "group": "Basic Shapes",
-    "adjLabel": "[horizontal thickness, vertical thickness]",
-    "defaults": [
-      33333,
-      33333
-    ]
-  },
-  {
-    "name": "corner",
-    "title": "Corner",
-    "group": "Basic Shapes",
-    "adjLabel": "[horizontal thickness, vertical thickness]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "diagStripe",
-    "title": "Diagonal stripe",
-    "group": "Basic Shapes",
-    "adjLabel": "[stripe width]",
-    "defaults": [
-      50000
-    ]
-  },
-  {
-    "name": "foldedCorner",
-    "title": "Folded corner",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "donut",
-    "title": "Donut",
-    "group": "Basic Shapes",
-    "adjLabel": "[ring width ratio]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "noSmoking",
-    "title": "Prohibition symbol",
-    "group": "Basic Shapes",
-    "adjLabel": "[slash width]",
-    "defaults": [
-      18750
-    ]
-  },
-  {
-    "name": "heart",
-    "title": "Heart",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "lightningBolt",
-    "title": "Lightning bolt",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "sun",
-    "title": "Sun",
-    "group": "Basic Shapes",
-    "adjLabel": "[inner radius ratio of rays]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "moon",
-    "title": "Moon",
-    "group": "Basic Shapes",
-    "adjLabel": "[crescent width]",
-    "defaults": [
-      50000
-    ]
-  },
-  {
-    "name": "cloud",
-    "title": "Cloud",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "smileyFace",
-    "title": "Smiley face",
-    "group": "Basic Shapes",
-    "adjLabel": "[mouth curvature]",
-    "defaults": [
-      4653
-    ]
-  },
-  {
-    "name": "bevel",
-    "title": "Bevel",
-    "group": "Basic Shapes",
-    "adjLabel": "[bevel width]",
-    "defaults": [
-      12500
-    ]
-  },
-  {
-    "name": "can",
-    "title": "Cylinder",
-    "group": "Basic Shapes",
-    "adjLabel": "[elliptical lid height]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "cube",
-    "title": "Cube",
-    "group": "Basic Shapes",
-    "adjLabel": "[perspective depth]",
-    "defaults": [
-      25000
-    ]
-  },
-  {
-    "name": "funnel",
-    "title": "Funnel",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "gear6",
-    "title": "Six-tooth gear",
-    "group": "Basic Shapes",
-    "adjLabel": "[tooth height, tooth width]",
-    "defaults": [
-      15000,
-      3526
-    ]
-  },
-  {
-    "name": "gear9",
-    "title": "Nine-tooth gear",
-    "group": "Basic Shapes",
-    "adjLabel": "[tooth height, tooth width]",
-    "defaults": [
-      10000,
-      1763
-    ]
-  },
-  {
-    "name": "plaque",
-    "title": "Plaque",
-    "group": "Basic Shapes",
-    "adjLabel": "[corner radius]",
-    "defaults": [
-      16667
-    ]
-  },
-  {
-    "name": "doubleWave",
-    "title": "Double wave",
-    "group": "Basic Shapes",
-    "adjLabel": "[wave amplitude, horizontal offset]",
-    "defaults": [
-      6250,
-      0
-    ]
-  },
-  {
-    "name": "wave",
-    "title": "Wave",
-    "group": "Basic Shapes",
-    "adjLabel": "[wave amplitude, horizontal offset]",
-    "defaults": [
-      12500,
-      0
-    ]
-  },
-  {
-    "name": "lineInv",
-    "title": "Inverse line",
-    "group": "Basic Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "round1Rect",
-    "title": "Single-rounded-corner rectangle",
-    "group": "Rectangle Variants",
-    "adjLabel": "[corner radius]",
-    "defaults": [
-      16667
-    ]
-  },
-  {
-    "name": "round2DiagRect",
-    "title": "Rectangle with two diagonally rounded corners",
-    "group": "Rectangle Variants",
-    "adjLabel": "[corner 1 radius, corner 2 radius]",
-    "defaults": [
-      16667,
-      0
-    ]
-  },
-  {
-    "name": "round2SameRect",
-    "title": "Rectangle with two same-side rounded corners",
-    "group": "Rectangle Variants",
-    "adjLabel": "[top corner radius, bottom corner radius]",
-    "defaults": [
-      16667,
-      0
-    ]
-  },
-  {
-    "name": "snip1Rect",
-    "title": "Single-cut-corner rectangle",
-    "group": "Rectangle Variants",
-    "adjLabel": "[corner cut size]",
-    "defaults": [
-      16667
-    ]
-  },
-  {
-    "name": "snip2DiagRect",
-    "title": "Rectangle with two diagonally cut corners",
-    "group": "Rectangle Variants",
-    "adjLabel": "[corner 1 cut size, corner 2 cut size]",
-    "defaults": [
-      0,
-      16667
-    ]
-  },
-  {
-    "name": "snip2SameRect",
-    "title": "Rectangle with two same-side cut corners",
-    "group": "Rectangle Variants",
-    "adjLabel": "[top cut size, bottom cut size]",
-    "defaults": [
-      16667,
-      0
-    ]
-  },
-  {
-    "name": "snipRoundRect",
-    "title": "Rectangle with one rounded and one cut corner",
-    "group": "Rectangle Variants",
-    "adjLabel": "[corner radius, corner cut size]",
-    "defaults": [
-      16667,
-      16667
-    ]
-  },
-  {
-    "name": "star4",
-    "title": "4-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      12500
-    ]
-  },
-  {
-    "name": "star5",
-    "title": "5-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio, horizontal factor, vertical factor]",
-    "defaults": [
-      19098,
-      105146,
-      110557
-    ]
-  },
-  {
-    "name": "star6",
-    "title": "6-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio, horizontal factor]",
-    "defaults": [
-      28868,
-      115470
-    ]
-  },
-  {
-    "name": "star7",
-    "title": "7-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio, horizontal factor, vertical factor]",
-    "defaults": [
-      34601,
-      102572,
-      105210
-    ]
-  },
-  {
-    "name": "star8",
-    "title": "8-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      37500
-    ]
-  },
-  {
-    "name": "star10",
-    "title": "10-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio, horizontal factor]",
-    "defaults": [
-      42533,
-      105146
-    ]
-  },
-  {
-    "name": "star12",
-    "title": "12-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      37500
-    ]
-  },
-  {
-    "name": "star16",
-    "title": "16-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      37500
-    ]
-  },
-  {
-    "name": "star24",
-    "title": "24-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      37500
-    ]
-  },
-  {
-    "name": "star32",
-    "title": "32-point star",
-    "group": "Stars and Bursts",
-    "adjLabel": "[inner radius ratio]",
-    "defaults": [
-      37500
-    ]
-  },
-  {
-    "name": "irregularSeal1",
-    "title": "Burst 1",
-    "group": "Stars and Bursts",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "irregularSeal2",
-    "title": "Burst 2",
-    "group": "Stars and Bursts",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "rightArrow",
-    "title": "Right arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "leftArrow",
-    "title": "Left arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "upArrow",
-    "title": "Up arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "downArrow",
-    "title": "Down arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "leftRightArrow",
-    "title": "Left-right arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "upDownArrow",
-    "title": "Up-down arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, up arrowhead length, shaft width, down arrowhead length]",
-    "defaults": [
-      50000,
-      50000,
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "quadArrow",
-    "title": "Quad arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length]",
-    "defaults": [
-      22500,
-      22500,
-      22500
-    ]
-  },
-  {
-    "name": "leftRightUpArrow",
-    "title": "Left-right-up arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length]",
-    "defaults": [
-      25000,
-      25000,
-      25000
-    ]
-  },
-  {
-    "name": "leftUpArrow",
-    "title": "Left-up arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length]",
-    "defaults": [
-      25000,
-      25000,
-      25000
-    ]
-  },
-  {
-    "name": "bentArrow",
-    "title": "Bent arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, bend position]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      43750
-    ]
-  },
-  {
-    "name": "bentUpArrow",
-    "title": "Bent up arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length]",
-    "defaults": [
-      25000,
-      25000,
-      25000
-    ]
-  },
-  {
-    "name": "uturnArrow",
-    "title": "U-turn arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, bend radius, shaft length]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      43750,
-      75000
-    ]
-  },
-  {
-    "name": "circularArrow",
-    "title": "Circular arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
-    "defaults": [
-      12500,
-      1142319,
-      20457681,
-      10800000,
-      12500
-    ]
-  },
-  {
-    "name": "leftCircularArrow",
-    "title": "Left circular arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
-    "defaults": [
-      12500,
-      -1142319,
-      1142319,
-      10800000,
-      12500
-    ]
-  },
-  {
-    "name": "leftRightCircularArrow",
-    "title": "Left-right circular arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
-    "defaults": [
-      12500,
-      1142319,
-      20457681,
-      11942319,
-      12500
-    ]
-  },
-  {
-    "name": "curvedRightArrow",
-    "title": "Curved right arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, curvature, arrowhead length]",
-    "defaults": [
-      25000,
-      50000,
-      25000
-    ]
-  },
-  {
-    "name": "curvedLeftArrow",
-    "title": "Curved left arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, curvature, arrowhead length]",
-    "defaults": [
-      25000,
-      50000,
-      25000
-    ]
-  },
-  {
-    "name": "curvedUpArrow",
-    "title": "Curved up arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, curvature, arrowhead length]",
-    "defaults": [
-      25000,
-      50000,
-      25000
-    ]
-  },
-  {
-    "name": "curvedDownArrow",
-    "title": "Curved down arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[arrowhead width, curvature, arrowhead length]",
-    "defaults": [
-      25000,
-      50000,
-      25000
-    ]
-  },
-  {
-    "name": "stripedRightArrow",
-    "title": "Striped right arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "notchedRightArrow",
-    "title": "Notched right arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[shaft width, arrowhead length]",
-    "defaults": [
-      50000,
-      50000
-    ]
-  },
-  {
-    "name": "swooshArrow",
-    "title": "Swoosh arrow",
-    "group": "Arrow Shapes",
-    "adjLabel": "[tail width, arrowhead length]",
-    "defaults": [
-      25000,
-      16667
-    ]
-  },
-  {
-    "name": "rightArrowCallout",
-    "title": "Right arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box width]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      64977
-    ]
-  },
-  {
-    "name": "leftArrowCallout",
-    "title": "Left arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box width]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      64977
-    ]
-  },
-  {
-    "name": "upArrowCallout",
-    "title": "Up arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box height]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      64977
-    ]
-  },
-  {
-    "name": "downArrowCallout",
-    "title": "Down arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box height]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      64977
-    ]
-  },
-  {
-    "name": "leftRightArrowCallout",
-    "title": "Left-right arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box width]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      48123
-    ]
-  },
-  {
-    "name": "upDownArrowCallout",
-    "title": "Up-down arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box height]",
-    "defaults": [
-      25000,
-      25000,
-      25000,
-      48123
-    ]
-  },
-  {
-    "name": "quadArrowCallout",
-    "title": "Quad arrow callout",
-    "group": "Arrow Callouts",
-    "adjLabel": "[shaft width, arrowhead width, arrowhead length, box size]",
-    "defaults": [
-      18515,
-      18515,
-      18515,
-      48123
-    ]
-  },
-  {
-    "name": "wedgeRectCallout",
-    "title": "Rectangle callout",
-    "group": "Callouts",
-    "adjLabel": "[tip X offset, tip Y offset]",
-    "defaults": [
-      -20833,
-      62500
-    ]
-  },
-  {
-    "name": "wedgeRoundRectCallout",
-    "title": "Rounded rectangle callout",
-    "group": "Callouts",
-    "adjLabel": "[tip X offset, tip Y offset, corner radius]",
-    "defaults": [
-      -20833,
-      62500,
-      16667
-    ]
-  },
-  {
-    "name": "wedgeEllipseCallout",
-    "title": "Ellipse callout",
-    "group": "Callouts",
-    "adjLabel": "[tip X offset, tip Y offset]",
-    "defaults": [
-      -20833,
-      62500
-    ]
-  },
-  {
-    "name": "cloudCallout",
-    "title": "Cloud callout",
-    "group": "Callouts",
-    "adjLabel": "[tip X offset, tip Y offset]",
-    "defaults": [
-      -20833,
-      62500
-    ]
-  },
-  {
-    "name": "borderCallout1",
-    "title": "Line callout 1",
-    "group": "Callouts",
-    "adjLabel": "[callout line Y1, X1, Y2, X2]",
-    "defaults": [
-      18750,
-      -8333,
-      112500,
-      -38333
-    ]
-  },
-  {
-    "name": "borderCallout2",
-    "title": "Line callout 2",
-    "group": "Callouts",
-    "adjLabel": "[line Y1, X1, knee point Y, X, end point Y, X]",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      112500,
-      -46667
-    ]
-  },
-  {
-    "name": "borderCallout3",
-    "title": "Line callout 3",
-    "group": "Callouts",
-    "adjLabel": "[line Y1, X1, knee point 1 Y, X, knee point 2 Y, X, end point Y, X]",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      100000,
-      -16667,
-      112963,
-      -8333
-    ]
-  },
-  {
-    "name": "accentCallout1",
-    "title": "Accent line callout 1",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout1",
-    "defaults": [
-      18750,
-      -8333,
-      112500,
-      -38333
-    ]
-  },
-  {
-    "name": "accentCallout2",
-    "title": "Accent line callout 2",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout2",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      112500,
-      -46667
-    ]
-  },
-  {
-    "name": "accentCallout3",
-    "title": "Accent line callout 3",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout3",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      100000,
-      -16667,
-      112963,
-      -8333
-    ]
-  },
-  {
-    "name": "accentBorderCallout1",
-    "title": "Bordered accent line callout 1",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout1",
-    "defaults": [
-      18750,
-      -8333,
-      112500,
-      -38333
-    ]
-  },
-  {
-    "name": "accentBorderCallout2",
-    "title": "Bordered accent line callout 2",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout2",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      112500,
-      -46667
-    ]
-  },
-  {
-    "name": "accentBorderCallout3",
-    "title": "Bordered accent line callout 3",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout3",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      100000,
-      -16667,
-      112963,
-      -8333
-    ]
-  },
-  {
-    "name": "callout1",
-    "title": "Borderless callout 1",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout1",
-    "defaults": [
-      18750,
-      -8333,
-      112500,
-      -38333
-    ]
-  },
-  {
-    "name": "callout2",
-    "title": "Borderless callout 2",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout2",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      112500,
-      -46667
-    ]
-  },
-  {
-    "name": "callout3",
-    "title": "Borderless callout 3",
-    "group": "Callouts",
-    "adjLabel": "Same as borderCallout3",
-    "defaults": [
-      18750,
-      -8333,
-      18750,
-      -16667,
-      100000,
-      -16667,
-      112963,
-      -8333
-    ]
-  },
-  {
-    "name": "leftBrace",
-    "title": "Left brace",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature, middle point position]",
-    "defaults": [
-      8333,
-      50000
-    ]
-  },
-  {
-    "name": "rightBrace",
-    "title": "Right brace",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature, middle point position]",
-    "defaults": [
-      8333,
-      50000
-    ]
-  },
-  {
-    "name": "leftBracket",
-    "title": "Left bracket",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature]",
-    "defaults": [
-      8333
-    ]
-  },
-  {
-    "name": "rightBracket",
-    "title": "Right bracket",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature]",
-    "defaults": [
-      8333
-    ]
-  },
-  {
-    "name": "bracePair",
-    "title": "Brace pair",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature]",
-    "defaults": [
-      8333
-    ]
-  },
-  {
-    "name": "bracketPair",
-    "title": "Bracket pair",
-    "group": "Brackets and Braces",
-    "adjLabel": "[curvature]",
-    "defaults": [
-      16667
-    ]
-  },
-  {
-    "name": "ribbon",
-    "title": "Down-curved ribbon",
-    "group": "Ribbons",
-    "adjLabel": "[fold height, ribbon curvature]",
-    "defaults": [
-      16667,
-      50000
-    ]
-  },
-  {
-    "name": "ribbon2",
-    "title": "Up-curved ribbon",
-    "group": "Ribbons",
-    "adjLabel": "[fold height, ribbon curvature]",
-    "defaults": [
-      16667,
-      50000
-    ]
-  },
-  {
-    "name": "ellipseRibbon",
-    "title": "Curved-surface down ribbon",
-    "group": "Ribbons",
-    "adjLabel": "[curvature, middle height, fold height]",
-    "defaults": [
-      25000,
-      50000,
-      12500
-    ]
-  },
-  {
-    "name": "ellipseRibbon2",
-    "title": "Curved-surface up ribbon",
-    "group": "Ribbons",
-    "adjLabel": "[curvature, middle height, fold height]",
-    "defaults": [
-      25000,
-      50000,
-      12500
-    ]
-  },
-  {
-    "name": "leftRightRibbon",
-    "title": "Left-right ribbon",
-    "group": "Ribbons",
-    "adjLabel": "[fold height, ribbon curvature, fold width]",
-    "defaults": [
-      50000,
-      50000,
-      16667
-    ]
-  },
-  {
-    "name": "horizontalScroll",
-    "title": "Horizontal scroll",
-    "group": "Scrolls",
-    "adjLabel": "[scroll size]",
-    "defaults": [
-      12500
-    ]
-  },
-  {
-    "name": "verticalScroll",
-    "title": "Vertical scroll",
-    "group": "Scrolls",
-    "adjLabel": "[scroll size]",
-    "defaults": [
-      12500
-    ]
-  },
-  {
-    "name": "mathPlus",
-    "title": "Plus sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness]",
-    "defaults": [
-      23520
-    ]
-  },
-  {
-    "name": "mathMinus",
-    "title": "Minus sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness]",
-    "defaults": [
-      23520
-    ]
-  },
-  {
-    "name": "mathMultiply",
-    "title": "Multiplication sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness]",
-    "defaults": [
-      23520
-    ]
-  },
-  {
-    "name": "mathDivide",
-    "title": "Division sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness, dot spacing, dot size]",
-    "defaults": [
-      23520,
-      5880,
-      11760
-    ]
-  },
-  {
-    "name": "mathEqual",
-    "title": "Equal sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness, line spacing]",
-    "defaults": [
-      23520,
-      11760
-    ]
-  },
-  {
-    "name": "mathNotEqual",
-    "title": "Not-equal sign",
-    "group": "Math Symbols",
-    "adjLabel": "[line thickness, slash angle°, line spacing]",
-    "defaults": [
-      23520,
-      6600000,
-      11760
-    ]
-  },
-  {
-    "name": "chartPlus",
-    "title": "Chart plus",
-    "group": "Chart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "chartStar",
-    "title": "Chart star",
-    "group": "Chart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "chartX",
-    "title": "Chart X",
-    "group": "Chart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "cornerTabs",
-    "title": "Corner tabs",
-    "group": "Tab Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "squareTabs",
-    "title": "Square tabs",
-    "group": "Tab Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "plaqueTabs",
-    "title": "Plaque tabs",
-    "group": "Tab Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonBackPrevious",
-    "title": "Back/Previous button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonBeginning",
-    "title": "Beginning button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonBlank",
-    "title": "Blank button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonDocument",
-    "title": "Document button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonEnd",
-    "title": "End button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonForwardNext",
-    "title": "Forward/Next button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonHelp",
-    "title": "Help button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonHome",
-    "title": "Home button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonInformation",
-    "title": "Information button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonMovie",
-    "title": "Movie button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonReturn",
-    "title": "Return button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "actionButtonSound",
-    "title": "Sound button",
-    "group": "Action Buttons",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartProcess",
-    "title": "Flowchart: Process",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartAlternateProcess",
-    "title": "Flowchart: Alternate process",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartDecision",
-    "title": "Flowchart: Decision",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartDocument",
-    "title": "Flowchart: Document",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartMultidocument",
-    "title": "Flowchart: Multidocument",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartInputOutput",
-    "title": "Flowchart: Data",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartPredefinedProcess",
-    "title": "Flowchart: Predefined process",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartInternalStorage",
-    "title": "Flowchart: Internal storage",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartManualInput",
-    "title": "Flowchart: Manual input",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartManualOperation",
-    "title": "Flowchart: Manual operation",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartPreparation",
-    "title": "Flowchart: Preparation",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartDelay",
-    "title": "Flowchart: Delay",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartTerminator",
-    "title": "Flowchart: Terminator",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartConnector",
-    "title": "Flowchart: Connector",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartOffpageConnector",
-    "title": "Flowchart: Off-page connector",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartPunchedCard",
-    "title": "Flowchart: Punched card",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartPunchedTape",
-    "title": "Flowchart: Punched tape",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartCollate",
-    "title": "Flowchart: Collate",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartSort",
-    "title": "Flowchart: Sort",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartExtract",
-    "title": "Flowchart: Extract",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartMerge",
-    "title": "Flowchart: Merge",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartOr",
-    "title": "Flowchart: Or",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartSummingJunction",
-    "title": "Flowchart: Summing junction",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartOnlineStorage",
-    "title": "Flowchart: Online storage",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartMagneticDisk",
-    "title": "Flowchart: Magnetic disk",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartMagneticDrum",
-    "title": "Flowchart: Magnetic drum",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartMagneticTape",
-    "title": "Flowchart: Magnetic tape",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartOfflineStorage",
-    "title": "Flowchart: Offline storage",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  },
-  {
-    "name": "flowChartDisplay",
-    "title": "Flowchart: Display",
-    "group": "Flowchart Shapes",
-    "adjLabel": "",
-    "defaults": []
-  }
+    name: "rect",
+    title: "Rectangle",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "roundRect",
+    title: "Rounded rectangle",
+    group: "Basic Shapes",
+    adjLabel: "[corner radius]",
+    defaults: [16667],
+  },
+  {
+    name: "ellipse",
+    title: "Ellipse",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "triangle",
+    title: "Triangle",
+    group: "Basic Shapes",
+    adjLabel: "[horizontal position of apex]",
+    defaults: [50000],
+  },
+  {
+    name: "rtTriangle",
+    title: "Right triangle",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "parallelogram",
+    title: "Parallelogram",
+    group: "Basic Shapes",
+    adjLabel: "[slant offset]",
+    defaults: [25000],
+  },
+  {
+    name: "trapezoid",
+    title: "Trapezoid",
+    group: "Basic Shapes",
+    adjLabel: "[top edge inset]",
+    defaults: [25000],
+  },
+  {
+    name: "nonIsoscelesTrapezoid",
+    title: "Non-isosceles trapezoid",
+    group: "Basic Shapes",
+    adjLabel: "[left offset, right offset]",
+    defaults: [25000, 25000],
+  },
+  {
+    name: "diamond",
+    title: "Diamond",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "pentagon",
+    title: "Regular pentagon",
+    group: "Basic Shapes",
+    adjLabel: "[horizontal factor, vertical factor]",
+    defaults: [105146, 110557],
+  },
+  {
+    name: "hexagon",
+    title: "Hexagon",
+    group: "Basic Shapes",
+    adjLabel: "[inset offset, vertical factor]",
+    defaults: [25000, 115470],
+  },
+  {
+    name: "heptagon",
+    title: "Heptagon",
+    group: "Basic Shapes",
+    adjLabel: "[horizontal factor, vertical factor]",
+    defaults: [102572, 105210],
+  },
+  {
+    name: "octagon",
+    title: "Octagon",
+    group: "Basic Shapes",
+    adjLabel: "[corner cut size]",
+    defaults: [29289],
+  },
+  {
+    name: "decagon",
+    title: "Decagon",
+    group: "Basic Shapes",
+    adjLabel: "[vertical factor]",
+    defaults: [105146],
+  },
+  {
+    name: "dodecagon",
+    title: "Dodecagon",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "plus",
+    title: "Plus sign",
+    group: "Basic Shapes",
+    adjLabel: "[arm width ratio]",
+    defaults: [25000],
+  },
+  {
+    name: "homePlate",
+    title: "Five-sided arrow",
+    group: "Basic Shapes",
+    adjLabel: "[arrowhead tip offset]",
+    defaults: [50000],
+  },
+  {
+    name: "chevron",
+    title: "V-shaped arrow",
+    group: "Basic Shapes",
+    adjLabel: "[V tip offset]",
+    defaults: [50000],
+  },
+  {
+    name: "pie",
+    title: "Pie",
+    group: "Basic Shapes",
+    adjLabel: "[start angle°, end angle°]",
+    defaults: [0, 16200000],
+  },
+  {
+    name: "pieWedge",
+    title: "Pie wedge",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "arc",
+    title: "Arc",
+    group: "Basic Shapes",
+    adjLabel: "[start angle°, end angle°]",
+    defaults: [16200000, 0],
+  },
+  {
+    name: "chord",
+    title: "Chord",
+    group: "Basic Shapes",
+    adjLabel: "[start angle°, end angle°]",
+    defaults: [2700000, 16200000],
+  },
+  {
+    name: "blockArc",
+    title: "Block arc",
+    group: "Basic Shapes",
+    adjLabel: "[start angle°, end angle°, thickness]",
+    defaults: [10800000, 0, 25000],
+  },
+  {
+    name: "teardrop",
+    title: "Teardrop",
+    group: "Basic Shapes",
+    adjLabel: "[tail extension ratio]",
+    defaults: [100000],
+  },
+  {
+    name: "frame",
+    title: "Frame",
+    group: "Basic Shapes",
+    adjLabel: "[border thickness]",
+    defaults: [12500],
+  },
+  {
+    name: "halfFrame",
+    title: "Half frame",
+    group: "Basic Shapes",
+    adjLabel: "[horizontal thickness, vertical thickness]",
+    defaults: [33333, 33333],
+  },
+  {
+    name: "corner",
+    title: "Corner",
+    group: "Basic Shapes",
+    adjLabel: "[horizontal thickness, vertical thickness]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "diagStripe",
+    title: "Diagonal stripe",
+    group: "Basic Shapes",
+    adjLabel: "[stripe width]",
+    defaults: [50000],
+  },
+  {
+    name: "foldedCorner",
+    title: "Folded corner",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "donut",
+    title: "Donut",
+    group: "Basic Shapes",
+    adjLabel: "[ring width ratio]",
+    defaults: [25000],
+  },
+  {
+    name: "noSmoking",
+    title: "Prohibition symbol",
+    group: "Basic Shapes",
+    adjLabel: "[slash width]",
+    defaults: [18750],
+  },
+  {
+    name: "heart",
+    title: "Heart",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "lightningBolt",
+    title: "Lightning bolt",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "sun",
+    title: "Sun",
+    group: "Basic Shapes",
+    adjLabel: "[inner radius ratio of rays]",
+    defaults: [25000],
+  },
+  {
+    name: "moon",
+    title: "Moon",
+    group: "Basic Shapes",
+    adjLabel: "[crescent width]",
+    defaults: [50000],
+  },
+  {
+    name: "cloud",
+    title: "Cloud",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "smileyFace",
+    title: "Smiley face",
+    group: "Basic Shapes",
+    adjLabel: "[mouth curvature]",
+    defaults: [4653],
+  },
+  {
+    name: "bevel",
+    title: "Bevel",
+    group: "Basic Shapes",
+    adjLabel: "[bevel width]",
+    defaults: [12500],
+  },
+  {
+    name: "can",
+    title: "Cylinder",
+    group: "Basic Shapes",
+    adjLabel: "[elliptical lid height]",
+    defaults: [25000],
+  },
+  {
+    name: "cube",
+    title: "Cube",
+    group: "Basic Shapes",
+    adjLabel: "[perspective depth]",
+    defaults: [25000],
+  },
+  {
+    name: "funnel",
+    title: "Funnel",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "gear6",
+    title: "Six-tooth gear",
+    group: "Basic Shapes",
+    adjLabel: "[tooth height, tooth width]",
+    defaults: [15000, 3526],
+  },
+  {
+    name: "gear9",
+    title: "Nine-tooth gear",
+    group: "Basic Shapes",
+    adjLabel: "[tooth height, tooth width]",
+    defaults: [10000, 1763],
+  },
+  {
+    name: "plaque",
+    title: "Plaque",
+    group: "Basic Shapes",
+    adjLabel: "[corner radius]",
+    defaults: [16667],
+  },
+  {
+    name: "doubleWave",
+    title: "Double wave",
+    group: "Basic Shapes",
+    adjLabel: "[wave amplitude, horizontal offset]",
+    defaults: [6250, 0],
+  },
+  {
+    name: "wave",
+    title: "Wave",
+    group: "Basic Shapes",
+    adjLabel: "[wave amplitude, horizontal offset]",
+    defaults: [12500, 0],
+  },
+  {
+    name: "lineInv",
+    title: "Inverse line",
+    group: "Basic Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "round1Rect",
+    title: "Single-rounded-corner rectangle",
+    group: "Rectangle Variants",
+    adjLabel: "[corner radius]",
+    defaults: [16667],
+  },
+  {
+    name: "round2DiagRect",
+    title: "Rectangle with two diagonally rounded corners",
+    group: "Rectangle Variants",
+    adjLabel: "[corner 1 radius, corner 2 radius]",
+    defaults: [16667, 0],
+  },
+  {
+    name: "round2SameRect",
+    title: "Rectangle with two same-side rounded corners",
+    group: "Rectangle Variants",
+    adjLabel: "[top corner radius, bottom corner radius]",
+    defaults: [16667, 0],
+  },
+  {
+    name: "snip1Rect",
+    title: "Single-cut-corner rectangle",
+    group: "Rectangle Variants",
+    adjLabel: "[corner cut size]",
+    defaults: [16667],
+  },
+  {
+    name: "snip2DiagRect",
+    title: "Rectangle with two diagonally cut corners",
+    group: "Rectangle Variants",
+    adjLabel: "[corner 1 cut size, corner 2 cut size]",
+    defaults: [0, 16667],
+  },
+  {
+    name: "snip2SameRect",
+    title: "Rectangle with two same-side cut corners",
+    group: "Rectangle Variants",
+    adjLabel: "[top cut size, bottom cut size]",
+    defaults: [16667, 0],
+  },
+  {
+    name: "snipRoundRect",
+    title: "Rectangle with one rounded and one cut corner",
+    group: "Rectangle Variants",
+    adjLabel: "[corner radius, corner cut size]",
+    defaults: [16667, 16667],
+  },
+  {
+    name: "star4",
+    title: "4-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [12500],
+  },
+  {
+    name: "star5",
+    title: "5-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio, horizontal factor, vertical factor]",
+    defaults: [19098, 105146, 110557],
+  },
+  {
+    name: "star6",
+    title: "6-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio, horizontal factor]",
+    defaults: [28868, 115470],
+  },
+  {
+    name: "star7",
+    title: "7-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio, horizontal factor, vertical factor]",
+    defaults: [34601, 102572, 105210],
+  },
+  {
+    name: "star8",
+    title: "8-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [37500],
+  },
+  {
+    name: "star10",
+    title: "10-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio, horizontal factor]",
+    defaults: [42533, 105146],
+  },
+  {
+    name: "star12",
+    title: "12-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [37500],
+  },
+  {
+    name: "star16",
+    title: "16-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [37500],
+  },
+  {
+    name: "star24",
+    title: "24-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [37500],
+  },
+  {
+    name: "star32",
+    title: "32-point star",
+    group: "Stars and Bursts",
+    adjLabel: "[inner radius ratio]",
+    defaults: [37500],
+  },
+  {
+    name: "irregularSeal1",
+    title: "Burst 1",
+    group: "Stars and Bursts",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "irregularSeal2",
+    title: "Burst 2",
+    group: "Stars and Bursts",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "rightArrow",
+    title: "Right arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "leftArrow",
+    title: "Left arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "upArrow",
+    title: "Up arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "downArrow",
+    title: "Down arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "leftRightArrow",
+    title: "Left-right arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "upDownArrow",
+    title: "Up-down arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, up arrowhead length, shaft width, down arrowhead length]",
+    defaults: [50000, 50000, 50000, 50000],
+  },
+  {
+    name: "quadArrow",
+    title: "Quad arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length]",
+    defaults: [22500, 22500, 22500],
+  },
+  {
+    name: "leftRightUpArrow",
+    title: "Left-right-up arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length]",
+    defaults: [25000, 25000, 25000],
+  },
+  {
+    name: "leftUpArrow",
+    title: "Left-up arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length]",
+    defaults: [25000, 25000, 25000],
+  },
+  {
+    name: "bentArrow",
+    title: "Bent arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, bend position]",
+    defaults: [25000, 25000, 25000, 43750],
+  },
+  {
+    name: "bentUpArrow",
+    title: "Bent up arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length]",
+    defaults: [25000, 25000, 25000],
+  },
+  {
+    name: "uturnArrow",
+    title: "U-turn arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, bend radius, shaft length]",
+    defaults: [25000, 25000, 25000, 43750, 75000],
+  },
+  {
+    name: "circularArrow",
+    title: "Circular arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
+    defaults: [12500, 1142319, 20457681, 10800000, 12500],
+  },
+  {
+    name: "leftCircularArrow",
+    title: "Left circular arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
+    defaults: [12500, -1142319, 1142319, 10800000, 12500],
+  },
+  {
+    name: "leftRightCircularArrow",
+    title: "Left-right circular arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, start angle°, end angle°, arc angle°, arrow tip width]",
+    defaults: [12500, 1142319, 20457681, 11942319, 12500],
+  },
+  {
+    name: "curvedRightArrow",
+    title: "Curved right arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, curvature, arrowhead length]",
+    defaults: [25000, 50000, 25000],
+  },
+  {
+    name: "curvedLeftArrow",
+    title: "Curved left arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, curvature, arrowhead length]",
+    defaults: [25000, 50000, 25000],
+  },
+  {
+    name: "curvedUpArrow",
+    title: "Curved up arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, curvature, arrowhead length]",
+    defaults: [25000, 50000, 25000],
+  },
+  {
+    name: "curvedDownArrow",
+    title: "Curved down arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[arrowhead width, curvature, arrowhead length]",
+    defaults: [25000, 50000, 25000],
+  },
+  {
+    name: "stripedRightArrow",
+    title: "Striped right arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "notchedRightArrow",
+    title: "Notched right arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[shaft width, arrowhead length]",
+    defaults: [50000, 50000],
+  },
+  {
+    name: "swooshArrow",
+    title: "Swoosh arrow",
+    group: "Arrow Shapes",
+    adjLabel: "[tail width, arrowhead length]",
+    defaults: [25000, 16667],
+  },
+  {
+    name: "rightArrowCallout",
+    title: "Right arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box width]",
+    defaults: [25000, 25000, 25000, 64977],
+  },
+  {
+    name: "leftArrowCallout",
+    title: "Left arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box width]",
+    defaults: [25000, 25000, 25000, 64977],
+  },
+  {
+    name: "upArrowCallout",
+    title: "Up arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box height]",
+    defaults: [25000, 25000, 25000, 64977],
+  },
+  {
+    name: "downArrowCallout",
+    title: "Down arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box height]",
+    defaults: [25000, 25000, 25000, 64977],
+  },
+  {
+    name: "leftRightArrowCallout",
+    title: "Left-right arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box width]",
+    defaults: [25000, 25000, 25000, 48123],
+  },
+  {
+    name: "upDownArrowCallout",
+    title: "Up-down arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box height]",
+    defaults: [25000, 25000, 25000, 48123],
+  },
+  {
+    name: "quadArrowCallout",
+    title: "Quad arrow callout",
+    group: "Arrow Callouts",
+    adjLabel: "[shaft width, arrowhead width, arrowhead length, box size]",
+    defaults: [18515, 18515, 18515, 48123],
+  },
+  {
+    name: "wedgeRectCallout",
+    title: "Rectangle callout",
+    group: "Callouts",
+    adjLabel: "[tip X offset, tip Y offset]",
+    defaults: [-20833, 62500],
+  },
+  {
+    name: "wedgeRoundRectCallout",
+    title: "Rounded rectangle callout",
+    group: "Callouts",
+    adjLabel: "[tip X offset, tip Y offset, corner radius]",
+    defaults: [-20833, 62500, 16667],
+  },
+  {
+    name: "wedgeEllipseCallout",
+    title: "Ellipse callout",
+    group: "Callouts",
+    adjLabel: "[tip X offset, tip Y offset]",
+    defaults: [-20833, 62500],
+  },
+  {
+    name: "cloudCallout",
+    title: "Cloud callout",
+    group: "Callouts",
+    adjLabel: "[tip X offset, tip Y offset]",
+    defaults: [-20833, 62500],
+  },
+  {
+    name: "borderCallout1",
+    title: "Line callout 1",
+    group: "Callouts",
+    adjLabel: "[callout line Y1, X1, Y2, X2]",
+    defaults: [18750, -8333, 112500, -38333],
+  },
+  {
+    name: "borderCallout2",
+    title: "Line callout 2",
+    group: "Callouts",
+    adjLabel: "[line Y1, X1, knee point Y, X, end point Y, X]",
+    defaults: [18750, -8333, 18750, -16667, 112500, -46667],
+  },
+  {
+    name: "borderCallout3",
+    title: "Line callout 3",
+    group: "Callouts",
+    adjLabel: "[line Y1, X1, knee point 1 Y, X, knee point 2 Y, X, end point Y, X]",
+    defaults: [18750, -8333, 18750, -16667, 100000, -16667, 112963, -8333],
+  },
+  {
+    name: "accentCallout1",
+    title: "Accent line callout 1",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout1",
+    defaults: [18750, -8333, 112500, -38333],
+  },
+  {
+    name: "accentCallout2",
+    title: "Accent line callout 2",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout2",
+    defaults: [18750, -8333, 18750, -16667, 112500, -46667],
+  },
+  {
+    name: "accentCallout3",
+    title: "Accent line callout 3",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout3",
+    defaults: [18750, -8333, 18750, -16667, 100000, -16667, 112963, -8333],
+  },
+  {
+    name: "accentBorderCallout1",
+    title: "Bordered accent line callout 1",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout1",
+    defaults: [18750, -8333, 112500, -38333],
+  },
+  {
+    name: "accentBorderCallout2",
+    title: "Bordered accent line callout 2",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout2",
+    defaults: [18750, -8333, 18750, -16667, 112500, -46667],
+  },
+  {
+    name: "accentBorderCallout3",
+    title: "Bordered accent line callout 3",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout3",
+    defaults: [18750, -8333, 18750, -16667, 100000, -16667, 112963, -8333],
+  },
+  {
+    name: "callout1",
+    title: "Borderless callout 1",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout1",
+    defaults: [18750, -8333, 112500, -38333],
+  },
+  {
+    name: "callout2",
+    title: "Borderless callout 2",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout2",
+    defaults: [18750, -8333, 18750, -16667, 112500, -46667],
+  },
+  {
+    name: "callout3",
+    title: "Borderless callout 3",
+    group: "Callouts",
+    adjLabel: "Same as borderCallout3",
+    defaults: [18750, -8333, 18750, -16667, 100000, -16667, 112963, -8333],
+  },
+  {
+    name: "leftBrace",
+    title: "Left brace",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature, middle point position]",
+    defaults: [8333, 50000],
+  },
+  {
+    name: "rightBrace",
+    title: "Right brace",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature, middle point position]",
+    defaults: [8333, 50000],
+  },
+  {
+    name: "leftBracket",
+    title: "Left bracket",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature]",
+    defaults: [8333],
+  },
+  {
+    name: "rightBracket",
+    title: "Right bracket",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature]",
+    defaults: [8333],
+  },
+  {
+    name: "bracePair",
+    title: "Brace pair",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature]",
+    defaults: [8333],
+  },
+  {
+    name: "bracketPair",
+    title: "Bracket pair",
+    group: "Brackets and Braces",
+    adjLabel: "[curvature]",
+    defaults: [16667],
+  },
+  {
+    name: "ribbon",
+    title: "Down-curved ribbon",
+    group: "Ribbons",
+    adjLabel: "[fold height, ribbon curvature]",
+    defaults: [16667, 50000],
+  },
+  {
+    name: "ribbon2",
+    title: "Up-curved ribbon",
+    group: "Ribbons",
+    adjLabel: "[fold height, ribbon curvature]",
+    defaults: [16667, 50000],
+  },
+  {
+    name: "ellipseRibbon",
+    title: "Curved-surface down ribbon",
+    group: "Ribbons",
+    adjLabel: "[curvature, middle height, fold height]",
+    defaults: [25000, 50000, 12500],
+  },
+  {
+    name: "ellipseRibbon2",
+    title: "Curved-surface up ribbon",
+    group: "Ribbons",
+    adjLabel: "[curvature, middle height, fold height]",
+    defaults: [25000, 50000, 12500],
+  },
+  {
+    name: "leftRightRibbon",
+    title: "Left-right ribbon",
+    group: "Ribbons",
+    adjLabel: "[fold height, ribbon curvature, fold width]",
+    defaults: [50000, 50000, 16667],
+  },
+  {
+    name: "horizontalScroll",
+    title: "Horizontal scroll",
+    group: "Scrolls",
+    adjLabel: "[scroll size]",
+    defaults: [12500],
+  },
+  {
+    name: "verticalScroll",
+    title: "Vertical scroll",
+    group: "Scrolls",
+    adjLabel: "[scroll size]",
+    defaults: [12500],
+  },
+  {
+    name: "mathPlus",
+    title: "Plus sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness]",
+    defaults: [23520],
+  },
+  {
+    name: "mathMinus",
+    title: "Minus sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness]",
+    defaults: [23520],
+  },
+  {
+    name: "mathMultiply",
+    title: "Multiplication sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness]",
+    defaults: [23520],
+  },
+  {
+    name: "mathDivide",
+    title: "Division sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness, dot spacing, dot size]",
+    defaults: [23520, 5880, 11760],
+  },
+  {
+    name: "mathEqual",
+    title: "Equal sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness, line spacing]",
+    defaults: [23520, 11760],
+  },
+  {
+    name: "mathNotEqual",
+    title: "Not-equal sign",
+    group: "Math Symbols",
+    adjLabel: "[line thickness, slash angle°, line spacing]",
+    defaults: [23520, 6600000, 11760],
+  },
+  {
+    name: "chartPlus",
+    title: "Chart plus",
+    group: "Chart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "chartStar",
+    title: "Chart star",
+    group: "Chart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "chartX",
+    title: "Chart X",
+    group: "Chart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "cornerTabs",
+    title: "Corner tabs",
+    group: "Tab Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "squareTabs",
+    title: "Square tabs",
+    group: "Tab Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "plaqueTabs",
+    title: "Plaque tabs",
+    group: "Tab Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonBackPrevious",
+    title: "Back/Previous button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonBeginning",
+    title: "Beginning button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonBlank",
+    title: "Blank button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonDocument",
+    title: "Document button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonEnd",
+    title: "End button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonForwardNext",
+    title: "Forward/Next button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonHelp",
+    title: "Help button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonHome",
+    title: "Home button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonInformation",
+    title: "Information button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonMovie",
+    title: "Movie button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonReturn",
+    title: "Return button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "actionButtonSound",
+    title: "Sound button",
+    group: "Action Buttons",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartProcess",
+    title: "Flowchart: Process",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartAlternateProcess",
+    title: "Flowchart: Alternate process",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartDecision",
+    title: "Flowchart: Decision",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartDocument",
+    title: "Flowchart: Document",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartMultidocument",
+    title: "Flowchart: Multidocument",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartInputOutput",
+    title: "Flowchart: Data",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartPredefinedProcess",
+    title: "Flowchart: Predefined process",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartInternalStorage",
+    title: "Flowchart: Internal storage",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartManualInput",
+    title: "Flowchart: Manual input",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartManualOperation",
+    title: "Flowchart: Manual operation",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartPreparation",
+    title: "Flowchart: Preparation",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartDelay",
+    title: "Flowchart: Delay",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartTerminator",
+    title: "Flowchart: Terminator",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartConnector",
+    title: "Flowchart: Connector",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartOffpageConnector",
+    title: "Flowchart: Off-page connector",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartPunchedCard",
+    title: "Flowchart: Punched card",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartPunchedTape",
+    title: "Flowchart: Punched tape",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartCollate",
+    title: "Flowchart: Collate",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartSort",
+    title: "Flowchart: Sort",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartExtract",
+    title: "Flowchart: Extract",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartMerge",
+    title: "Flowchart: Merge",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartOr",
+    title: "Flowchart: Or",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartSummingJunction",
+    title: "Flowchart: Summing junction",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartOnlineStorage",
+    title: "Flowchart: Online storage",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartMagneticDisk",
+    title: "Flowchart: Magnetic disk",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartMagneticDrum",
+    title: "Flowchart: Magnetic drum",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartMagneticTape",
+    title: "Flowchart: Magnetic tape",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartOfflineStorage",
+    title: "Flowchart: Offline storage",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
+  {
+    name: "flowChartDisplay",
+    title: "Flowchart: Display",
+    group: "Flowchart Shapes",
+    adjLabel: "",
+    defaults: [],
+  },
 ];
 export const SHAPE_BY_NAME = new Map(SHAPE_CATALOG.map((s) => [s.name, s]));
 

@@ -1,0 +1,76 @@
+pageType: cover
+layoutId: cover
+elements:
+  - elementId: lyt-cover-arc
+    inherited:
+      scope: layout
+      ownerId: cover
+      elementId: arc
+    elementType: shape
+    shapeName: custom
+    bounds:
+      - 640
+      - 130
+      - 280
+      - 280
+    geometry:
+      viewBox:
+        - 100
+        - 100
+      path: M 0 100 C 0 45 22 0 50 0 C 78 0 100 45 100 100 L 84 100 C 84 56 70 16 50
+        16 C 30 16 16 56 16 100 Z
+    fill:
+      type: gradient
+      gradientType: linear
+      angle: 90
+      stops:
+        - position: 0
+          color: "#F97316"
+        - position: 1
+          color: "#FDE68A"
+          alpha: 0.85
+    shadow:
+      blur: 14
+      color: "#000000"
+      offsetX: 6
+      offsetY: 8
+      opacity: 0.35
+  - elementId: title
+    elementType: text
+    bounds:
+      - 80
+      - 180
+      - 520
+      - 90
+    content:
+      text: 封面标题
+      fontSize: 44
+      bold: true
+      color: "#FFFFFF"
+      align:
+        - left
+        - middle
+  - elementId: subtitle
+    elementType: text
+    bounds:
+      - 80
+      - 282
+      - 520
+      - 40
+    content:
+      text: 母版与版式结构检查
+      fontSize: 20
+      color: "#E0F2FE"
+      align:
+        - left
+        - middle
+background:
+  type: gradient
+  gradientType: linear
+  angle: 135
+  stops:
+    - position: 0
+      color: "#1E3A8A"
+    - position: 1
+      color: "#0F766E"
+backgroundInherited: true

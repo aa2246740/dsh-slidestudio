@@ -4,11 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import JSZip from "jszip";
-import {
-  createEmptyProject,
-  listComposedPage,
-  saveProject,
-} from "@open-slidestudio/pptd-v2";
+import { createEmptyProject, listComposedPage, saveProject } from "@open-slidestudio/pptd-v2";
 import { exportProjectToPptx } from "./export-pptd.js";
 
 test("exports rectangle as a native full-bounds rect without hiding real unknown degradation", async () => {
@@ -47,18 +43,14 @@ test("exports rectangle as a native full-bounds rect without hiding real unknown
     saveProject(project);
 
     const result = await exportProjectToPptx(project);
-    const aliasDegradations = result.report.degradations.filter(
-      (row) => row.elementId === "alias-rectangle",
-    );
+    const aliasDegradations = result.report.degradations.filter((row) => row.elementId === "alias-rectangle");
     assert.deepEqual(aliasDegradations, []);
     assert.equal(
       result.report.degradations.some((row) => row.elementId === "canonical-decagon"),
       false,
     );
     assert.ok(
-      result.report.degradations.some(
-        (row) => row.elementId === "legacy-unknown" && row.kind === "shape-as-rect",
-      ),
+      result.report.degradations.some((row) => row.elementId === "legacy-unknown" && row.kind === "shape-as-rect"),
     );
 
     const zip = await JSZip.loadAsync(result.data);

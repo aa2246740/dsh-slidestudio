@@ -1,0 +1,22 @@
+version: v2
+title: 旧格式烟测（第一轮）
+size:
+  - 960
+  - 540
+theme:
+  colors:
+    primary: "#2563EB"
+    text: "#111111"
+    background: "#FFFFFF"
+    muted: "#6B7280"
+  textStyles:
+    title:
+      fontSize: 32
+      bold: true
+      color: $text
+    body:
+      fontSize: 16
+      color: $text
+pages:
+  - pages/1_cover.page
+  - pages/2_mixed.page

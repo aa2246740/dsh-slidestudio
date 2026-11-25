@@ -1,0 +1,50 @@
+pageType: content
+background:
+  type: gradient
+  gradientType: linear
+  stops:
+    - position: 0
+      color: "#07111F"
+    - position: 1
+      color: "#DCE8F5"
+elements:
+  - elementId: wf-dark
+    elementType: chart
+    bounds: [20, 28, 430, 260]
+    title: 现金桥
+    axis:
+      x: 阶段
+      y: 金额
+    data:
+      cols: [阶段, 金额, 总计]
+      rows:
+        - [期初, 120, true]
+        - [流入, 60, false]
+        - [流出, -35, false]
+        - [期末, 145, true]
+    series:
+      - type: waterfall
+        encode:
+          x: 阶段
+          y: 金额
+          isTotal: 总计
+    legend: false
+  - elementId: scatter-dark
+    elementType: chart
+    bounds: [490, 28, 430, 300]
+    title: 风险矩阵
+    axis:
+      x: 可能性
+      y: 影响
+    data:
+      cols: [风险, 可能性, 影响]
+      rows:
+        - [供应, 4, 5]
+        - [价格, 3, 4]
+    series:
+      - type: scatter
+        encode:
+          x: 可能性
+          y: 影响
+        fill: "#38BDF8"
+    legend: false

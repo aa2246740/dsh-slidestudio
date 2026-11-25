@@ -1,12 +1,73 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalWritePageIssues, isCanonicalWritePageArgs, normalizeWritePageLineArrows, normalizeWritePageDialect } from "./write-page-schema.js";
+import {
+  canonicalWritePageIssues,
+  isCanonicalWritePageArgs,
+  normalizeWritePageLineArrows,
+  normalizeWritePageDialect,
+  writePageJsonSchema,
+} from "./write-page-schema.js";
 
 const base = (elementType: string, extra: Record<string, unknown>) => ({
   elementId: `${elementType}-1`,
   elementType,
   bounds: [10, 20, 300, 120],
   ...extra,
+});
+
+/** Every `border.width` schema in a compiled JSON schema (shape and line branches). */
+function borderWidthSchemas(node: unknown, found: Record<string, unknown>[] = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) borderWidthSchemas(item, found);
+    return found;
+  }
+  if (node === null || typeof node !== "object") return found;
+  const record = node as Record<string, unknown>;
+  const properties = record.properties as Record<string, unknown> | undefined;
+  const border = properties?.border as { properties?: Record<string, unknown> } | undefined;
+  const width = border?.properties?.width as Record<string, unknown> | undefined;
+  if (width) found.push(width);
+  for (const value of Object.values(record)) borderWidthSchemas(value, found);
+  return found;
+}
+
+test("documents border.width as PPTD px wherever a shape or line border is written (ruling 112)", () => {
+  const widths = borderWidthSchemas(writePageJsonSchema());
+  assert.ok(widths.length >= 2, "the shape and line branches both carry a border");
+  for (const width of widths) {
+    const description = String(width.description ?? "");
+    assert.match(description, /PPTD px/);
+    assert.match(description, /9525 EMU/);
+  }
+});
+
+test("VAL-FAULT-011: non-object elements name the JSON path and expected/received type without content", (t) => {
+  const issues = canonicalWritePageIssues({
+    id: "p05",
+    elements: [
+      ...Array.from({ length: 20 }, (_, i) => base("text", { elementId: `t${i}`, content: { text: "synthetic" } })),
+      "synthetic-placeholder",
+    ],
+  });
+  assert.deepEqual(issues, ["$.elements[20] must be an object (received string)"]);
+  assert.ok(!issues.join("; ").includes("synthetic-placeholder"));
+  t.diagnostic(issues.join("; "));
+});
+
+test("VAL-FAULT-011: type-discriminated fill errors name the failing branch field", (t) => {
+  const opacityIssues = canonicalWritePageIssues({
+    id: "p05",
+    elements: [base("shape", { shapeName: "rect", fill: { type: "solid", color: "#123456", opacity: 0.5 } })],
+  });
+  t.diagnostic(opacityIssues.join("; "));
+  assert.deepEqual(opacityIssues, ["$.elements[0].fill.opacity is not allowed"]);
+  assert.deepEqual(
+    canonicalWritePageIssues({
+      id: "p05",
+      elements: [base("shape", { shapeName: "rect", fill: { type: "solid", color: 12 } })],
+    }),
+    ["$.elements[0].fill.color must be a string (received number)"],
+  );
 });
 
 test("accepts all seven canonical PPTD element branches", () => {
@@ -154,9 +215,7 @@ test("rejects the b7 nested content.style shape instead of dropping it", () => {
       }),
     ],
   };
-  assert.deepEqual(canonicalWritePageIssues(args), [
-    "$.elements[0].content.style must be a string (received object)",
-  ]);
+  assert.deepEqual(canonicalWritePageIssues(args), ["$.elements[0].content.style must be a string (received object)"]);
 });
 
 test("reports actual JSON types for numeric text without echoing arbitrary content", () => {
@@ -227,7 +286,12 @@ test("requires non-empty elements, exact bounds, unique ids, and branch fields",
         base("table", {
           columnWidths: [120, 0],
           rowHeights: [-1],
-          rows: [[{ text: "A", rowSpan: 0 }, { text: "B", colSpan: -1 }]],
+          rows: [
+            [
+              { text: "A", rowSpan: 0 },
+              { text: "B", colSpan: -1 },
+            ],
+          ],
         }),
       ],
     }),
@@ -247,7 +311,11 @@ test("rejects unknown generation fields at every canonical object boundary", () 
     elements: [base("text", { content: { text: "Title", font_size: 50 }, fontSize: 50 })],
   });
   assert.ok(issues.includes("$.arguments is not allowed"));
-  assert.ok(issues.includes("$.elements[0].fontSize is not allowed"));
+  assert.ok(
+    issues.includes(
+      "$.elements[0].fontSize is not allowed; move to $.elements[0].content.fontSize (destination must be absent; resolve conflicting values explicitly)",
+    ),
+  );
   assert.ok(issues.includes("$.elements[0].content.font_size is not allowed"));
 });
 
@@ -305,4 +373,42 @@ test("rejects empty gradients at every page, table, and chart fill location", ()
       "$.elements[1].series[0].fill.stops must not be empty",
     ],
   );
+});
+
+test("VAL-LAYOUT-017: a text element accepts the pageNumber field and refuses any other field", () => {
+  const numbered = (field: string) => ({
+    id: "page-1",
+    elements: [
+      base("text", {
+        elementId: "pageno",
+        content: { text: "{page} / {pages}", field, fontSize: 12 },
+      }),
+    ],
+  });
+  assert.deepEqual(canonicalWritePageIssues(numbered("pageNumber")), []);
+  assert.notDeepEqual(canonicalWritePageIssues(numbered("date")), []);
+});
+
+/** Every gradient fill schema in a compiled JSON schema: the object that declares gradientType. */
+function gradientFillSchemas(node: unknown, found: Record<string, unknown>[] = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) gradientFillSchemas(item, found);
+    return found;
+  }
+  if (node === null || typeof node !== "object") return found;
+  const record = node as Record<string, unknown>;
+  const properties = record.properties as Record<string, unknown> | undefined;
+  if (properties?.gradientType) found.push(properties);
+  for (const value of Object.values(record)) gradientFillSchemas(value, found);
+  return found;
+}
+
+test("VAL-EDIT-007: every gradient fill schema says that leaving out angle resets it", () => {
+  const gradients = gradientFillSchemas(writePageJsonSchema());
+  assert.ok(gradients.length > 0, "the write_page schema declares gradient fills");
+  for (const properties of gradients) {
+    const angle = properties.angle as { type?: string; description?: string };
+    assert.equal(angle.type, "number");
+    assert.match(String(angle.description), /leaving it out resets/i);
+  }
 });

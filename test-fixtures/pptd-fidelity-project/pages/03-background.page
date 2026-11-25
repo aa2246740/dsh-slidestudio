@@ -1,0 +1,52 @@
+pageType: content
+background:
+  type: gradient
+  gradientType: linear
+  angle: 90
+  stops:
+    - position: 0
+      color: "#FFF7ED"
+    - position: 1
+      color: "#BFDBFE"
+      alpha: 0.9
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 40
+      - 30
+      - 880
+      - 50
+    content:
+      text: 渐变页面背景
+      fontSize: 24
+      bold: true
+      color: "#111111"
+      align:
+        - left
+        - middle
+  - elementId: caption
+    elementType: text
+    bounds:
+      - 60
+      - 120
+      - 840
+      - 60
+    content:
+      text: 本页背景为线性渐变，导出为 PPTX 页面背景的渐变填充。
+      fontSize: 16
+      color: "#444444"
+      align:
+        - left
+        - middle
+  - elementId: accent-rect
+    elementType: shape
+    shapeName: rect
+    bounds:
+      - 60
+      - 240
+      - 380
+      - 160
+    fill:
+      type: solid
+      color: "#1D4ED8"

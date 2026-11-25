@@ -1,0 +1,47 @@
+pageType: content
+background:
+  type: solid
+  color: "#FFFFFF"
+elements:
+  - elementId: tbl
+    elementType: table
+    bounds: [40, 40, 540, 160]
+    columnWidths: [0.35, 0.35, 0.3]
+    rows:
+      - - text: 区域
+          bold: true
+        - text: 收入
+          bold: true
+        - text: 增速
+          bold: true
+      - - text: 华北
+        - text: "120"
+        - text: "8%"
+      - - text: 华东
+        - text: "210"
+        - text: "12%"
+  - elementId: chart-light
+    elementType: chart
+    bounds: [40, 240, 860, 220]
+    data:
+      cols: [月, 收入]
+      rows:
+        - [1月, 10]
+        - [2月, 18]
+        - [3月, 15]
+        - [4月, 22]
+    series:
+      - type: bar
+        name: 收入
+        encode:
+          x: 月
+          y: 收入
+    title: 月度收入
+    legend: true
+  - elementId: image-fill
+    elementType: shape
+    bounds: [620, 40, 280, 160]
+    shapeName: rect
+    fill:
+      type: image
+      src: media/unmapped-fill.png

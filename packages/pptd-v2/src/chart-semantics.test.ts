@@ -4,10 +4,25 @@ import type { ChartElement } from "./types.js";
 import {
   categoricalChartModel,
   chartKind,
+  chartSurfaceColor,
+  isDarkChartSurface,
   placeScatterLabels,
   scatterChartModel,
   waterfallChartModel,
 } from "./chart-semantics.js";
+
+/** A 420 x 200 chart at (40, 40), and a page that is white unless a test says otherwise. */
+const CHART_BOUNDS: [number, number, number, number] = [40, 40, 420, 200];
+const SLIDE_BOUNDS: [number, number, number, number] = [0, 0, 960, 540];
+
+function surfaceOf(overrides: Partial<Parameters<typeof chartSurfaceColor>[0]> = {}): string {
+  return chartSurfaceColor({ bounds: CHART_BOUNDS, below: [], pageCss: "#FFFFFF", ...overrides });
+}
+
+/** A plain preset rectangle under the chart, painted in `solidCss` and covering the chart. */
+function panelUnder(solidCss: string | undefined, overrides: Record<string, unknown> = {}) {
+  return { bounds: SLIDE_BOUNDS, plainRect: true, solidCss, ...overrides };
+}
 
 describe("chart semantics", () => {
   it("honors reversed bar encodings as a horizontal chart", () => {
@@ -20,9 +35,7 @@ describe("chart semantics", () => {
           ["华北", 2315],
         ],
       },
-      series: [
-        { type: "bar", name: "金额", encode: { x: "金额", y: "区域" } },
-      ],
+      series: [{ type: "bar", name: "金额", encode: { x: "金额", y: "区域" } }],
     } as Pick<ChartElement, "data" | "series">;
 
     const model = categoricalChartModel(chart);
@@ -53,10 +66,13 @@ describe("chart semantics", () => {
 
     assert.equal(model.orientation, "vertical");
     assert.deepEqual(model.categories, ["黑金", "金卡"]);
-    assert.deepEqual(model.series.map((series) => series.values), [
-      [2.8, 8.6],
-      [22, 28],
-    ]);
+    assert.deepEqual(
+      model.series.map((series) => series.values),
+      [
+        [2.8, 8.6],
+        [22, 28],
+      ],
+    );
   });
 
   it("keeps each combination series kind and value axis", () => {
@@ -167,14 +183,8 @@ describe("chart semantics", () => {
       for (let j = i + 1; j < placements.length; j += 1) {
         const left = placements[i]!.box;
         const right = placements[j]!.box;
-        const overlapWidth = Math.max(
-          0,
-          Math.min(left.right, right.right) - Math.max(left.left, right.left),
-        );
-        const overlapHeight = Math.max(
-          0,
-          Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top),
-        );
+        const overlapWidth = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+        const overlapHeight = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
         assert.equal(overlapWidth * overlapHeight, 0);
       }
     }
@@ -220,5 +230,73 @@ describe("waterfall value domain", () => {
     assert.ok(model.valueMin <= 100);
     assert.ok(model.valueMax >= 150);
     assert.ok(model.valueMax - model.valueMin <= 200);
+  });
+});
+
+describe("chart surface: the colour a chart's ink reads against", () => {
+  it("takes the chart's own background before anything painted beneath it", () => {
+    assert.equal(surfaceOf({ chartCss: "#111111", below: [panelUnder("#FFFFFF")] }), "#111111");
+  });
+
+  it("takes an opaque solid plain rectangle that covers the chart", () => {
+    assert.equal(surfaceOf({ below: [panelUnder("#111111")] }), "#111111");
+  });
+
+  it("takes the topmost covering panel and ignores one that does not cover the chart", () => {
+    const below = [
+      panelUnder("#111111"),
+      panelUnder("#EEEEEE"),
+      { ...panelUnder("#000000"), bounds: [100, 40, 400, 200] as [number, number, number, number] },
+    ];
+    assert.equal(surfaceOf({ below }), "#EEEEEE");
+  });
+
+  it("ignores hidden, custom, translucent, gradient and unpainted panels", () => {
+    const excluded = [
+      panelUnder("#111111", { hidden: true }),
+      panelUnder("#111111", { plainRect: false }),
+      panelUnder("rgba(17, 17, 17, 0.5)"),
+      panelUnder("linear-gradient(90deg, #111111 0%, #FFFFFF 100%)"),
+      panelUnder(undefined),
+    ];
+    for (const panel of excluded) {
+      assert.equal(surfaceOf({ below: [panel] }), "#FFFFFF", JSON.stringify(panel));
+    }
+  });
+
+  it("reads the surface from the colour a candidate carries, and a picture carries none", () => {
+    assert.equal(surfaceOf({ below: [panelUnder("#E5E7EB")] }), "#E5E7EB");
+    assert.equal(surfaceOf({ below: [panelUnder(undefined)] }), "#FFFFFF");
+  });
+
+  it("falls back to the page surface, or to nothing when the page is unknown", () => {
+    assert.equal(surfaceOf({ pageCss: "#FFFFFF" }), "#FFFFFF");
+    assert.equal(surfaceOf({ pageCss: "" }), "");
+  });
+
+  it("reads a surface as dark when its first colour has YIQ brightness below 140", () => {
+    const dark = [
+      "#111111",
+      "#000",
+      "#888888",
+      "rgb(17, 17, 17)",
+      "rgba(17, 17, 17, 0.5)",
+      "#11111180",
+      "linear-gradient(90deg, #102E52 0%, #ffffff 100%)",
+      // The first stop decides, even when it is translucent and the second stop is white.
+      "linear-gradient(90deg, rgba(0, 0, 0, 0.5) 0%, #FFFFFF 100%)",
+    ];
+    const light = [
+      "#FFFFFF",
+      "#FFF",
+      "#8C8C8C",
+      "rgb(255, 255, 255)",
+      "#E5E7EB",
+      "linear-gradient(90deg, #FFFFFF 0%, #111111 100%)",
+      "",
+      "not a colour",
+    ];
+    for (const css of dark) assert.equal(isDarkChartSurface(css), true, css);
+    for (const css of light) assert.equal(isDarkChartSurface(css), false, css);
   });
 });

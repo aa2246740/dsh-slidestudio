@@ -11,9 +11,9 @@ const XML_PATH = path.resolve(
   "../src/data/presetShapeDefinitions.xml",
 );
 
-type Guides = Record<string, number>;
+export type Guides = Record<string, number>;
 
-type PathCmd =
+export type PathCmd =
   | { k: "M" | "L"; x: string; y: string }
   | { k: "C"; x1: string; y1: string; x2: string; y2: string; x: string; y: string }
   | { k: "Q"; x1: string; y1: string; x: string; y: string }
@@ -186,7 +186,7 @@ function quad(pts: string[][]) {
   return { x1: pts[0]![0]!, y1: pts[0]![1]!, x: pts[1]![0]!, y: pts[1]![1]! };
 }
 
-function seedGuides(w: number, h: number): Guides {
+export function seedGuides(w: number, h: number): Guides {
   const ss = Math.min(w, h);
   const ls = Math.max(w, h);
   return {
@@ -233,7 +233,7 @@ function num(tok: string, g: Guides): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function evalFmla(fmla: string, g: Guides): number {
+export function evalFmla(fmla: string, g: Guides): number {
   const p = fmla.trim().split(/\s+/);
   const op = p[0] ?? "val";
   const a = num(p[1] ?? "0", g);
@@ -294,7 +294,7 @@ function v(expr: string | number, g: Guides): number {
   return num(expr, g);
 }
 
-function deg(emuAng: number): number {
+export function deg(emuAng: number): number {
   return emuAng / 60000;
 }
 
@@ -401,10 +401,7 @@ export function ooxmlPresetNames(): string[] {
   return [...cache.keys()];
 }
 
-export function ooxmlShapeGeometry(
-  name: string,
-  adjustments?: number[],
-): ShapeGeometry | null {
+export function ooxmlShapeGeometry(name: string, adjustments?: number[]): ShapeGeometry | null {
   loadXml();
   const shape = cache.get(name);
   if (!shape || !shape.paths.length) return null;

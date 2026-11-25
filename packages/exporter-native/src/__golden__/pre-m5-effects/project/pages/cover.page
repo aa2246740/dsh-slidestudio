@@ -1,0 +1,87 @@
+pageType: cover
+background:
+  type: solid
+  color: "#F7F3EA"
+elements:
+  - elementId: title-text
+    elementType: text
+    bounds:
+      - 60
+      - 40
+      - 520
+      - 60
+    content:
+      text: 无阴影的普通页面
+      fontSize: 32
+      color: "#111111"
+      bold: true
+  - elementId: solid-rect
+    elementType: shape
+    bounds:
+      - 60
+      - 120
+      - 200
+      - 120
+    shapeName: rect
+    fill:
+      type: solid
+      color: "#2563EB"
+    border:
+      width: 2
+      color: "#111111"
+      style: solid
+  - elementId: gradient-ellipse
+    elementType: shape
+    bounds:
+      - 300
+      - 120
+      - 200
+      - 120
+    shapeName: ellipse
+    fill:
+      type: gradient
+      gradientType: linear
+      angle: 90
+      stops:
+        - position: 0
+          color: "#FFF4F4"
+        - position: 1
+          color: "#C00000"
+  - elementId: rule-line
+    elementType: line
+    bounds:
+      - 60
+      - 280
+      - 200
+      - 2
+    viewBox:
+      - 200
+      - 2
+    points: M0 1 L200 1
+    border:
+      width: 2
+      color: "#2563EB"
+      style: solid
+  - elementId: plain-picture
+    elementType: image
+    bounds:
+      - 300
+      - 280
+      - 160
+      - 100
+    src: media/photo.png
+  - elementId: plain-table
+    elementType: table
+    bounds:
+      - 60
+      - 400
+      - 400
+      - 80
+    columnWidths:
+      - 200
+      - 200
+    rows:
+      - - text: 指标
+        - text: 数值
+      - - text: 收入
+        - text: "120"

@@ -1,0 +1,83 @@
+pageType: content
+background:
+  type: solid
+  color: "#FFFFFF"
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 40
+      - 30
+      - 880
+      - 50
+    content:
+      text: 自定义路径与渐变阴影
+      fontSize: 24
+      bold: true
+      color: "#111111"
+      align:
+        - left
+        - middle
+  - elementId: path-solid
+    elementType: shape
+    shapeName: custom
+    bounds:
+      - 60
+      - 150
+      - 380
+      - 220
+    geometry:
+      viewBox:
+        - 200
+        - 100
+      path: M 0 50 C 50 0 150 100 200 50 L 200 100 L 0 100 Z
+    fill:
+      type: solid
+      color: "#2563EB"
+  - elementId: path-gradient-shadow
+    elementType: shape
+    shapeName: custom
+    bounds:
+      - 520
+      - 150
+      - 380
+      - 220
+    geometry:
+      viewBox:
+        - 200
+        - 100
+      path: M 100 0 L 200 60 L 150 100 L 50 100 L 0 60 Z
+    fill:
+      type: gradient
+      gradientType: linear
+      angle: 45
+      stops:
+        - position: 0
+          color: "#2563EB"
+          alpha: 1
+        - position: 0.5
+          color: "#10B981"
+          alpha: 0.6
+        - position: 1
+          color: "#F59E0B"
+          alpha: 0.2
+    shadow:
+      blur: 10
+      color: "#000000"
+      offsetX: 4
+      offsetY: 4
+      opacity: 0.35
+  - elementId: caption
+    elementType: text
+    bounds:
+      - 60
+      - 400
+      - 840
+      - 40
+    content:
+      text: 左：纯色自定义路径。右：三段渐变（含透明度）与投影。
+      fontSize: 16
+      color: "#444444"
+      align:
+        - left
+        - middle

@@ -10,10 +10,7 @@ import { openSession, renderModel } from "./index.js";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function loadPaint(): (el: object) => string | null {
-  const src = fs.readFileSync(
-    path.join(repoRoot, "apps/native-web/public/shape-paint.js"),
-    "utf8",
-  );
+  const src = fs.readFileSync(path.join(repoRoot, "apps/native-web/public/shape-paint.js"), "utf8");
   const g: { shapePaintMarkup?: (el: object) => string | null } = {};
   new Function("globalThis", src)(g);
   if (typeof g.shapePaintMarkup !== "function") {
@@ -28,8 +25,7 @@ describe("native shape paint markup", () => {
     const svg = paint({
       id: "overlay",
       pathD: "M0 0H100V100H0Z",
-      fillCss:
-        "linear-gradient(0deg, rgba(0, 0, 0, 0.949) 0%, rgba(0, 0, 0, 0.6) 50%, rgba(0, 0, 0, 0) 100%)",
+      fillCss: "linear-gradient(0deg, rgba(0, 0, 0, 0.949) 0%, rgba(0, 0, 0, 0.6) 50%, rgba(0, 0, 0, 0) 100%)",
     });
     assert.ok(svg);
     assert.match(svg, /<linearGradient/);

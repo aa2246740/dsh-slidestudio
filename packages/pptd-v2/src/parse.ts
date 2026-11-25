@@ -3,14 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
+import { PptdError } from "./errors.js";
+import { materializeInheritance } from "./inheritance.js";
+import { assertLayoutSchema, assertPageOwnership } from "./layout-schema.js";
 import type { Page, PptdProject, Presentation } from "./types.js";
 
-export class PptdError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PptdError";
-  }
-}
+export { PptdError };
 
 /**
  * A PPTD save updates a manifest and one or more page files. Keep every
@@ -18,6 +16,33 @@ export class PptdError extends Error {
  * competing save halfway through that multi-file operation.
  */
 const WRITE_LOCK_NAME = ".pptd-write.lock";
+
+/**
+ * YAML parse results keyed by file identity (mtime + size). Writers always go
+ * through writeFileAtomic's rename, which changes both, so a hit is always the
+ * current content. Hits are deep-cloned: callers receive fresh objects, same
+ * as an uncached parse, so mutations can never leak through the cache. Inspect
+ * paths re-load the same project on every poll — without this a host slow
+ * enough to make parse cost measurable burns a whole core on re-parses.
+ */
+const parseCache = new Map<string, { mtimeMs: number; size: number; doc: unknown }>();
+const PARSE_CACHE_MAX = 256;
+
+function readYamlFileCached(file: string): unknown {
+  const st = fs.statSync(file);
+  const hit = parseCache.get(file);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+    parseCache.delete(file);
+    parseCache.set(file, hit);
+    return structuredClone(hit.doc);
+  }
+  const doc = YAML.parse(fs.readFileSync(file, "utf8"));
+  if (parseCache.size >= PARSE_CACHE_MAX) {
+    parseCache.delete(parseCache.keys().next().value!);
+  }
+  parseCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, doc });
+  return structuredClone(doc);
+}
 const LOCK_RETRY_MS = 10;
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 const lockDepthByRoot = new Map<string, number>();
@@ -26,13 +51,20 @@ function lockDir(rootDir: string): string {
   return path.join(path.resolve(rootDir), WRITE_LOCK_NAME);
 }
 
+const syncSleepBuffer = new SharedArrayBuffer(4);
+const syncSleepView = new Int32Array(syncSleepBuffer);
+
 function sleepSync(ms: number): void {
-  // Bounded busy-wait: Atomics.wait on a SharedArrayBuffer is unavailable in
-  // some embedders (renderer processes, restricted workers). Lock retries are
-  // 10ms, so a short spin is acceptable and portable.
-  const end = Date.now() + Math.max(0, ms);
-  while (Date.now() < end) {
-    // intentional bounded spin
+  // Real blocking sleep: Atomics.wait parks the thread instead of spinning at
+  // 100% CPU while a lock is held. Fall back to the bounded spin for embedders
+  // where Atomics.wait on the main thread is unavailable (renderer processes).
+  try {
+    Atomics.wait(syncSleepView, 0, 0, Math.max(0, ms));
+  } catch {
+    const end = Date.now() + Math.max(0, ms);
+    while (Date.now() < end) {
+      // intentional bounded spin
+    }
   }
 }
 
@@ -96,11 +128,7 @@ function reclaimDeadWriteLock(dir: string): boolean {
 }
 
 /** Execute a synchronous multi-file project operation under the PPTD lock. */
-export function withProjectWriteLock<T>(
-  rootDir: string,
-  action: () => T,
-  opts: { timeoutMs?: number } = {},
-): T {
+export function withProjectWriteLock<T>(rootDir: string, action: () => T, opts: { timeoutMs?: number } = {}): T {
   const root = path.resolve(rootDir);
   const heldDepth = lockDepthByRoot.get(root) ?? 0;
   if (heldDepth > 0) {
@@ -176,14 +204,18 @@ function assertPresentation(raw: unknown, file: string): Presentation {
     }
     seenPages.add(key);
   }
+  const theme = o.theme as Record<string, unknown> | null | undefined;
+  if (theme && typeof theme === "object" && theme.neutralChrome !== undefined) {
+    if (typeof theme.neutralChrome !== "boolean") {
+      throw new PptdError(`${file}: theme.neutralChrome must be true or false`);
+    }
+  }
   return o as unknown as Presentation;
 }
 
 function isFiniteNumberArray(value: unknown, length: number): value is number[] {
   return (
-    Array.isArray(value) &&
-    value.length === length &&
-    value.every((n) => typeof n === "number" && Number.isFinite(n))
+    Array.isArray(value) && value.length === length && value.every((n) => typeof n === "number" && Number.isFinite(n))
   );
 }
 
@@ -259,15 +291,15 @@ function loadProjectUnlocked(source: string): PptdProject {
     throw new PptdError(`manifest must be a .pptd file: ${manifestPath}`);
   }
 
-  const manifestText = fs.readFileSync(manifestPath, "utf8");
-  const presentation = assertPresentation(YAML.parse(manifestText), manifestPath);
+  const presentation = assertPresentation(readYamlFileCached(manifestPath), manifestPath);
+  assertLayoutSchema(presentation, manifestPath);
 
   const pages = presentation.pages.map((rel) => {
     const pagePath = safeJoin(rootDir, rel);
     if (!fs.existsSync(pagePath)) {
       throw new PptdError(`missing page file: ${rel}`);
     }
-    const page = assertPage(YAML.parse(fs.readFileSync(pagePath, "utf8")), pagePath);
+    const page = assertPage(readYamlFileCached(pagePath), pagePath);
     return { path: rel, page };
   });
 
@@ -299,10 +331,7 @@ export function loadProject(source: string): PptdProject {
 function writeFileAtomic(target: string, contents: string): void {
   const dir = path.dirname(target);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(
-    dir,
-    `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
-  );
+  const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
   try {
     const fd = fs.openSync(tmp, "w");
     try {
@@ -344,8 +373,13 @@ export function saveProject(project: PptdProject): void {
         throw new PptdError(`duplicate page path: ${rel}`);
       }
       seen.add(key);
-      return { out, page };
+      return { out, page, rel };
     });
+    // Masters, layouts and page ownership are checked with the destinations, so a deck that
+    // fails any of them leaves every file as it was. Copies are refreshed only after that.
+    assertLayoutSchema(presentation, manifestName);
+    for (const { rel, page } of targets) assertPageOwnership(presentation, page, rel);
+    materializeInheritance(project);
     const manifestDoc: Presentation = {
       ...presentation,
       version: "v2",

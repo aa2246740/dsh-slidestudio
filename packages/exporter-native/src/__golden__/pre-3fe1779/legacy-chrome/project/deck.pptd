@@ -1,0 +1,14 @@
+version: v2
+title: 旧版框线与图表配色
+size:
+  - 960
+  - 540
+theme:
+  colors:
+    primary: "#2563EB"
+    text: "#111111"
+    background: "#FFFFFF"
+    muted: "#6B7280"
+pages:
+  - pages/1_dark.page
+  - pages/2_light.page

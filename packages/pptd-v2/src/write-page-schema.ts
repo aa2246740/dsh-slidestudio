@@ -1,23 +1,30 @@
-import type {
-  Animation,
-  ChartElement,
-  Fill,
-  IconElement,
-  LineElement,
-  PptdElement,
-  ShapeElement,
-  TableElement,
-  TextElement,
-} from "./types.js";
+import type { Animation, Fill, PptdElement } from "./types.js";
 import { SUPPORTED_SHAPE_NAMES } from "./shape-catalog.js";
+import { CUSTOM_SHAPE_NAME, customGeometryIssues } from "./custom-geometry.js";
+import { record, typeIssue, unionIssues } from "./write-page-diagnostics.js";
+import { misplacedStyleIssue } from "./write-page-style-catalog.js";
+import { PROVENANCE_PROPERTY, canonicalProvenanceIssues, type ProvenanceDeclaration } from "./write-page-provenance.js";
+import { semanticIssues } from "./write-page-semantics.js";
+import { effectIssues, fillEffectIssues, shadowIssues } from "./effect-issues.js";
 
-type Schema =
-  | { readonly type: "string"; readonly enum?: readonly string[]; readonly const?: string; readonly description?: string }
+export type Schema =
+  | {
+      readonly type: "string";
+      readonly enum?: readonly string[];
+      readonly const?: string;
+      readonly description?: string;
+    }
   | { readonly type: "number"; readonly description?: string }
   | { readonly type: "integer"; readonly description?: string }
   | { readonly type: "boolean"; readonly description?: string }
   | { readonly type: "null"; readonly description?: string }
-  | { readonly type: "array"; readonly items?: Schema; readonly minItems?: number; readonly maxItems?: number; readonly description?: string }
+  | {
+      readonly type: "array";
+      readonly items?: Schema;
+      readonly minItems?: number;
+      readonly maxItems?: number;
+      readonly description?: string;
+    }
   | {
       readonly type: "object";
       readonly properties?: PropertyMap;
@@ -26,20 +33,26 @@ type Schema =
     }
   | { readonly oneOf: readonly [Schema, Schema, ...Schema[]]; readonly description?: string };
 
-type Property = Schema & { readonly required?: true };
-type PropertyMap = Readonly<Record<string, Property>>;
+export type Property = Schema & { readonly required?: true };
+export type PropertyMap = Readonly<Record<string, Property>>;
 
-const string = (description?: string) => ({ type: "string", ...(description ? { description } : {}) }) as const;
-const number = (description?: string) => ({ type: "number", ...(description ? { description } : {}) }) as const;
-const boolean = (description?: string) => ({ type: "boolean", ...(description ? { description } : {}) }) as const;
-const array = (items: Schema, description?: string) =>
+export const string = (description?: string) => ({ type: "string", ...(description ? { description } : {}) }) as const;
+export const number = (description?: string) => ({ type: "number", ...(description ? { description } : {}) }) as const;
+export const boolean = (description?: string) =>
+  ({ type: "boolean", ...(description ? { description } : {}) }) as const;
+export const array = (items: Schema, description?: string) =>
   ({ type: "array", items, ...(description ? { description } : {}) }) as const;
 const tuple = (items: Schema, length: number, description?: string) =>
   ({ ...array(items, description), minItems: length, maxItems: length }) as const;
-const object = (properties: PropertyMap, additionalProperties = false, description?: string) =>
-  ({ type: "object", properties, additionalProperties, ...(description ? { description } : {}) }) as const;
-const oneOf = (...branches: [Schema, Schema, ...Schema[]]) => ({ oneOf: branches }) as const;
-const required = <T extends Schema>(schema: T): T & { readonly required: true } =>
+export const object = (properties: PropertyMap, additionalProperties = false, description?: string) =>
+  ({
+    type: "object",
+    properties,
+    additionalProperties,
+    ...(description ? { description } : {}),
+  }) as const;
+export const oneOf = (...branches: [Schema, Schema, ...Schema[]]) => ({ oneOf: branches }) as const;
+export const required = <T extends Schema>(schema: T): T & { readonly required: true } =>
   ({ ...schema, required: true }) as T & { readonly required: true };
 
 const color = string("Official #RRGGBB/#RRGGBBAA or an adopted Theme.colors $token.");
@@ -48,31 +61,84 @@ const bounds = tuple(number(), 4, "Exactly [x,y,width,height]; all values finite
 const alignment = tuple(string(), 2, "Exactly [horizontal,vertical].");
 
 const fit = object({ mode: required({ type: "string", enum: ["fill", "contain", "cover"] }) });
-const imageCrop = object({ left: number(), top: number(), right: number(), bottom: number() });
-const supportedShapeName = {
+const imageCrop = object(
+  { left: number(), top: number(), right: number(), bottom: number() },
+  false,
+  "Fractions from 0 to 1 of the picture removed from each side. left plus right and top plus bottom must stay below 1.",
+);
+const shapeNameOrCustom = {
   type: "string",
-  enum: SUPPORTED_SHAPE_NAMES,
+  enum: [...SUPPORTED_SHAPE_NAMES, CUSTOM_SHAPE_NAME],
   description:
-    "Use an official SHAPE_CATALOG name (for example rect, roundRect, ellipse, triangle). Accepted alias: rectangle means rect. Unknown names are rejected for new writes.",
+    "Use an official SHAPE_CATALOG name (for example rect, roundRect, ellipse, triangle), or custom together with geometry for a free path. Accepted alias: rectangle means rect. Unknown names are rejected for new writes.",
 } as const;
-const shapeDef = object({ shapeName: required(supportedShapeName), adjustments: finiteNumberArray });
-const gradientStop = object({ position: required(number()), color: required(color) });
-const solidFill = object({ type: required({ type: "string", const: "solid" }), color: required(color) });
+const customGeometry = object(
+  {
+    viewBox: required(tuple(number(), 2, "Exactly two positive numbers [width,height] in path units.")),
+    path: required(
+      string(
+        "Absolute M/L/C/Q/Z path in viewBox units: one command letter per segment, at most 256 segments and 4 KiB. arcTo and H/V/S/T are not allowed.",
+      ),
+    ),
+  },
+  false,
+  "Required when shapeName is custom; never on a preset shape.",
+);
+const imageCropShape = object(
+  {
+    shapeName: required(shapeNameOrCustom),
+    adjustments: finiteNumberArray,
+    geometry: customGeometry,
+  },
+  false,
+  "A picture clip: an official preset name, or custom with geometry (the picture is drawn inside that path).",
+);
+const gradientStop = object({
+  position: required(number()),
+  color: required(color),
+  alpha: number("Stop opacity from 0 to 1; it multiplies the alpha of the colour."),
+});
+const solidFill = object({
+  type: required({ type: "string", const: "solid" }),
+  color: required(color),
+});
 const gradientFill = object({
-    type: required({ type: "string", const: "gradient" }),
-    gradientType: required({ type: "string", enum: ["linear", "radial"] }),
-    stops: required(array(gradientStop)),
-    angle: number(),
-  });
+  type: required({ type: "string", const: "gradient" }),
+  gradientType: required({ type: "string", enum: ["linear", "radial"] }),
+  stops: required(array(gradientStop)),
+  angle: number("Degrees clockwise, 0 is left to right. Leaving it out resets it to 0."),
+});
 const imageFill = object({
-    type: required({ type: "string", const: "image" }),
-    src: required(string()),
-    fit,
-    opacity: number(),
-  });
-const fill = oneOf(solidFill, gradientFill, imageFill);
-const border = object({ style: string(), width: number(), color });
-const shadow = object({ blur: number(), color, offsetX: number(), offsetY: number() });
+  type: required({ type: "string", const: "image" }),
+  src: required(string()),
+  fit,
+  opacity: number(),
+  mode: {
+    type: "string",
+    enum: ["stretch", "tile"],
+    description: "stretch (default) draws the picture once across the shape; tile repeats it at natural size.",
+  },
+  crop: imageCrop,
+});
+export const fill = oneOf(solidFill, gradientFill, imageFill);
+const border = object({
+  style: string(),
+  width: number(
+    "Stroke width in PPTD px for every shape and line (1 px = 9525 EMU = 0.75 pt), the same unit as x and y. A colour without a width draws 1 px; an unstyled line draws 2 px.",
+  ),
+  color,
+});
+const shadow = object(
+  {
+    blur: number("Blur radius in PPTD px; zero or more."),
+    color,
+    offsetX: number(),
+    offsetY: number(),
+    opacity: number("Shadow opacity from 0 to 1; it multiplies the alpha of the colour."),
+  },
+  false,
+  "Element shadow in PPTD px. Omitted blur, offsetX and offsetY take 12, 0 and 4.",
+);
 const smartArt = object({
   id: required(string()),
   layout: required({ type: "string", enum: ["process", "cycle", "hierarchy"] }),
@@ -101,7 +167,11 @@ const baseProperties = {
 } as const satisfies PropertyMap;
 
 const textContent = object({
-  text: required(string('Plain or rich-text HTML string. Quote numeric labels too: "1", "2", "3". Inline CSS belongs only inside this string.')),
+  text: required(
+    string(
+      'Plain or rich-text HTML string. Quote numeric labels too: "1", "2", "3". Inline CSS belongs only inside this string.',
+    ),
+  ),
   style: string("Theme text-style reference such as $title. Never pass a style object here."),
   color,
   fontSize: number("Font size belongs directly on content."),
@@ -124,6 +194,12 @@ const textContent = object({
   wrap: boolean(),
   list: { type: "string", enum: ["bullet", "number"] },
   href: string(),
+  field: {
+    type: "string",
+    enum: ["pageNumber"],
+    description:
+      "pageNumber shows the page's own number: {page} becomes its 1-based position and {pages} the deck total. Never zero-pad the tokens.",
+  },
 });
 
 const tableCell = object({
@@ -152,7 +228,7 @@ const lineArrow = oneOf(
   {
     type: "string",
     enum: ["arrow", "stealth", "diamond", "oval", "none", "null", ""],
-    description: "Use JSON null for no head. The string \"null\", none, or {} are accepted and stored as no head.",
+    description: 'Use JSON null for no head. The string "null", none, or {} are accepted and stored as no head.',
   },
   { type: "null" },
   object({}, false, "Empty object means no arrow head."),
@@ -176,7 +252,8 @@ export const PPTD_ELEMENT_PARAMETER_SPEC = oneOf(
   object({
     ...baseProperties,
     elementType: required({ type: "string", const: "shape" }),
-    shapeName: required(supportedShapeName),
+    shapeName: required(shapeNameOrCustom),
+    geometry: customGeometry,
     fill,
     border,
     adjustments: finiteNumberArray,
@@ -187,7 +264,7 @@ export const PPTD_ELEMENT_PARAMETER_SPEC = oneOf(
     src: required(string()),
     fit,
     crop: imageCrop,
-    cropShape: shapeDef,
+    cropShape: imageCropShape,
   }),
   object({
     ...baseProperties,
@@ -207,6 +284,11 @@ export const PPTD_ELEMENT_PARAMETER_SPEC = oneOf(
     legend: oneOf(boolean(), object({}, true)),
     labels: boolean(),
     axis: chartAxis,
+    grouping: {
+      type: "string",
+      enum: ["clustered", "stacked", "percentStacked"],
+      description: "Bar grouping. Omit for clustered. stacked and percentStacked apply to bar charts only.",
+    },
   }),
   object({
     ...baseProperties,
@@ -217,7 +299,13 @@ export const PPTD_ELEMENT_PARAMETER_SPEC = oneOf(
   object({
     ...baseProperties,
     elementType: required({ type: "string", const: "line" }),
-    viewBox: required(tuple(number(), 2, "Exactly two numbers [width,height], for example [300,120]. Do not use the four-number SVG viewBox form.")),
+    viewBox: required(
+      tuple(
+        number(),
+        2,
+        "Exactly two numbers [width,height], for example [300,120]. Do not use the four-number SVG viewBox form.",
+      ),
+    ),
     points: required(string()),
     border,
     curve: string(),
@@ -236,9 +324,15 @@ export const WRITE_PAGE_PARAMETER_SPEC = {
   pageType: string(),
   background: fill,
   notes: string(),
-  elements: required(array(PPTD_ELEMENT_PARAMETER_SPEC, "A non-empty complete-page replacement using canonical PPTD v2 elements.")),
+  elements: required(
+    array(PPTD_ELEMENT_PARAMETER_SPEC, "A non-empty complete-page replacement using canonical PPTD v2 elements."),
+  ),
   animations: array(animation),
   expectedPageSha256: string("pageSha256 returned by read_page when replacing an editor-locked existing page."),
+  layoutId: string(
+    "Optional id of a page layout the deck already defines. The page inherits its copies; omit it for a page without a layout.",
+  ),
+  provenance: PROVENANCE_PROPERTY,
 } as const satisfies PropertyMap;
 
 /** Element-scoped edit contract. The array contains only the authorized target
@@ -246,47 +340,36 @@ export const WRITE_PAGE_PARAMETER_SPEC = {
 export const EDIT_ELEMENTS_PARAMETER_SPEC = {
   pageId: required(string("Existing PPTD page id. Must match the active editor element scope.")),
   expectedPageSha256: required(string("Current pageSha256 returned by read_page.")),
-  elements: required(array(PPTD_ELEMENT_PARAMETER_SPEC, "Complete replacements for exactly the authorized target elementIds.")),
+  elements: required(
+    array(PPTD_ELEMENT_PARAMETER_SPEC, "Complete replacements for exactly the authorized target elementIds."),
+  ),
 } as const satisfies PropertyMap;
 
-/** Compile the shared specification to standard JSON Schema. DSH's author DSL
- * drops array cardinality keywords, so publish this lossless form to providers. */
-export function writePageJsonSchema(): Record<string, unknown> {
-  function compile(schema: Property): Record<string, unknown> {
-    const { required: _required, ...node } = schema;
-    if ("oneOf" in node) return { ...node, oneOf: node.oneOf.map(compile) };
-    if (node.type === "array") return { ...node, ...(node.items ? { items: compile(node.items) } : {}) };
-    if (node.type === "object") {
-      const entries = Object.entries(node.properties ?? {});
-      const requiredFields = entries.filter(([, child]) => child.required).map(([key]) => key);
-      return {
-        ...node,
-        properties: Object.fromEntries(entries.map(([key, child]) => [key, compile(child)])),
-        ...(requiredFields.length ? { required: requiredFields } : {}),
-      };
-    }
-    return node;
+/** Lower one shared parameter spec to standard JSON Schema. DSH's author DSL drops array
+ * cardinality keywords, so providers receive this lossless form. */
+export function compileParameterSchema(schema: Property): Record<string, unknown> {
+  const { required: _required, ...node } = schema;
+  if ("oneOf" in node) return { ...node, oneOf: node.oneOf.map(compileParameterSchema) };
+  if (node.type === "array") return { ...node, ...(node.items ? { items: compileParameterSchema(node.items) } : {}) };
+  if (node.type === "object") {
+    const entries = Object.entries(node.properties ?? {});
+    const requiredFields = entries.filter(([, child]) => child.required).map(([key]) => key);
+    return {
+      ...node,
+      properties: Object.fromEntries(entries.map(([key, child]) => [key, compileParameterSchema(child)])),
+      ...(requiredFields.length ? { required: requiredFields } : {}),
+    };
   }
-  return compile(object(WRITE_PAGE_PARAMETER_SPEC));
+  return node;
+}
+
+/** Compile the shared write_page specification to standard JSON Schema for providers. */
+export function writePageJsonSchema(): Record<string, unknown> {
+  return compileParameterSchema(object(WRITE_PAGE_PARAMETER_SPEC));
 }
 
 export function editElementsJsonSchema(): Record<string, unknown> {
-  function compile(schema: Property): Record<string, unknown> {
-    const { required: _required, ...node } = schema;
-    if ("oneOf" in node) return { ...node, oneOf: node.oneOf.map(compile) };
-    if (node.type === "array") return { ...node, ...(node.items ? { items: compile(node.items) } : {}) };
-    if (node.type === "object") {
-      const entries = Object.entries(node.properties ?? {});
-      const requiredFields = entries.filter(([, child]) => child.required).map(([key]) => key);
-      return {
-        ...node,
-        properties: Object.fromEntries(entries.map(([key, child]) => [key, compile(child)])),
-        ...(requiredFields.length ? { required: requiredFields } : {}),
-      };
-    }
-    return node;
-  }
-  return compile(object(EDIT_ELEMENTS_PARAMETER_SPEC));
+  return compileParameterSchema(object(EDIT_ELEMENTS_PARAMETER_SPEC));
 }
 
 export type CanonicalWritePageArgs = {
@@ -297,6 +380,9 @@ export type CanonicalWritePageArgs = {
   elements: PptdElement[];
   animations?: Animation[];
   expectedPageSha256?: string;
+  layoutId?: string;
+  /** Runtime metadata only: recorded in the run ledger, never persisted into the page. */
+  provenance?: ProvenanceDeclaration;
 };
 
 export type CanonicalEditElementsArgs = {
@@ -305,44 +391,8 @@ export type CanonicalEditElementsArgs = {
   elements: PptdElement[];
 };
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function receivedType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
-
-function typeIssue(path: string, expected: string, value: unknown): string {
-  // Report only the JSON type. Echoing arbitrary string/object contents can
-  // leak page copy into logs, and including primitive values would split the
-  // same normalized ToolInvalidArgsLoopGuard fingerprint (for example 1/2/3).
-  return `${path} must be ${expected} (received ${receivedType(value)})`;
-}
-
 function schemaIssues(schema: Schema, value: unknown, path: string): string[] {
-  if ("oneOf" in schema) {
-    const results = schema.oneOf.map((branch) => schemaIssues(branch, value, path));
-    const matches = results.filter((issues) => issues.length === 0);
-    if (matches.length === 1) return [];
-    if (matches.length > 1) return [`${path} matches more than one schema branch`];
-    const discriminant = record(value)?.elementType;
-    if (typeof discriminant === "string") {
-      const branch = schema.oneOf.find((candidate) => {
-        if (!("type" in candidate) || candidate.type !== "object") return false;
-        const property = candidate.properties?.elementType;
-        return property && "const" in property && property.const === discriminant;
-      });
-      if (branch) return schemaIssues(branch, value, path);
-    }
-    return [`${path} does not match any schema branch`];
-  }
+  if ("oneOf" in schema) return unionIssues(schema.oneOf, value, path, schemaIssues);
   if (schema.type === "null") return value === null ? [] : [typeIssue(path, "null", value)];
   if (schema.type === "string") {
     if (typeof value !== "string") return [typeIssue(path, "a string", value)];
@@ -377,95 +427,8 @@ function schemaIssues(schema: Schema, value: unknown, path: string): string[] {
   }
   if (!schema.additionalProperties) {
     for (const key of Object.keys(candidate)) {
-      if (!Object.hasOwn(properties, key)) issues.push(`${path}.${key} is not allowed`);
+      if (!Object.hasOwn(properties, key)) issues.push(misplacedStyleIssue(candidate, key, path));
     }
-  }
-  return issues;
-}
-
-function semanticIssues(args: CanonicalWritePageArgs): string[] {
-  const issues: string[] = [];
-  const checkFill = (candidate: Fill | string | undefined, path: string): void => {
-    if (typeof candidate !== "string" && candidate?.type === "gradient" && candidate.stops.length === 0) {
-      issues.push(`${path}.stops must not be empty`);
-    }
-  };
-  if (!args.id.trim()) issues.push("$.id must not be empty");
-  if (args.elements.length === 0) issues.push("$.elements must not be empty");
-  checkFill(args.background, "$.background");
-  const ids = new Set<string>();
-  for (const [index, element] of args.elements.entries()) {
-    const path = `$.elements[${index}]`;
-    if (!element.elementId.trim()) issues.push(`${path}.elementId must not be empty`);
-    else if (ids.has(element.elementId)) issues.push(`${path}.elementId must be unique`);
-    else ids.add(element.elementId);
-    if (element.bounds.length !== 4) issues.push(`${path}.bounds must contain exactly 4 numbers`);
-    else if (element.bounds[2] <= 0 || element.bounds[3] <= 0) issues.push(`${path}.bounds width and height must be positive`);
-    if (element.elementType === "text") {
-      const text = element as TextElement;
-      if (text.content.align && text.content.align.length !== 2) {
-        issues.push(`${path}.content.align must contain exactly 2 strings`);
-      }
-    }
-    if (element.elementType === "line") {
-      const line = element as LineElement;
-      if (line.viewBox.length !== 2) issues.push(`${path}.viewBox must contain exactly 2 numbers`);
-      if (line.arrow && line.arrow.length !== 2) issues.push(`${path}.arrow must contain exactly 2 values`);
-      if (line.connects && line.connects.length !== 2) issues.push(`${path}.connects must contain exactly 2 ids`);
-    }
-    if (element.elementType === "table") {
-      const table = element as TableElement;
-      if (table.columnWidths.length === 0) issues.push(`${path}.columnWidths must not be empty`);
-      for (const [columnIndex, width] of table.columnWidths.entries()) {
-        if (width <= 0) issues.push(`${path}.columnWidths[${columnIndex}] must be positive`);
-      }
-      if (table.rows.length === 0) issues.push(`${path}.rows must not be empty`);
-      for (const [rowIndex, row] of table.rows.entries()) {
-        if (row.length !== table.columnWidths.length) {
-          issues.push(`${path}.rows[${rowIndex}] must match columnWidths length`);
-        }
-        for (const [cellIndex, cell] of row.entries()) {
-          if (cell.rowSpan !== undefined && cell.rowSpan < 1) {
-            issues.push(`${path}.rows[${rowIndex}][${cellIndex}].rowSpan must be at least 1`);
-          }
-          if (cell.colSpan !== undefined && cell.colSpan < 1) {
-            issues.push(`${path}.rows[${rowIndex}][${cellIndex}].colSpan must be at least 1`);
-          }
-          if (cell.align && cell.align.length !== 2) {
-            issues.push(`${path}.rows[${rowIndex}][${cellIndex}].align must contain exactly 2 strings`);
-          }
-          checkFill(cell.fill, `${path}.rows[${rowIndex}][${cellIndex}].fill`);
-        }
-      }
-      if (table.rowHeights && table.rowHeights.length !== table.rows.length) {
-        issues.push(`${path}.rowHeights must match rows length`);
-      }
-      for (const [rowIndex, height] of (table.rowHeights ?? []).entries()) {
-        if (height <= 0) issues.push(`${path}.rowHeights[${rowIndex}] must be positive`);
-      }
-    }
-    if (element.elementType === "chart") {
-      const chart = element as ChartElement;
-      if (chart.data.cols.length === 0) issues.push(`${path}.data.cols must not be empty`);
-      if (chart.data.rows.length === 0) issues.push(`${path}.data.rows must not be empty`);
-      for (const [rowIndex, row] of chart.data.rows.entries()) {
-        if (row.length !== chart.data.cols.length) {
-          issues.push(`${path}.data.rows[${rowIndex}] must match data.cols length`);
-        }
-      }
-      if (chart.series.length === 0) issues.push(`${path}.series must not be empty`);
-      for (const [seriesIndex, series] of chart.series.entries()) {
-        for (const [key, value] of Object.entries(series.encode ?? {})) {
-          if (typeof value !== "string") {
-            issues.push(typeIssue(`${path}.series[${seriesIndex}].encode.${key}`, "a string", value));
-          }
-        }
-        checkFill(series.fill, `${path}.series[${seriesIndex}].fill`);
-      }
-    }
-    if (element.elementType === "shape") checkFill((element as ShapeElement).fill, `${path}.fill`);
-    if (element.elementType === "icon") checkFill((element as IconElement).fill, `${path}.fill`);
-    if (element.elementType === "chart") checkFill((element as ChartElement).background, `${path}.background`);
   }
   return issues;
 }
@@ -474,8 +437,18 @@ function semanticIssues(args: CanonicalWritePageArgs): string[] {
 export function canonicalWritePageIssues(value: unknown): string[] {
   const root = record(value);
   if (!root) return [typeIssue("$", "an object", value)];
+  // Provenance issues come first so an invalid basis value is always reported
+  // with its Chinese schema error, whatever else is wrong with the page.
+  const provenanceIssues = canonicalProvenanceIssues(root.provenance);
+  if (provenanceIssues.length) return provenanceIssues;
+  // Custom-path refusals are Chinese and name the element, so they also precede the schema.
+  const geometryIssues = customGeometryIssues(root.elements);
+  if (geometryIssues.length) return geometryIssues;
+  // So are the M5 effect refusals (shadow and stop-alpha ranges, non-finite numbers).
+  const effectRangeIssues = effectIssues({ background: root.background, elements: root.elements });
+  if (effectRangeIssues.length) return effectRangeIssues;
   const rootSchema = object(WRITE_PAGE_PARAMETER_SPEC);
-  const issues = schemaIssues(rootSchema, value, "$" );
+  const issues = schemaIssues(rootSchema, value, "$");
   if (issues.length) return issues;
   return semanticIssues(value as CanonicalWritePageArgs);
 }
@@ -484,8 +457,12 @@ export function canonicalWritePageIssues(value: unknown): string[] {
 export function canonicalEditElementsIssues(value: unknown): string[] {
   const root = record(value);
   if (!root) return [typeIssue("$", "an object", value)];
+  const geometryIssues = customGeometryIssues(root.elements);
+  if (geometryIssues.length) return geometryIssues;
+  const effectRangeIssues = effectIssues({ elements: root.elements });
+  if (effectRangeIssues.length) return effectRangeIssues;
   const rootSchema = object(EDIT_ELEMENTS_PARAMETER_SPEC);
-  const issues = schemaIssues(rootSchema, value, "$" );
+  const issues = schemaIssues(rootSchema, value, "$");
   if (issues.length) return issues;
   const args = value as CanonicalEditElementsArgs;
   const semantic = semanticIssues({ id: args.pageId, elements: args.elements });
@@ -505,7 +482,14 @@ export function isCanonicalWritePageArgs(value: unknown): value is CanonicalWrit
 
 /** Validate a single Fill value (solid/gradient/image) against the write schema. */
 export function canonicalFillIssues(value: unknown): string[] {
-  return schemaIssues(fill, value, "$");
+  const effects = fillEffectIssues(value);
+  return effects.length ? effects : schemaIssues(fill, value, "$");
+}
+
+/** Validate one element shadow (blur ≥ 0, opacity 0 to 1) for a scoped shadow edit. */
+export function canonicalShadowIssues(value: unknown): string[] {
+  const ranges = shadowIssues(value);
+  return ranges.length ? ranges : schemaIssues(shadow, value, "$");
 }
 
 /**
@@ -531,56 +515,4 @@ export function canonicalTextStylePatchIssues(patch: unknown): string[] {
   return issues;
 }
 
-const LINE_ARROW_NONE = new Set(["", "null", "none", "false"]);
-const LINE_ARROW_HEADS = new Set(["arrow", "stealth", "diamond", "oval"]);
-
-/** Models often send the string "null" instead of JSON null for a missing line head. */
-export function coerceLineArrowHead(value: unknown): "arrow" | "stealth" | "diamond" | "oval" | null | unknown {
-  if (value === undefined) return undefined;
-  if (value === null || value === false) return null;
-  if (typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).length === 0) return null;
-  if (typeof value === "string") {
-    const token = value.trim().toLowerCase();
-    if (LINE_ARROW_NONE.has(token)) return null;
-    if (LINE_ARROW_HEADS.has(token)) return token;
-  }
-  return value;
-}
-
-export function normalizeWritePageLineArrows(args: Record<string, unknown>): void {
-  const elements = args.elements;
-  if (!Array.isArray(elements)) return;
-  for (const element of elements) {
-    if (!element || typeof element !== "object" || Array.isArray(element)) continue;
-    const rec = element as Record<string, unknown>;
-    if (rec.elementType !== "line" || !Array.isArray(rec.arrow) || rec.arrow.length !== 2) continue;
-    rec.arrow = [coerceLineArrowHead(rec.arrow[0]), coerceLineArrowHead(rec.arrow[1])];
-  }
-}
-
-function unwrapXmlTextNode(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const rec = value as Record<string, unknown>;
-  const keys = Object.keys(rec);
-  if (keys.length === 1 && keys[0] === "$text" && typeof rec.$text === "string") {
-    return rec.$text;
-  }
-  return value;
-}
-
-/** MiniMax and similar adapters wrap strings as { $text: "Microsoft YaHei" }. */
-export function normalizeWritePageDialect(args: Record<string, unknown>): void {
-  const walk = (node: unknown): unknown => {
-    const unwrapped = unwrapXmlTextNode(node);
-    if (unwrapped !== node) return unwrapped;
-    if (Array.isArray(node)) {
-      for (let index = 0; index < node.length; index += 1) node[index] = walk(node[index]);
-      return node;
-    }
-    if (!node || typeof node !== "object") return node;
-    const rec = node as Record<string, unknown>;
-    for (const key of Object.keys(rec)) rec[key] = walk(rec[key]);
-    return rec;
-  };
-  walk(args);
-}
+export { coerceLineArrowHead, normalizeWritePageLineArrows, normalizeWritePageDialect } from "./write-page-dialect.js";

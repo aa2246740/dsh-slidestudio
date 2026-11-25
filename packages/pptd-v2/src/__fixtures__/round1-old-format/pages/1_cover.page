@@ -1,0 +1,32 @@
+pageType: cover
+background:
+  type: solid
+  color: "#FFFFFF"
+notes: 封面讲稿备注
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 80
+      - 180
+      - 800
+      - 72
+    content:
+      text: 旧格式烟测
+      bold: true
+      fontSize: 36
+      color: $text
+      align:
+        - center
+        - middle
+  - elementId: accent
+    elementType: shape
+    bounds:
+      - 380
+      - 340
+      - 200
+      - 8
+    shapeName: rect
+    fill:
+      type: solid
+      color: $primary

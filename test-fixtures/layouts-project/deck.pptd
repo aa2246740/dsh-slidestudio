@@ -1,0 +1,156 @@
+version: v2
+title: 版式结构检查
+size:
+  - 960
+  - 540
+theme:
+  colors:
+    primary: "#2563EB"
+    text: "#111111"
+    background: "#FFFFFF"
+  textStyles:
+    title:
+      fontSize: 36
+      bold: true
+      color: $text
+    body:
+      fontSize: 18
+      color: $text
+pages:
+  - pages/01-cover.page
+  - pages/02-body.page
+  - pages/03-body.page
+  - pages/04-body.page
+  - pages/05-body.page
+  - pages/06-body.page
+  - pages/07-body.page
+  - pages/08-body.page
+  - pages/09-body.page
+  - pages/10-body.page
+  - pages/11-body.page
+  - pages/12-body.page
+  - pages/13-body.page
+  - pages/14-body.page
+  - pages/15-body.page
+  - pages/16-body.page
+  - pages/17-body.page
+  - pages/18-body.page
+  - pages/19-body.page
+  - pages/20-body.page
+  - pages/21-body.page
+  - pages/22-body.page
+  - pages/23-body.page
+  - pages/24-end.page
+masters:
+  - id: main
+    name: 母版
+    elements:
+      - elementId: pageno
+        elementType: text
+        bounds:
+          - 880
+          - 506
+          - 60
+          - 22
+        layoutRole: footer
+        content:
+          text: "{page}"
+          field: pageNumber
+          fontSize: 12
+          color: "#6B7280"
+          align:
+            - right
+            - middle
+layouts:
+  - id: cover
+    name: 封面
+    showMasterElements: false
+    background:
+      type: gradient
+      gradientType: linear
+      angle: 135
+      stops:
+        - position: 0
+          color: "#1E3A8A"
+        - position: 1
+          color: "#0F766E"
+    elements:
+      - elementId: arc
+        elementType: shape
+        shapeName: custom
+        bounds:
+          - 640
+          - 130
+          - 280
+          - 280
+        geometry:
+          viewBox:
+            - 100
+            - 100
+          path: M 0 100 C 0 45 22 0 50 0 C 78 0 100 45 100 100 L 84 100 C 84 56 70 16 50
+            16 C 30 16 16 56 16 100 Z
+        fill:
+          type: gradient
+          gradientType: linear
+          angle: 90
+          stops:
+            - position: 0
+              color: "#F97316"
+            - position: 1
+              color: "#FDE68A"
+              alpha: 0.85
+        shadow:
+          blur: 14
+          color: "#000000"
+          offsetX: 6
+          offsetY: 8
+          opacity: 0.35
+  - id: body
+    name: 正文
+    masterId: main
+    elements:
+      - elementId: header-rule
+        elementType: line
+        bounds:
+          - 0
+          - 56
+          - 960
+          - 2
+        viewBox:
+          - 960
+          - 2
+        points: 0,1 960,1
+        border:
+          width: 1.5
+          color: "#1D4ED8"
+      - elementId: logo-a
+        elementType: image
+        bounds:
+          - 24
+          - 12
+          - 120
+          - 40
+        src: media/logo-a.png
+      - elementId: logo-b
+        elementType: image
+        bounds:
+          - 816
+          - 12
+          - 120
+          - 40
+        src: media/logo-b.png
+      - elementId: footer
+        elementType: text
+        bounds:
+          - 40
+          - 506
+          - 600
+          - 22
+        layoutRole: footer
+        content:
+          text: 版式结构检查 · 正文
+          fontSize: 12
+          color: "#6B7280"
+          align:
+            - left
+            - middle

@@ -18,18 +18,9 @@ describe("slide font policy", () => {
   });
 
   it("builds a CSS stack with latin before the East Asian fallbacks", () => {
-    assert.equal(
-      fontCss({ latin: "Georgia", ea: "楷体" }),
-      'Georgia, "楷体", KaiTi, "Kaiti SC", sans-serif',
-    );
-    assert.equal(
-      fontCss("宋体"),
-      'Arial, "宋体", SimSun, "Songti SC", sans-serif',
-    );
-    assert.equal(
-      fontCss(undefined),
-      'Arial, "微软雅黑", "Microsoft YaHei", "PingFang SC", sans-serif',
-    );
+    assert.equal(fontCss({ latin: "Georgia", ea: "楷体" }), 'Georgia, "楷体", KaiTi, "Kaiti SC", sans-serif');
+    assert.equal(fontCss("宋体"), 'Arial, "宋体", SimSun, "Songti SC", sans-serif');
+    assert.equal(fontCss(undefined), 'Arial, "微软雅黑", "Microsoft YaHei", "PingFang SC", sans-serif');
   });
 
   it("recognises only the common Office/WPS faces", () => {

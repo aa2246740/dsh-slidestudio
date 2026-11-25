@@ -1,8 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CHART_GRID,
+  CHART_GRID_NEUTRAL,
+  CHART_INK,
+  CHART_INK_NEUTRAL,
   CHART_TEXT_PX,
   alignedSecondaryScale,
+  chartChrome,
   chartLayout,
   chartNumberFormatCode,
   chartSwatch,
@@ -13,6 +18,48 @@ import {
   resolveChartLegend,
   seriesDecimals,
 } from "./chart-layout.js";
+
+/** HSL saturation of `#RRGGBB`, the measure the palette rule uses for chromatic colours. */
+function saturation(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  return max === min ? 0 : (max - min) / (1 - Math.abs(2 * lightness - 1));
+}
+
+describe("chart chrome", () => {
+  it("neutral chrome stays below the palette saturation limit on light and dark surfaces", () => {
+    for (const hex of [
+      CHART_INK_NEUTRAL.light,
+      CHART_INK_NEUTRAL.dark,
+      CHART_GRID_NEUTRAL.light,
+      CHART_GRID_NEUTRAL.dark,
+    ]) {
+      assert.ok(saturation(hex) < 0.12, `${hex} would add an accent the palette did not print`);
+    }
+  });
+
+  it("keeps the pre-palette values for decks without the neutral flag", () => {
+    assert.deepEqual(CHART_INK, { light: "#626976", dark: "#CBD5E1" });
+    assert.deepEqual(CHART_GRID, { light: "#E5E7EB", dark: "#475569" });
+    assert.deepEqual(chartChrome(), {
+      ink: { light: "#626976", dark: "#CBD5E1" },
+      grid: { light: "#E5E7EB", dark: "#475569" },
+    });
+    assert.deepEqual(chartChrome({ neutralChrome: false }), chartChrome());
+    assert.deepEqual(chartChrome(null), chartChrome());
+  });
+
+  it("uses the neutral set only when the theme carries the neutral flag", () => {
+    assert.deepEqual(chartChrome({ neutralChrome: true }), {
+      ink: { light: "#626976", dark: "#D4D4D4" },
+      grid: { light: "#E5E5E5", dark: "#525252" },
+    });
+  });
+});
 
 describe("niceScale", () => {
   it("scales 0.091–8.641 onto 0..10 with step 2", () => {
@@ -92,6 +139,15 @@ describe("chart number formatting", () => {
     assert.equal(formatChartValue(-4, 0, { signed: true }), "−4");
     assert.equal(formatChartValue(4, 0, { signed: true }), "+4");
     assert.equal(formatChartValue(0, 0, { signed: true }), "0");
+  });
+
+  it("keeps the minus sign of a negative value whether or not it is signed", () => {
+    assert.equal(formatChartValue(-50), "−50");
+    assert.equal(formatChartValue(-50, 0, { signed: false }), "−50");
+    assert.equal(formatChartValue(-0.5, 2), "−0.50");
+    assert.equal(formatChartValue(-1234567), "−1,234,567");
+    assert.equal(formatChartValue(0), "0");
+    assert.equal(formatChartValue(50), "50");
   });
 
   it("emits Excel format codes that match the decimals", () => {
@@ -250,14 +306,10 @@ describe("chartLayout", () => {
 
   it("leaves a band under the plot for a label below a negative bar", () => {
     const plain = chartLayout({ w: 400, h: 300 }, base);
-    const reserved = chartLayout(
-      { w: 400, h: 300 },
-      { ...base, reserveBelowLabel: true },
-    );
+    const reserved = chartLayout({ w: 400, h: 300 }, { ...base, reserveBelowLabel: true });
     assert.ok(plain.categoryBand);
     assert.ok(reserved.categoryBand);
-    const gap =
-      reserved.categoryBand.y - (reserved.plot.y + reserved.plot.h);
+    const gap = reserved.categoryBand.y - (reserved.plot.y + reserved.plot.h);
     const plainGap = plain.categoryBand.y - (plain.plot.y + plain.plot.h);
     assert.ok(gap >= CHART_TEXT_PX.dataLabel + 4);
     assert.ok(gap > plainGap);

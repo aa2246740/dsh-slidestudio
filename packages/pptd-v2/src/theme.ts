@@ -1,105 +1,18 @@
 import type { Theme } from "./types.js";
 import { resolveFontPair } from "./font-policy.js";
 import { DEFAULT_TEXT_LINE_HEIGHT } from "./text-layout.js";
+import { colorAlpha, resolveThemeColor, toRgbHex } from "./official-color.js";
+import { solidFillColor } from "./solid-fill.js";
 
-/** Resolve `$primary` style theme color refs; leave other strings as-is. */
-export function resolveThemeColor(
-  value: string | undefined,
-  theme: Theme | undefined,
-  fallback = "#000000",
-): string {
-  if (!value) return fallback;
-  if (value.startsWith("$") && theme?.colors) {
-    const key = value.slice(1);
-    const c = theme.colors[key];
-    if (c) return resolveThemeColor(c, theme, fallback);
-  }
-  return value;
-}
-
-/**
- * Official PPTD Color (`reference/pptd.md` Shared Types):
- * HEX6 `#RRGGBB`, HEX8 `#RRGGBBAA`, or `$theme`. Unprefixed `RRGGBB` is not listed.
- */
-export type OfficialPptdColorKind = "omitted" | "hash" | "theme" | "unprefixed" | "invalid";
-
-export function officialPptdColorKind(value: string | undefined | null): OfficialPptdColorKind {
-  if (value == null) return "omitted";
-  const v = String(value).trim();
-  if (v === "") return "omitted";
-  if (/^\$[A-Za-z][A-Za-z0-9_-]*$/.test(v)) return "theme";
-  if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(v)) return "hash";
-  if (/^[0-9A-Fa-f]{3}$/.test(v) || /^[0-9A-Fa-f]{6}$/.test(v) || /^[0-9A-Fa-f]{8}$/.test(v)) {
-    return "unprefixed";
-  }
-  return "invalid";
-}
-
-export class InvalidPptdColorError extends Error {
-  readonly input: string;
-  readonly kind: OfficialPptdColorKind;
-  constructor(input: string, kind: OfficialPptdColorKind = officialPptdColorKind(input)) {
-    super(
-      `PPTD Color requires #RRGGBB, #RRGGBBAA, or a Theme.colors $token that exists (reference/pptd.md). ${JSON.stringify(input)} is ${kind}; it must not become #000000.`,
-    );
-    this.name = "InvalidPptdColorError";
-    this.input = input;
-    this.kind = kind;
-  }
-}
-
-function normalizeOfficialHash(v: string): string | undefined {
-  if (!v.startsWith("#")) return undefined;
-  let h = v.slice(1);
-  if (h.length === 3) {
-    h = h
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-  if (h.length === 8) h = h.slice(0, 6);
-  if (h.length !== 6 || !/^[0-9A-Fa-f]{6}$/.test(h)) return undefined;
-  return `#${h.toUpperCase()}`;
-}
-
-/**
- * Normalize official PPTD color to #RRGGBB (drop alpha).
- * Omitted values use `fallback`. Present unprefixed RRGGBB and unresolved
- * `$theme` are rejected — never invented as #000000 / #FFFFFF.
- */
-export function toRgbHex(
-  value: string | undefined,
-  theme?: Theme,
-  fallback = "#000000",
-): string {
-  if (value == null || String(value).trim() === "") {
-    return normalizeOfficialHash(fallback) ?? "#000000";
-  }
-  const resolved = resolveThemeColor(value, theme, "").trim();
-  const kind = officialPptdColorKind(resolved);
-  if (kind === "hash") {
-    const hex = normalizeOfficialHash(resolved);
-    if (hex) return hex;
-  }
-  if (kind === "unprefixed" || kind === "invalid" || kind === "theme") {
-    throw new InvalidPptdColorError(String(value).trim(), kind);
-  }
-  return normalizeOfficialHash(fallback) ?? "#000000";
-}
-
-/** Extract alpha 0–1 from #RRGGBBAA if present. */
-export function colorAlpha(
-  value: string | undefined,
-  theme?: Theme,
-): number | undefined {
-  const v = resolveThemeColor(value, theme, "").trim();
-  if (!v.startsWith("#")) return undefined;
-  const h = v.slice(1);
-  if (h.length === 8) {
-    return parseInt(h.slice(6, 8), 16) / 255;
-  }
-  return undefined;
-}
+export {
+  InvalidPptdColorError,
+  colorAlpha,
+  officialPptdColorKind,
+  resolveThemeColor,
+  themeColorIsCyclic,
+  toRgbHex,
+  type OfficialPptdColorKind,
+} from "./official-color.js";
 
 function srgbChannelToLinear(channel: number): number {
   return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
@@ -111,11 +24,7 @@ export function relativeLuminance(hex: string, theme?: Theme): number {
   const red = Number.parseInt(value.slice(0, 2), 16) / 255;
   const green = Number.parseInt(value.slice(2, 4), 16) / 255;
   const blue = Number.parseInt(value.slice(4, 6), 16) / 255;
-  return (
-    0.2126 * srgbChannelToLinear(red) +
-    0.7152 * srgbChannelToLinear(green) +
-    0.0722 * srgbChannelToLinear(blue)
-  );
+  return 0.2126 * srgbChannelToLinear(red) + 0.7152 * srgbChannelToLinear(green) + 0.0722 * srgbChannelToLinear(blue);
 }
 
 /** WCAG contrast ratio of two sRGB colors (1–21). */
@@ -148,25 +57,16 @@ export function shapePaintFill(
   theme?: Theme,
 ): ShapePaintFill | undefined {
   if (!fill || fill.type === "none") return undefined;
-  let raw: string | undefined;
-  if (fill.type === "solid" || (!fill.type && typeof fill.color === "string")) {
-    raw = fill.color;
-  } else if (fill.type === "gradient") {
-    raw = fill.stops?.[0]?.color;
-  } else {
-    return undefined;
-  }
+  // One solid colour, or the first stop of a multi-stop gradient, which the export records as a degrade.
+  const raw = solidFillColor(fill) ?? (fill.type === "gradient" ? fill.stops?.[0]?.color : undefined);
   if (!raw) return undefined;
-  const elementOpacity =
-    opacity == null || Number.isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
+  const elementOpacity = opacity == null || Number.isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
   const alpha = Math.max(0, Math.min(1, (colorAlpha(raw, theme) ?? 1) * elementOpacity));
   if (alpha <= 0) return undefined;
   return { hex: toRgbHex(raw, theme), alpha };
 }
 
-export type ElementFillPaint =
-  | { type: "none" }
-  | { type: "solid"; hex: string; alpha: number };
+export type ElementFillPaint = { type: "none" } | { type: "solid"; hex: string; alpha: number };
 
 /**
  * Single paint decision for Hub SVG and hybrid PPTX.
@@ -184,8 +84,7 @@ export function elementFillPaint(
   const kind = (elementType || "shape").toLowerCase();
   if (!fill) {
     if (kind === "icon") {
-      const elementOpacity =
-        opacity == null || Number.isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
+      const elementOpacity = opacity == null || Number.isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
       if (elementOpacity <= 0) return { type: "none" };
       return { type: "solid", hex: "#000000", alpha: elementOpacity };
     }
@@ -194,6 +93,20 @@ export function elementFillPaint(
   const paint = shapePaintFill(fill, opacity, theme);
   if (!paint) return { type: "none" };
   return { type: "solid", hex: paint.hex, alpha: paint.alpha };
+}
+
+/**
+ * The paint of a fill that shows one solid colour (`solidFillColor`), with element opacity applied
+ * as `shapePaintFill` applies it. Any other fill has no solid paint here, so the caller falls back.
+ */
+export function solidFillPaint(
+  fill: LooseFill | undefined,
+  opacity?: number,
+  theme?: Theme,
+): ElementFillPaint | undefined {
+  if (solidFillColor(fill) === undefined) return undefined;
+  const paint = shapePaintFill(fill, opacity, theme);
+  return paint ? { type: "solid", hex: paint.hex, alpha: paint.alpha } : { type: "none" };
 }
 
 /** SVG `fill` attribute for Hub. Missing CSS is no paint — never invent a color. */
@@ -247,29 +160,31 @@ export type RangeStylePatch = {
 };
 
 function decodeEntities(s: string): string {
-  return s
-    // Line endings normalize to \n — a pasted or hand-edited CRLF must not
-    // survive into run text and round-trip as a literal \r.
-    .replace(/\r\n?/g, "\n")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (m, d) => {
-      const n = Number(d);
-      return n <= 0x10ffff ? String.fromCodePoint(n) : m;
-    })
-    .replace(/&#x([0-9a-f]+);/gi, (m, h) => {
-      const n = parseInt(h, 16);
-      return n <= 0x10ffff ? String.fromCodePoint(n) : m;
-    })
-    // &amp; decodes LAST: a double-escaped entity like &amp;lt; must stay the
-    // literal text "&lt;", not collapse to "<".
-    .replace(/&amp;/g, "&");
+  return (
+    s
+      // Line endings normalize to \n — a pasted or hand-edited CRLF must not
+      // survive into run text and round-trip as a literal \r.
+      .replace(/\r\n?/g, "\n")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (m, d) => {
+        const n = Number(d);
+        return n <= 0x10ffff ? String.fromCodePoint(n) : m;
+      })
+      .replace(/&#x([0-9a-f]+);/gi, (m, h) => {
+        const n = parseInt(h, 16);
+        return n <= 0x10ffff ? String.fromCodePoint(n) : m;
+      })
+      // &amp; decodes LAST: a double-escaped entity like &amp;lt; must stay the
+      // literal text "&lt;", not collapse to "<".
+      .replace(/&amp;/g, "&")
+  );
 }
 
-function applyInlineCss(run: Omit<RichTextRun, "text">, css: string): void {
+function applyInlineCss(run: Omit<RichTextRun, "text">, css: string, bareHex: boolean): void {
   for (const part of css.split(";")) {
     const i = part.indexOf(":");
     if (i < 0) continue;
@@ -283,7 +198,11 @@ function applyInlineCss(run: Omit<RichTextRun, "text">, css: string): void {
     } else if (key === "color") {
       // Whitelist color syntax — a hostile clipboard style like
       // url(javascript:…) or expression(…) must not become a run color.
-      if (/^(#[0-9a-fA-F]{3,8}|rgba?\([^()]{1,60}\)|hsla?\([^()]{1,60}\)|[a-zA-Z]{1,20})$/.test(val)) {
+      // A bare six-digit colour is kept only for a stored-text read (`bareHex`).
+      if (
+        /^(#[0-9a-fA-F]{3,8}|rgba?\([^()]{1,60}\)|hsla?\([^()]{1,60}\)|[a-zA-Z]{1,20})$/.test(val) ||
+        (bareHex && /^[0-9a-fA-F]{6}$/.test(val))
+      ) {
         run.color = val;
       }
     } else if (key === "font-weight") {
@@ -302,11 +221,7 @@ function applyInlineCss(run: Omit<RichTextRun, "text">, css: string): void {
 const SKIP_TEXT_TAGS = new Set(["script", "style", "iframe", "object", "noscript"]);
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function runStyle(run: Omit<RichTextRun, "text">): Omit<RichTextRun, "text"> {
@@ -373,10 +288,7 @@ function styleCss(run: Omit<RichTextRun, "text">): string {
   return parts.join(";");
 }
 
-function applyPatch(
-  style: Omit<RichTextRun, "text">,
-  patch: RangeStylePatch,
-): Omit<RichTextRun, "text"> {
+function applyPatch(style: Omit<RichTextRun, "text">, patch: RangeStylePatch): Omit<RichTextRun, "text"> {
   const next: Omit<RichTextRun, "text"> = { ...style };
   const keys = ["bold", "italic", "underline", "color", "fontSize"] as const;
   for (const key of keys) {
@@ -392,8 +304,10 @@ function applyPatch(
  * Parse Kimi PPTD HTML fragments into styled runs.
  * Official decks store metric labels as `<p><span style=…>`.
  * Canonical serialize form (style-only spans) round-trips losslessly after merge.
+ * `readBareHex` is for the stored-text read in color-fallback.ts only: a run colour of six hex
+ * digits without `#` is kept, so it can be read as `#RRGGBB`. Writes use the default parse.
  */
-export function parseRichText(html: string): RichTextRun[] {
+export function parseRichText(html: string, options: { readBareHex?: boolean } = {}): RichTextRun[] {
   if (!html) return [];
   if (!/<[a-z][\s\S]*>/i.test(html)) {
     return mergeRuns([{ text: decodeEntities(html) }]);
@@ -443,7 +357,7 @@ export function parseRichText(html: string): RichTextRun[] {
     if (selfClosing) continue;
     const next: Omit<RichTextRun, "text"> = { ...stack[stack.length - 1] };
     const style = /style\s*=\s*"([^"]*)"/i.exec(m[2] ?? "")?.[1] ?? "";
-    applyInlineCss(next, style);
+    applyInlineCss(next, style, options.readBareHex === true);
     if (tag === "b" || tag === "strong") next.bold = true;
     if (tag === "i" || tag === "em") next.italic = true;
     if (tag === "u") next.underline = true;
@@ -471,9 +385,7 @@ export function serializeRichText(runs: RichTextRun[]): string {
   const joined = runs.map((r) => r.text).join("");
   if (!hasStyle && !joined.includes("\n")) return escapeHtml(joined);
 
-  const paragraphs: Array<Array<{ style: Omit<RichTextRun, "text">; text: string }>> = [
-    [],
-  ];
+  const paragraphs: Array<Array<{ style: Omit<RichTextRun, "text">; text: string }>> = [[]];
   for (const run of runs) {
     const style = runStyle(run);
     const parts = run.text.split("\n");
@@ -550,11 +462,7 @@ export function stripHtmlToText(html: string): string {
 }
 
 /** CSS color that keeps 8-digit hex alpha (`#FFFFFFB3` → rgba). */
-export function toCssColor(
-  value: string | undefined,
-  theme?: Theme,
-  fallback = "#000000",
-): string {
+export function toCssColor(value: string | undefined, theme?: Theme, fallback = "#000000"): string {
   const raw = resolveThemeColor(value, theme, fallback);
   const hex = toRgbHex(raw, theme, fallback);
   const a = colorAlpha(raw, theme);
@@ -599,25 +507,18 @@ export function resolveTextStyle(
 ): ResolvedTextStyle {
   const styleKey = content.style?.replace(/^\$/, "");
   const fromTheme =
-    styleKey && theme?.textStyles?.[styleKey]
-      ? (theme.textStyles[styleKey] as Record<string, unknown>)
-      : {};
+    styleKey && theme?.textStyles?.[styleKey] ? (theme.textStyles[styleKey] as Record<string, unknown>) : {};
 
   const runs = parseRichText(unescapePlainText(content.text ?? ""));
   const colorRaw =
-    (content.color as string | undefined) ??
-    (fromTheme.color as string | undefined) ??
-    runs[0]?.color ??
-    "#000000";
+    (content.color as string | undefined) ?? (fromTheme.color as string | undefined) ?? runs[0]?.color ?? "#000000";
   const fontSize =
     content.fontSize ??
     (typeof fromTheme.fontSize === "number" ? fromTheme.fontSize : undefined) ??
     runs[0]?.fontSize ??
     18;
   const bold =
-    content.bold ??
-    (typeof fromTheme.bold === "boolean" ? fromTheme.bold : undefined) ??
-    Boolean(runs[0]?.bold);
+    content.bold ?? (typeof fromTheme.bold === "boolean" ? fromTheme.bold : undefined) ?? Boolean(runs[0]?.bold);
   const italic =
     content.italic ??
     (typeof fromTheme.italic === "boolean" ? fromTheme.italic : undefined) ??
@@ -627,28 +528,15 @@ export function resolveTextStyle(
     (typeof fromTheme.underline === "boolean" ? fromTheme.underline : undefined) ??
     Boolean(runs[0]?.underline);
   const lineHeight =
-    content.lineHeight ??
-    (typeof fromTheme.lineHeight === "number"
-      ? fromTheme.lineHeight
-      : DEFAULT_TEXT_LINE_HEIGHT);
+    content.lineHeight ?? (typeof fromTheme.lineHeight === "number" ? fromTheme.lineHeight : DEFAULT_TEXT_LINE_HEIGHT);
   const letterSpacing =
-    content.letterSpacing ??
-    (typeof fromTheme.letterSpacing === "number"
-      ? fromTheme.letterSpacing
-      : undefined);
+    content.letterSpacing ?? (typeof fromTheme.letterSpacing === "number" ? fromTheme.letterSpacing : undefined);
   const highlightRaw =
     (content.backgroundColor as string | undefined) ??
-    (typeof fromTheme.backgroundColor === "string"
-      ? fromTheme.backgroundColor
-      : undefined);
-  const backgroundColor = highlightRaw
-    ? toCssColor(highlightRaw, theme)
-    : undefined;
+    (typeof fromTheme.backgroundColor === "string" ? fromTheme.backgroundColor : undefined);
+  const backgroundColor = highlightRaw ? toCssColor(highlightRaw, theme) : undefined;
 
-  const themeFont = fromTheme.fontFamily as
-    | string
-    | { latin: string; ea: string }
-    | undefined;
+  const themeFont = fromTheme.fontFamily as string | { latin: string; ea: string } | undefined;
   const fontFamily = resolveFontPair(content.fontFamily ?? themeFont);
 
   return {
