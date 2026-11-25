@@ -1,4 +1,3 @@
-import { runModelSwitchTransaction } from "./model-switch.js";
 import { AssistantQuestions } from "./assistant-questions.js";
 import {
   hideSlidesSessions,
@@ -21,7 +20,7 @@ import "@deepseek-ai/dsh-agent";
 import "@deepseek-ai/dsh-tools";
 import "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-attachment";
-import type { Agent, ModelSelection, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
+import type { Agent, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import {
   createPresentationRun,
   buildCatalogDto,
@@ -29,6 +28,12 @@ import {
   machineRuntimeReuse,
   type ModelInputModality,
 } from "@open-slidestudio/presentation-run";
+import {
+  liveModelOf,
+  modelSelectionFor,
+  readLiveModelSelection,
+  runGuardedLiveModelSwitch,
+} from "./model-selection-compat.js";
 import {
   bindToolProviderToModelSelection,
   createSlidesProduceSetup,
@@ -458,11 +463,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     },
     reasoningEffort?: string,
   ): { setup: ReturnType<typeof createSlidesProduceSetup>; selection: ModelSelectionRef } => {
-    const current: ModelSelection = {
-      provider: provider.providerId,
-      model: provider.modelId,
-      ...(reasoningEffort ? { reasoningEffort: ReasoningEffortId(reasoningEffort) } : {}),
-    };
+    const current = modelSelectionFor(provider.providerId, provider.modelId, reasoningEffort);
     const selection: ModelSelectionRef = { current, assembled: undefined };
     const deps = bindToolProviderToModelSelection({
       store,
@@ -869,7 +870,12 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       const handle = await ctx.agents.create({
         // Subagent origin keeps generation sessions out of every Work sidebar view.
         sessionId, meta: slidesSessionMeta(store.slicesRoot()),
-        agentOptions: { ...agentOptionsForRoute(route), model }, setup: prepared.setup,
+        agentOptions: {
+          ...agentOptionsForRoute(route),
+          model,
+          ...(reasoningEffort ? { reasoningEffort: ReasoningEffortId(reasoningEffort) } : {}),
+        },
+        setup: prepared.setup,
       });
       if (reasoningEffort) efforts.set(sessionId, reasoningEffort);
       selections.set(sessionId, prepared.selection);
@@ -903,14 +909,18 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         persistPresentationRunProvider(root, provider);
         presentation.hydrate(root);
       }
-      const prepared = produceSetup(
-        provider,
-        reasoningEffortForModel(dshHome, route.provider, model, efforts.get(sessionId), modelCatalog),
+      const reasoningEffort = reasoningEffortForModel(
+        dshHome, route.provider, model, efforts.get(sessionId), modelCatalog,
       );
+      const prepared = produceSetup(provider, reasoningEffort);
       await legacyHider.ensureRunnable(sessionId);
       const handle = await ctx.agents.resume({
         resumeSessionId: sessionId as Agent["id"],
-        agentOptions: { ...agentOptionsForRoute(route), model },
+        agentOptions: {
+          ...agentOptionsForRoute(route),
+          model,
+          ...(reasoningEffort ? { reasoningEffort: ReasoningEffortId(reasoningEffort) } : {}),
+        },
         setup: prepared.setup,
       });
       selections.set(sessionId, prepared.selection);
@@ -934,17 +944,8 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         throw new Error(`cannot switch model for busy session ${sessionId}`);
       }
       const selection = agent ? selections.get(sessionId) : undefined;
-      if (agent && !selection) {
-        throw new Error(`live session ${sessionId} has no mutable model selection`);
-      }
       const projectRoot = store.resolveRoot(priorBinding);
-      const nextProvider = capabilityProvider(route.provider, selectedModel, true, catalog);
-      const priorProvider = capabilityProvider(
-        priorBinding.provider.providerId,
-        priorBinding.provider.modelId,
-        true,
-      );
-      const priorSelection = selection?.current;
+      const priorSelection = readLiveModelSelection({ model: liveModelOf(agent) }, selection);
       const priorModel = models.get(sessionId);
       const hadModel = models.has(sessionId);
       const priorEffort = efforts.get(sessionId);
@@ -952,37 +953,38 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
         dshHome, route.provider, selectedModel,
         reasoningEffort?.trim() || priorSelection?.reasoningEffort, catalog,
       );
-      await runModelSwitchTransaction({
+      let liveSelectionApplied = false;
+      await runGuardedLiveModelSwitch({
+        agent,
+        sessionId,
+        selection,
+        next: modelSelectionFor(route.provider, selectedModel, effort),
+        prior: priorSelection,
+        markLiveApplied: () => {
+          liveSelectionApplied = true;
+        },
+        liveSelectionApplied: () => liveSelectionApplied,
         apply: () => {
           models.set(sessionId, selectedModel);
           if (effort) efforts.set(sessionId, effort);
           else efforts.delete(sessionId);
           store.updateProvider(sessionId, { providerId: route.provider, modelId: selectedModel });
-          if (!persistPresentationRunProvider(projectRoot, nextProvider)) {
+          if (!persistPresentationRunProvider(projectRoot, capabilityProvider(route.provider, selectedModel, true, catalog))) {
             throw new Error(`presentation binding is missing for session ${sessionId}`);
           }
         },
-        activate: async () => {
-          if (selection) {
-            if (effort) efforts.set(sessionId, effort);
-            else efforts.delete(sessionId);
-            selection.current = {
-              provider: route.provider,
-              model: selectedModel,
-              ...(effort ? { reasoningEffort: effort } : {}),
-            } as ModelSelection;
-          } else {
-            await runtime.resumeAgent(sessionId);
-          }
-        },
-        rollback: () => {
+        resume: () => runtime.resumeAgent(sessionId),
+        rollbackStore: () => {
           store.updateProvider(sessionId, priorBinding.provider);
-          persistPresentationRunProvider(projectRoot, priorProvider);
+          persistPresentationRunProvider(projectRoot, capabilityProvider(
+            priorBinding.provider.providerId,
+            priorBinding.provider.modelId,
+            true,
+          ));
           if (hadModel) models.set(sessionId, priorModel!);
           else models.delete(sessionId);
           if (priorEffort) efforts.set(sessionId, priorEffort);
           else efforts.delete(sessionId);
-          if (selection) selection.current = priorSelection;
         },
       });
     },

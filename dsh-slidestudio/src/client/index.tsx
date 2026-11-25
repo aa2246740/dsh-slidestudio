@@ -64,34 +64,42 @@ declare module '@deepseek-ai/cordis' {
  * invocation API, so use its slot/ARIA controls without touching private stores.
  */
 function activateSettingsControl(ctx: ClientContext): boolean {
-  const trigger = document.querySelector('[data-slot="sidebar.settings"] [data-slot="settings.trigger"]')
-    ?.closest('button')
-  if (trigger && !trigger.disabled) {
-    trigger.click()
+  try {
+    const trigger = document
+      .querySelector('[data-slot="sidebar.settings"] [data-slot="settings.trigger"]')
+      ?.closest('button')
+    if (trigger && !trigger.disabled) {
+      trigger.click()
+      return true
+    }
+    const launcher = document.querySelector<HTMLButtonElement>(
+      '[data-slot="sidebar.settings"] [data-slot="settings.launcher"] button[aria-haspopup="menu"]',
+    )
+    if (!launcher || launcher.disabled) return false
+    if (launcher.getAttribute('aria-expanded') !== 'true') {
+      launcher.click()
+      return false // React mounts the portal menu before the next poll.
+    }
+    const shortcuts = ctx.get('shortcuts') as ShortcutsService | undefined
+    const aria = shortcuts?.catalog.getSnapshot().find((row) => String(row.id) === 'settings.open')?.aria
+    const matches = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button[role="menuitem"]')].filter(
+      (button) => {
+        if (button.disabled) return false
+        // ja/es/fr 等菜单文案不是「设置 / Settings」，先认快捷键。
+        if (aria && button.getAttribute('aria-keyshortcuts') === aria) return true
+        // The user may unbind the command; the official zh/en menu remains usable.
+        const label = button.cloneNode(true) as HTMLElement
+        label.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove())
+        return ['设置', 'Settings'].includes(label.textContent?.trim() ?? '')
+      },
+    )
+    // 找不到唯一菜单项时返回 false，由轮询超时通知 oss:dsh-settings-failed。
+    if (matches.length !== 1) return false
+    matches[0].click()
     return true
+  } catch {
+    return false
   }
-  const launcher = document.querySelector<HTMLButtonElement>(
-    '[data-slot="sidebar.settings"] [data-slot="settings.launcher"] button[aria-haspopup="menu"]',
-  )
-  if (!launcher || launcher.disabled) return false
-  if (launcher.getAttribute('aria-expanded') !== 'true') {
-    launcher.click()
-    return false // React mounts the portal menu before the next poll.
-  }
-  const shortcuts = ctx.get('shortcuts') as ShortcutsService | undefined
-  const aria = shortcuts?.catalog.getSnapshot().find(row => String(row.id) === 'settings.open')?.aria
-  const matches = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button[role="menuitem"]')]
-    .filter(button => {
-      if (button.disabled) return false
-      if (aria && button.getAttribute('aria-keyshortcuts') === aria) return true
-      // The user may unbind the command; the official zh/en menu remains usable.
-      const label = button.cloneNode(true) as HTMLElement
-      label.querySelectorAll('[aria-hidden="true"]').forEach(node => node.remove())
-      return ['设置', 'Settings'].includes(label.textContent?.trim() ?? '')
-    })
-  if (matches.length !== 1) return false
-  matches[0].click()
-  return true
 }
 
 /** The hub inside the iframe follows DSH's own Language setting. */
@@ -100,7 +108,11 @@ let currentLang: 'zh' | 'en' = 'zh'
 function activeLang(ctx: ClientContext): 'zh' | 'en' {
   try {
     const locale = ctx.get('locale') as LocaleService | undefined
-    return locale?.getLocale?.().active === 'en' ? 'en' : 'zh'
+    const active = locale?.getLocale?.().active
+    // 旧夹具没有 locale，或 active 为空，继续用中文。
+    if (!active) return 'zh'
+    // rc.5 增加了 ja/es/fr/de/ru/pt。只有 zh、zh-CN、zh_TW 这类中文标记显示中文。
+    return /^zh(?:$|[-_])/i.test(active) ? 'zh' : 'en'
   } catch {
     return 'zh'
   }
@@ -111,9 +123,7 @@ function slideTitle(): string {
 }
 
 function slideDescription(): string {
-  return currentLang === 'en'
-    ? 'Turn one sentence into a polished slide deck'
-    : '一句话把想法变成漂亮的演示文稿'
+  return currentLang === 'en' ? 'Turn one sentence into a polished slide deck' : '一句话把想法变成漂亮的演示文稿'
 }
 
 /** Push the active locale into every app iframe the plugin mounted. */
@@ -135,9 +145,7 @@ function settingsModalOpen(): boolean {
 /** Any other dialog holding the modal layer — e.g. the settings.onboarding
  *  key prompt that re-mounts on a fresh home — blocks `settings.open`. */
 function otherDialogOpen(): boolean {
-  return (
-    document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcut-modal="settings"])') !== null
-  )
+  return document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcut-modal="settings"])') !== null
 }
 
 /** The slot renderer marks each mount site with `data-slot` — the anchor is
@@ -167,21 +175,32 @@ function openDshSettings(ctx: ClientContext, source: MessageEventSource | null, 
     return
   }
   const layout = ctx.get('layout') as LayoutService | undefined
-  if (!layout) { resumePersonal?.(); notify('oss:dsh-settings-failed'); return }
+  if (!layout) {
+    resumePersonal?.()
+    notify('oss:dsh-settings-failed')
+    return
+  }
   const previousPanel = layout.panelInfo?.getSnapshot().activePanelId ?? null
   layout.selectPanel(null)
   // Fresh signal: aborted by any later selectPanel, so a user-driven
   // navigation cancels the pending restore below.
   const navigation = layout.beginNavigation?.() ?? null
-  driveSettingsOpen(ctx, () => {
-    if (navigation?.aborted) { resumePersonal?.(false); return }
-    try {
-      layout.selectPanel(previousPanel)
-    } catch {
-      // Panel unregistered meanwhile (e.g. Personal unloaded); stay put.
-    }
-    resumePersonal?.()
-  }, notify)
+  driveSettingsOpen(
+    ctx,
+    () => {
+      if (navigation?.aborted) {
+        resumePersonal?.(false)
+        return
+      }
+      try {
+        layout.selectPanel(previousPanel)
+      } catch {
+        // Panel unregistered meanwhile (e.g. Personal unloaded); stay put.
+      }
+      resumePersonal?.()
+    },
+    notify,
+  )
 }
 
 /**
@@ -237,7 +256,12 @@ let pageDestination: string | undefined
 const pageListeners = new Set<() => void>()
 function SlidesPage() {
   const destination = React.useSyncExternalStore(
-    listener => { pageListeners.add(listener); return () => { pageListeners.delete(listener) } },
+    (listener) => {
+      pageListeners.add(listener)
+      return () => {
+        pageListeners.delete(listener)
+      }
+    },
     () => pageDestination,
   )
   return (
@@ -251,8 +275,17 @@ function SlidesPage() {
 
 function SlidesEntryIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <rect x="1.5" y="2.5" width="13" height="9" rx="1.5" />
       <path d="M8 11.5v2" />
       <path d="M5.5 14h5" />
@@ -265,55 +298,105 @@ const PANEL = 'slides'
 /** Public composer takeover: accidental Work entry remains readable, with no
  * prompt box that can bypass the editor's project/intent checks. */
 function registerSessionEntry(ctx: ClientContext): void {
-  ctx.inject(['sessions'], inner => {
+  ctx.inject(['sessions'], (inner) => {
     const sessions = inner.get('sessions') as unknown as SessionsService
     const ReadOnlyComposer = ({ matched }: { matched: string }) => {
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState('')
       const english = currentLang === 'en'
       const open = async () => {
-        setBusy(true); setError('')
+        setBusy(true)
+        setError('')
         try {
           const response = await fetch(`/slides/state/${encodeURIComponent(matched)}`)
-          const state = await response.json() as Partial<SliceSessionSnapshot> & { error?: string }
-          if (!response.ok || !state.binding?.projectRoot) throw new Error(state.error || (english ? 'Deck unavailable' : '找不到对应的演示文稿'))
-          const query = new URLSearchParams({ project: state.binding.projectRoot, session: matched, workspace: '1', live: '1', lang: currentLang })
+          const state = (await response.json()) as Partial<SliceSessionSnapshot> & { error?: string }
+          if (!response.ok || !state.binding?.projectRoot)
+            throw new Error(state.error || (english ? 'Deck unavailable' : '找不到对应的演示文稿'))
+          const query = new URLSearchParams({
+            project: state.binding.projectRoot,
+            session: matched,
+            workspace: '1',
+            live: '1',
+            lang: currentLang,
+          })
           pageDestination = `/app/index.html?${query}`
-          pageListeners.forEach(listener => listener())
+          pageListeners.forEach((listener) => listener())
           const personal = ctx.get('personal') as PersonalRegistry | undefined
           if (!personal?.open?.(PANEL)) (ctx.get('layout') as LayoutService | undefined)?.selectPanel(PANEL)
-        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
-        finally { setBusy(false) }
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
       }
-      return <section aria-label={english ? 'SlideStudio generation history' : '演示文稿生成记录'}
-        style={{ padding: '16px 20px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 12, background: 'var(--dsw-alias-button-elevated-fill, #fff)', color: 'var(--dsw-alias-label-primary, #222)' }}>
-        <strong>{english ? 'Continue editing in SlideStudio' : '请在演示文稿中继续编辑'}</strong>
-        <p style={{ margin: '8px 0 12px', fontSize: 13 }}>{english ? 'This conversation is the generation history. Open the deck to edit, continue generation or stop it.' : '这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。'}</p>
-        <button type="button" disabled={busy} onClick={() => { void open() }}
-          style={{ font: 'inherit', padding: '8px 14px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer' }}>
-          {busy ? (english ? 'Opening…' : '正在打开…') : (english ? 'Open in SlideStudio' : '在演示文稿中继续')}
-        </button>
-        {error && <p role="alert">{error}</p>}
-      </section>
+      return (
+        <section
+          aria-label={english ? 'SlideStudio generation history' : '演示文稿生成记录'}
+          style={{
+            padding: '16px 20px',
+            border: '1px solid var(--dsw-alias-border-l3, #ddd)',
+            borderRadius: 12,
+            background: 'var(--dsw-alias-button-elevated-fill, #fff)',
+            color: 'var(--dsw-alias-label-primary, #222)',
+          }}
+        >
+          <strong>{english ? 'Continue editing in SlideStudio' : '请在演示文稿中继续编辑'}</strong>
+          <p style={{ margin: '8px 0 12px', fontSize: 13 }}>
+            {english
+              ? 'This conversation is the generation history. Open the deck to edit, continue generation or stop it.'
+              : '这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。'}
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void open()
+            }}
+            style={{
+              font: 'inherit',
+              padding: '8px 14px',
+              border: '1px solid var(--dsw-alias-border-l3, #ddd)',
+              borderRadius: 8,
+              background: 'transparent',
+              color: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            {busy ? (english ? 'Opening…' : '正在打开…') : english ? 'Open in SlideStudio' : '在演示文稿中继续'}
+          </button>
+          {error && <p role="alert">{error}</p>}
+        </section>
+      )
     }
     inner.slots.inject('conversation.composer', () => {
       let remove: (() => void) | undefined
       let signature = ''
       const update = () => {
         const owned = Object.entries(sessions.list.getSnapshot().byId)
-          .filter(([, row]) => row.projectionValues?.agentPreset === 'slides').map(([id]) => id).sort()
+          .filter(([, row]) => row.projectionValues?.agentPreset === 'slides')
+          .map(([id]) => id)
+          .sort()
         const next = JSON.stringify(owned)
         if (next === signature) return
         signature = next
         remove?.()
         const ids = new Set(owned)
-        remove = inner.slots.register({ name: 'conversation.composer', priority: -100,
-          select: (owner: { sessionId?: string }) => owner.sessionId && ids.has(owner.sessionId) ? owner.sessionId : null,
-        }, ReadOnlyComposer as React.ComponentType)
+        remove = inner.slots.register(
+          {
+            name: 'conversation.composer',
+            priority: -100,
+            select: (owner: { sessionId?: string }) =>
+              owner.sessionId && ids.has(owner.sessionId) ? owner.sessionId : null,
+          },
+          ReadOnlyComposer as React.ComponentType,
+        )
       }
       update()
       const off = sessions.list.subscribe(update)
-      return () => { off(); remove?.() }
+      return () => {
+        off()
+        remove?.()
+      }
     })
   })
 }
@@ -334,7 +417,8 @@ function registerStandalone(ctx: ClientContext): () => void {
       ctx.slots.register(
         { name: 'sidebar.panellist', id: PANEL, order: -9, label: () => slideTitle() },
         SlidesEntryIcon,
-      )),
+      ),
+    ),
   ]
   return () => {
     for (const stop of stops) stop()
@@ -372,13 +456,14 @@ export function apply(ctx: ClientContext) {
   ctx.inject(['personal'], (inner) => {
     standalone?.()
     standalone = undefined
-    const registerFeature = () => inner.personal!.register({
-      id: 'slides',
-      title: slideTitle(),
-      description: slideDescription(),
-      order: 1,
-      component: SlidesPage,
-    })
+    const registerFeature = () =>
+      inner.personal!.register({
+        id: 'slides',
+        title: slideTitle(),
+        description: slideDescription(),
+        order: 1,
+        component: SlidesPage,
+      })
     let remove = registerFeature()
     const offLocale = (ctx.get('locale') as LocaleService | undefined)?.subscribe(() => {
       // PersonalFeature.title is a static snapshot: re-register to retitle.

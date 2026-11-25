@@ -32,11 +32,7 @@ import {
   reviewWriteTargets,
   reviewWriteTargetForPage,
 } from "@open-slidestudio/presentation-run";
-import type {
-  CapabilitySnapshot,
-  ModelInputModality,
-  PresentationRun,
-} from "@open-slidestudio/presentation-run";
+import type { CapabilitySnapshot, ModelInputModality, PresentationRun } from "@open-slidestudio/presentation-run";
 import {
   EDIT_ELEMENTS_PARAMETER_SPEC,
   WRITE_PAGE_PARAMETER_SPEC,
@@ -56,26 +52,18 @@ import { SLICE_TOOL_NAMES, type WritePageOutcome } from "./protocol.js";
 import { writeSliceRuntime, briefForOpenProject, readSliceRuntimeFile } from "./runtime.js";
 import { SliceSessionStore, yamlExistsForPage } from "./slice-session.js";
 import { decideWritePage, readWritePageDisk, normalizeWritePageArgs } from "./write-page.js";
-import {
-  reviewPageGate,
-  writePageGate,
-  writePageSerial,
-  type ExclusiveSessionGate,
-} from "./write-page-serial.js";
+import { reviewPageGate, writePageGate, writePageSerial, type ExclusiveSessionGate } from "./write-page-serial.js";
 import type { AgentFaults } from "./agent-fault.js";
 import { renderPageToolContent, shouldAttachPageRaster } from "./page-raster-content.js";
-import {
-  CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES,
-  PRODUCE_WEB_SEARCH_DESCRIPTION,
-} from "./produce-request-header.js";
+import { CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES, PRODUCE_WEB_SEARCH_DESCRIPTION } from "./produce-request-header.js";
+import { editableMetaScope, metaOnlyEditScope, rewriteEditScope, structuralEditScope } from "./produce-edit-scope.js";
+import { isSliceToolStepVisible, registerToolWithWhen, sliceToolGuard } from "./tool-visibility.js";
 import { activeElementEditScope, prepareElementEdit } from "./edit-elements.js";
 
+export { isSliceToolStepVisible, sliceToolGuard };
+
 export type SliceAttachments = {
-  saveImage(input: {
-    data: Uint8Array;
-    mediaType: "image/png" | "image/jpeg";
-    name?: string;
-  }): Promise<{
+  saveImage(input: { data: Uint8Array; mediaType: "image/png" | "image/jpeg"; name?: string }): Promise<{
     attachmentId: string;
     mediaType: string;
     bytes: number;
@@ -164,10 +152,7 @@ export function withProductToolArgumentContract(definition: ToolDefinition): Too
         record = inner;
         depth += 1;
       }
-      if (
-        Object.hasOwn(record, "arguments") ||
-        !Object.keys(record).every((key) => declaredKeys.has(key))
-      ) {
+      if (Object.hasOwn(record, "arguments") || !Object.keys(record).every((key) => declaredKeys.has(key))) {
         throw new ToolArgsError([
           `$args.arguments is a provider wire envelope, not a declared field of ${definition.name}; pass the declared fields directly at the top level: ${expected}`,
         ]);
@@ -239,31 +224,10 @@ async function replayOrRun(
   return jsonValue(outcome);
 }
 
-export function sliceToolGuard(allowed: ReadonlySet<string>) {
-  // A bare "forbidden" leaves the model dead-ended: it retries the same tool or
-  // gives up and reports a fake system block. Naming the allowed write
-  // surfaces lets it self-correct in the same step.
-  const WRITE_SURFACES = ["write_page", "edit_elements", "edit_page_background", "delete_pages", "reorder_pages", "write_todo", "update_deck"];
-  return (exec: { name: string }): string | undefined => {
-    if (exec.name.startsWith("_")) return undefined;
-    if (allowed.has(exec.name)) return undefined;
-    const alternatives = WRITE_SURFACES.filter((name) => allowed.has(name));
-    return `slides preset forbids ${exec.name}${
-      alternatives.length ? `; the write tools available this turn: ${alternatives.join(", ")}` : ""
-    }`;
-  };
-}
+const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES);
 
-const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(
-  CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES,
-);
-
-export function produceToolAllowlist(
-  caps: CapabilitySnapshot,
-): ReadonlySet<string> {
-  const allowed = new Set<string>(
-    SLICE_TOOL_NAMES.filter((name) => !CAPABILITY_FILTERED_PRODUCE_TOOLS.has(name)),
-  );
+export function produceToolAllowlist(caps: CapabilitySnapshot): ReadonlySet<string> {
+  const allowed = new Set<string>(SLICE_TOOL_NAMES.filter((name) => !CAPABILITY_FILTERED_PRODUCE_TOOLS.has(name)));
   allowed.add("ask_user_question");
   if (caps.vision.mode !== "none") allowed.add("review_page");
   if (caps.imageSearch.configured) allowed.add("search_image");
@@ -271,21 +235,14 @@ export function produceToolAllowlist(
   return allowed;
 }
 
-function persistHubProvider(
-  deps: Pick<ToolDeps, "store" | "provider">,
-  sessionId?: string,
-): string | undefined {
+function persistHubProvider(deps: Pick<ToolDeps, "store" | "provider">, sessionId?: string): string | undefined {
   if (!sessionId) return;
   const binding = deps.store.bindingFor(sessionId);
   if (!binding) return;
-  const root =
-    typeof deps.store.resolveRoot === "function"
-      ? deps.store.resolveRoot(binding)
-      : binding.projectRoot;
+  const root = typeof deps.store.resolveRoot === "function" ? deps.store.resolveRoot(binding) : binding.projectRoot;
   if (typeof root !== "string" || !root.trim()) return;
   const sameRoute =
-    binding.provider.providerId === deps.provider.providerId &&
-    binding.provider.modelId === deps.provider.modelId;
+    binding.provider.providerId === deps.provider.providerId && binding.provider.modelId === deps.provider.modelId;
   // Host-global tools reflect the boot route. They may inspect a session that
   // has since switched, but must not downgrade that session's accepted binding.
   if (!sameRoute) return root;
@@ -336,8 +293,11 @@ export function sessionProduceToolAllowlist(
     allowed.add("edit_elements");
   }
   const structural = projectRoot ? structuralEditScope(projectRoot) : undefined;
-  if (projectRoot && !structural &&
-    reviewWriteTargets(readActiveReviewGuard(projectRoot)).some(({scope}) => scope.kind !== "elements")) {
+  if (
+    projectRoot &&
+    !structural &&
+    reviewWriteTargets(readActiveReviewGuard(projectRoot)).some(({ scope }) => scope.kind !== "elements")
+  ) {
     allowed.add("edit_page_background");
   }
   // Page deletion is only ever exposed while a structural lock names the pages
@@ -353,78 +313,23 @@ export function sessionProduceToolAllowlist(
   // A metaOnly lock grants deck fields and nothing else — pull every page
   // write surface so the only mutation left is update_deck itself.
   if (projectRoot && metaOnlyEditScope(projectRoot)) {
-    for (const name of ["write_page", "edit_elements", "edit_page_background", "delete_pages", "reorder_pages", "write_todo"]) {
+    for (const name of [
+      "write_page",
+      "edit_elements",
+      "edit_page_background",
+      "delete_pages",
+      "reorder_pages",
+      "write_todo",
+    ]) {
       allowed.delete(name);
     }
   }
   return allowed;
 }
 
-/** True while the active lock is a metaOnly page lock (deck fields only). */
-function metaOnlyEditScope(projectRoot: string): boolean {
-  const scope = readActiveReviewGuard(projectRoot)?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
-  return (scope as Record<string, unknown>).metaOnly === true;
-}
-
-/** Fields the active lock whitelists for deck-level metadata writes. */
-function editableMetaScope(projectRoot: string): ReadonlySet<"title" | "theme"> {
-  const scope = readActiveReviewGuard(projectRoot)?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return new Set();
-  const rec = scope as Record<string, unknown>;
-  return new Set(
-    (Array.isArray(rec.editableMeta) ? rec.editableMeta : [])
-      .map((field) => String(field ?? "").trim())
-      .filter((field): field is "title" | "theme" => field === "title" || field === "theme"),
-  );
-}
-
-/**
- * A full-rewrite lock (kind "deck" + rewrite) authorizes replacing the deck:
- * write_todo commits a new plan, write_page covers every baseline page plus
- * new ids, and delete_pages/reorder_pages settle the manifest to match.
- */
-function rewriteEditScope(projectRoot: string): boolean {
-  const scope = readActiveReviewGuard(projectRoot)?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
-  const rec = scope as Record<string, unknown>;
-  return rec.kind === "deck" && rec.rewrite === true && rec.structureOnly !== true;
-}
-
-/**
- * A page-list edit lock (kind "deck" + structureOnly) authorizes page-list
- * changes: adds at insertIndex, removals from deletablePageIds, whitelisted
- * rewrites via editablePageIds. It is the only scope under which write_page
- * may create a page that is absent from the committed plan.
- */
-function structuralEditScope(projectRoot: string): { insertIndex?: number; deletablePageIds: ReadonlySet<string>; reorderPageIds: readonly string[] } | undefined {
-  const scope = readActiveReviewGuard(projectRoot)?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
-  const rec = scope as Record<string, unknown>;
-  if (rec.kind !== "deck" || rec.structureOnly !== true) return undefined;
-  const insertIndex = Number(rec.insertIndex);
-  const deletablePageIds = new Set(
-    (Array.isArray(rec.deletablePageIds) ? rec.deletablePageIds : [])
-      .map((id) => String(id ?? "").trim())
-      .filter((id) => id.length > 0),
-  );
-  return {
-    insertIndex: Number.isSafeInteger(insertIndex) && insertIndex >= 0 ? insertIndex : undefined,
-    deletablePageIds,
-    reorderPageIds: (Array.isArray(rec.reorderPageIds) ? rec.reorderPageIds : [])
-      .map((id) => String(id ?? "").trim())
-      .filter((id) => id.length > 0),
-  };
-}
-
 type SliceToolExec = { agent?: { id: string }; callId?: string; signal: AbortSignal };
 
-async function present(
-  deps: ToolDeps,
-  exec: SliceToolExec,
-  name: string,
-  args: Record<string, unknown>,
-) {
+async function present(deps: ToolDeps, exec: SliceToolExec, name: string, args: Record<string, unknown>) {
   const sessionId = sessionIdOf(exec);
   const { projectRoot } = requireBinding(deps, sessionId);
   return deps.presentation.execute(
@@ -469,12 +374,17 @@ export function registerSliceTools(
     generateImageTool(deps),
     exportDeckTool(deps),
   ].filter((def) => !options?.exclude?.has(def.name));
-  const disposers = defs.map((def) => tools.register(withProductToolArgumentContract(def)));
+  const disposers = defs.map((def) =>
+    registerToolWithWhen(tools, withProductToolArgumentContract(def), ({ agent }) =>
+      isSliceToolStepVisible(def.name, sessionProduceToolAllowlist(deps, agent?.id)),
+    ),
+  );
   disposers.push(
     tools.guard((exec) => {
       const allowed = sessionProduceToolAllowlist(deps, exec.agent?.id);
       // Discussion is an explicit read-only capability, including hidden tools.
-      if (allowed === DISCUSSION_TOOLS && !allowed.has(exec.name)) return `Discussion is read-only: ${exec.name} is unavailable`;
+      if (allowed === DISCUSSION_TOOLS && !allowed.has(exec.name))
+        return `Discussion is read-only: ${exec.name} is unavailable`;
       return sliceToolGuard(allowed)(exec);
     }),
   );
@@ -486,8 +396,7 @@ export function registerSliceTools(
 function openProjectTool(deps: ToolDeps): ToolDefinition {
   return defineTool({
     name: "open_project",
-    description:
-      "Create or reopen the PPTD project bound to this DSH session. Do not pass a filesystem path.",
+    description: "Create or reopen the PPTD project bound to this DSH session. Do not pass a filesystem path.",
     parameters: {
       title: { type: "string", description: "Deck title" },
     },
@@ -578,7 +487,6 @@ function readReferenceTool(deps: ToolDeps): ToolDefinition {
   });
 }
 
-
 const SLIDE_PLAN_ITEMS_PARAMETER = {
   type: "array",
   items: {
@@ -593,7 +501,8 @@ const SLIDE_PLAN_ITEMS_PARAMETER = {
       purpose: { type: "string" },
     },
   },
-  description: "Complete ordered plan: {pageId, title, layoutFamily, exhibits, note?, purpose?}. Use an explicit empty exhibits array when none are needed. One page is valid.",
+  description:
+    "Complete ordered plan: {pageId, title, layoutFamily, exhibits, note?, purpose?}. Use an explicit empty exhibits array when none are needed. One page is valid.",
 } as const;
 
 function runtimeKindThemeInput(projectRoot: string): {
@@ -604,13 +513,11 @@ function runtimeKindThemeInput(projectRoot: string): {
   try {
     const rec = readSliceRuntimeFile(projectRoot);
     const brief = typeof rec.brief === "string" ? rec.brief.trim() : "";
-    const designSystemId =
-      typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
+    const designSystemId = typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
     return {
       brief,
       designSystemId: designSystemId || undefined,
-      userExplicitPack:
-        rec.designDirection === "preset" || rec.designDirection === "user-design",
+      userExplicitPack: rec.designDirection === "preset" || rec.designDirection === "user-design",
     };
   } catch {
     return { brief: "", userExplicitPack: false };
@@ -620,23 +527,28 @@ function runtimeKindThemeInput(projectRoot: string): {
 function rejectKindThemePack(
   projectRoot: string,
   args: Record<string, unknown>,
-): {
-  outcome: "rejected";
-  error: string;
-  packId: string | undefined;
-  kind: string;
-  detail: string;
-  painted: false;
-} | undefined {
+):
+  | {
+      outcome: "rejected";
+      error: string;
+      packId: string | undefined;
+      kind: string;
+      detail: string;
+      painted: false;
+    }
+  | undefined {
   const runtime = runtimeKindThemeInput(projectRoot);
   const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
   const issue = kindThemePackIssue({
     brief: runtime.brief,
     designSystemId: runtime.designSystemId,
-    adoptedSourceIds: requestedSources.length ? requestedSources : sourceIdList(
-      listSourceReceipts(projectRoot)
-        .filter((row) => row.state === "adopted" || row.state === "executed")
-        .map((row) => row.sourceId)),
+    adoptedSourceIds: requestedSources.length
+      ? requestedSources
+      : sourceIdList(
+          listSourceReceipts(projectRoot)
+            .filter((row) => row.state === "adopted" || row.state === "executed")
+            .map((row) => row.sourceId),
+        ),
     userExplicitPack: runtime.userExplicitPack,
   });
   if (!issue) return undefined;
@@ -651,80 +563,84 @@ function rejectKindThemePack(
 }
 
 function commitDesignTool(deps: ToolDeps): ToolDefinition {
-  return closeToolParameterRoot(defineTool({
-    name: "commit_design",
-    description:
-      "Commit the slide plan only after list_references reports referencesComplete=true. Pass an explicit ordered {pageId, title, layoutFamily, exhibits}[] plan, including a valid single-page plan. Optional adoptedSourceIds names the exact scenario/design sources chosen for this plan; every chunk of a newly selected source must already have been read. Do not invent a host preset id. Plan every page the brief needs.",
-    parameters: {
-      slidePlan: {
-        ...SLIDE_PLAN_ITEMS_PARAMETER,
-        required: true,
+  return closeToolParameterRoot(
+    defineTool({
+      name: "commit_design",
+      description:
+        "Commit the slide plan only after list_references reports referencesComplete=true. Pass an explicit ordered {pageId, title, layoutFamily, exhibits}[] plan, including a valid single-page plan. Optional adoptedSourceIds names the exact scenario/design sources chosen for this plan; every chunk of a newly selected source must already have been read. Do not invent a host preset id. Plan every page the brief needs.",
+      parameters: {
+        slidePlan: {
+          ...SLIDE_PLAN_ITEMS_PARAMETER,
+          required: true,
+        },
+        adoptedSourceIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Canonical array of source ids actually adopted.",
+        },
       },
-      adoptedSourceIds: {
-        type: "array",
-        items: { type: "string" },
-        description: "Canonical array of source ids actually adopted.",
+      output: jsonOutput((value) => JSON.stringify(value)),
+      async execute(args, exec) {
+        const sessionId = sessionIdOf(exec);
+        const { projectRoot } = requireBinding(deps, sessionId);
+        const rejected = rejectKindThemePack(projectRoot, args as Record<string, unknown>);
+        if (rejected) return jsonValue(rejected);
+        const result = await present(deps, exec, "commit_design", args as Record<string, unknown>);
+        if (!result.ok) {
+          return jsonValue({
+            ...result.payload,
+            outcome: "rejected",
+            error: result.payload.error ?? "rejected",
+            detail: result.detail,
+            painted: false,
+          });
+        }
+        return jsonValue({ ...result.payload, outcome: "committed" });
       },
-    },
-    output: jsonOutput((value) => JSON.stringify(value)),
-    async execute(args, exec) {
-      const sessionId = sessionIdOf(exec);
-      const { projectRoot } = requireBinding(deps, sessionId);
-      const rejected = rejectKindThemePack(projectRoot, args as Record<string, unknown>);
-      if (rejected) return jsonValue(rejected);
-      const result = await present(deps, exec, "commit_design", args as Record<string, unknown>);
-      if (!result.ok) {
-        return jsonValue({
-          ...result.payload,
-          outcome: "rejected",
-          error: result.payload.error ?? "rejected",
-          detail: result.detail,
-          painted: false,
-        });
-      }
-      return jsonValue({ ...result.payload, outcome: "committed" });
-    },
-  }));
+    }),
+  );
 }
 
 function writeTodoTool(deps: ToolDeps): ToolDefinition {
-  return closeToolParameterRoot(defineTool({
-    name: "write_todo",
-    description:
-      "Commit the page plan only after list_references reports referencesComplete=true. Same explicit plan shape as commit_design: items [{pageId, title, layoutFamily, exhibits}]. A single-page task is valid. A rejected reference preflight leaves the current plan unchanged. Plan every page the brief needs.",
-    parameters: {
-      items: {
-        ...SLIDE_PLAN_ITEMS_PARAMETER,
-        required: true,
+  return closeToolParameterRoot(
+    defineTool({
+      name: "write_todo",
+      description:
+        "Commit the page plan only after list_references reports referencesComplete=true. Same explicit plan shape as commit_design: items [{pageId, title, layoutFamily, exhibits}]. A single-page task is valid. A rejected reference preflight leaves the current plan unchanged. Plan every page the brief needs.",
+      parameters: {
+        items: {
+          ...SLIDE_PLAN_ITEMS_PARAMETER,
+          required: true,
+        },
       },
-    },
-    output: jsonOutput((value) => JSON.stringify(value)),
-    async execute(args, exec) {
-      const sessionId = sessionIdOf(exec);
-      const { projectRoot } = requireBinding(deps, sessionId);
-      const rejected = rejectKindThemePack(projectRoot, args as Record<string, unknown>);
-      if (rejected) return jsonValue(rejected);
-      const result = await present(deps, exec, "write_todo", args as Record<string, unknown>);
-      if (!result.ok) {
-        return jsonValue({
-          ...result.payload,
-          outcome: "rejected",
-          error: result.payload.error ?? "rejected",
-          detail: result.detail,
-          painted: false,
-        });
-      }
-      return jsonValue({ ...result.payload, outcome: "committed" });
-    },
-  }));
+      output: jsonOutput((value) => JSON.stringify(value)),
+      async execute(args, exec) {
+        const sessionId = sessionIdOf(exec);
+        const { projectRoot } = requireBinding(deps, sessionId);
+        const rejected = rejectKindThemePack(projectRoot, args as Record<string, unknown>);
+        if (rejected) return jsonValue(rejected);
+        const result = await present(deps, exec, "write_todo", args as Record<string, unknown>);
+        if (!result.ok) {
+          return jsonValue({
+            ...result.payload,
+            outcome: "rejected",
+            error: result.payload.error ?? "rejected",
+            detail: result.detail,
+            painted: false,
+          });
+        }
+        return jsonValue({ ...result.payload, outcome: "committed" });
+      },
+    }),
+  );
 }
 
 function lastReviewVerdict(projectRoot: string, pageId: string): "pass" | "revise" | undefined {
   const ledger = readRunLedger(projectRoot);
   if (!ledger) return undefined;
-  const fact = [...ledger.facts].reverse().find(
-    (row) => row.type === "page.visual-review-recorded" && row.pageId === pageId,
-  );
+  const fact = [...ledger.facts]
+    .reverse()
+    .find((row) => row.type === "page.visual-review-recorded" && row.pageId === pageId);
   if (fact?.type !== "page.visual-review-recorded") return undefined;
   return fact.verdict;
 }
@@ -742,13 +658,11 @@ export async function autoRenderWriteOutcome(
 ): Promise<WritePageOutcome> {
   const result = await render(pageId);
   const rawStatus = result.payload.layoutStatus;
-  const layoutStatus = result.ok &&
-    (rawStatus === "pass" || rawStatus === "fail" || rawStatus === "unavailable")
-    ? rawStatus
-    : "unavailable";
-  const layoutIssues = Array.isArray(result.payload.layoutIssues)
-    ? result.payload.layoutIssues
-    : [];
+  const layoutStatus =
+    result.ok && (rawStatus === "pass" || rawStatus === "fail" || rawStatus === "unavailable")
+      ? rawStatus
+      : "unavailable";
+  const layoutIssues = Array.isArray(result.payload.layoutIssues) ? result.payload.layoutIssues : [];
   const renderNote = String(result.payload.note ?? result.detail ?? "").trim();
   return {
     ...outcome,
@@ -776,9 +690,10 @@ export function formatWritePageOutcome(value: unknown): string {
     }
     const issues = (rec.layoutIssues ?? []).map(layoutIssueLabel).filter(Boolean).join(", ");
     const evidence = issues ? ` issues=${issues}` : rec.renderNote ? ` note=${rec.renderNote}` : "";
-    const next = status === "fail"
-      ? "Rewrite this page to resolve the listed layout issues, then call render_page again."
-      : "Retry render_page when the pinned editor raster is available; do not compose yet.";
+    const next =
+      status === "fail"
+        ? "Rewrite this page to resolve the listed layout issues, then call render_page again."
+        : "Retry render_page when the pinned editor raster is available; do not compose yet.";
     return `${base}.${evidence} ${next}`;
   }
   if (rec.outcome === "revise-requires-change") {
@@ -905,21 +820,22 @@ async function executeWritePageOnce(
     // plan; existing disk pages are writable regardless of plan membership so
     // pages added by earlier structural turns stay editable.
     const structuralNewPage = !onDisk && structuralEditScope(projectRoot) !== undefined;
-    if (!onDisk && !structuralNewPage &&
-        !readCommittedPagePlan(projectRoot).some((page) => page.pageId === persistPageKey(pageId))) {
+    if (
+      !onDisk &&
+      !structuralNewPage &&
+      !readCommittedPagePlan(projectRoot).some((page) => page.pageId === persistPageKey(pageId))
+    ) {
       return {
-        outcome: "rejected", error: "not_in_plan", painted: false,
+        outcome: "rejected",
+        error: "not_in_plan",
+        painted: false,
         detail: `page ${pageId} is not in the current plan — commit the updated complete plan before write_page`,
       };
     }
   } catch (error) {
     return { outcome: "rejected", detail: error instanceof Error ? error.message : String(error), painted: false };
   }
-  const versionConflict = aiReviewPageVersionConflict(
-    projectRoot,
-    pageId,
-    clean.expectedPageSha256,
-  );
+  const versionConflict = aiReviewPageVersionConflict(projectRoot, pageId, clean.expectedPageSha256);
   if (versionConflict) {
     return { outcome: "rejected", detail: versionConflict, painted: false };
   }
@@ -938,10 +854,8 @@ async function executeWritePageOnce(
     readWritePageDisk(projectRoot),
   );
   if (decision.action === "skip") {
-    return autoRenderWriteOutcome(
-      decision.outcome,
-      decision.outcome.pageId,
-      (targetPageId) => present(deps, exec, "render_page", { pageId: targetPageId }),
+    return autoRenderWriteOutcome(decision.outcome, decision.outcome.pageId, (targetPageId) =>
+      present(deps, exec, "render_page", { pageId: targetPageId }),
     );
   }
   if (decision.action === "reject") return decision.outcome;
@@ -968,48 +882,68 @@ async function executeWritePageOnce(
     pageSha256: after?.pageSha256 ?? decision.pageSha256,
     ...(fontNotes.length ? { fontNotes } : {}),
   } satisfies WritePageOutcome;
-  return autoRenderWriteOutcome(
-    outcome,
-    writtenId,
-    (targetPageId) => present(deps, exec, "render_page", { pageId: targetPageId }),
+  return autoRenderWriteOutcome(outcome, writtenId, (targetPageId) =>
+    present(deps, exec, "render_page", { pageId: targetPageId }),
   );
 }
 
 function editPageBackgroundTool(deps: ToolDeps): ToolDefinition {
   const definition = defineTool({
     name: "edit_page_background",
-    description: "Change ONLY an existing page background. Use this for background-only edits instead of copying all elements into write_page. Pass pageId, expectedPageSha256 from read_page, and the complete canonical background. The Host preserves every element, text string, style, order, notes and animation verbatim. Available only inside an active editor page/deck scope; stale hashes and element-only scopes are rejected. The same write/render and review gates apply.",
+    description:
+      "Change ONLY an existing page background. Use this for background-only edits instead of copying all elements into write_page. Pass pageId, expectedPageSha256 from read_page, and the complete canonical background. The Host preserves every element, text string, style, order, notes and animation verbatim. Available only inside an active editor page/deck scope; stale hashes and element-only scopes are rejected. The same write/render and review gates apply.",
     parameters: {
-      pageId: {type: "string", required: true},
-      expectedPageSha256: {type: "string", required: true},
-      background: {type: "json", required: true},
+      pageId: { type: "string", required: true },
+      expectedPageSha256: { type: "string", required: true },
+      background: { type: "json", required: true },
     },
     output: jsonOutput(formatWritePageOutcome),
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
-      const {projectRoot} = requireBinding(deps, sessionId);
+      const { projectRoot } = requireBinding(deps, sessionId);
       const toolCallId = callIdOf(exec);
-      return writePageSerial.enqueue(sessionId, () => replayOrRun(projectRoot, "edit_page_background", args, toolCallId, async () => {
-        const target = reviewWriteTargetForPage(readActiveReviewGuard(projectRoot), String(args.pageId));
-        const allowed = Boolean(target) && target!.scope.kind !== "elements";
-        if (!allowed) return {outcome: "rejected", error: "PAGE_EDIT_SCOPE_REQUIRED", detail: "edit_page_background requires an active editor page/deck scope for this page", painted: false};
-        const baseline = readPageFromProject(projectRoot, String(args.pageId));
-        if (baseline.pageSha256 !== String(args.expectedPageSha256).trim().toLowerCase()) {
-          return {outcome: "rejected", error: "PAGE_EDIT_STALE_PAGE", detail: "stale-page: read_page again before editing", painted: false};
-        }
-        const {pageSha256, ...page} = baseline;
-        const merged = {...page, background: structuredClone(args.background), expectedPageSha256: pageSha256};
-        const issues = canonicalWritePageIssues(merged);
-        if (issues.length) throw new ToolArgsError(issues);
-        return executeWritePageOnce(deps, exec, projectRoot, merged, toolCallId);
-      }));
+      return writePageSerial.enqueue(sessionId, () =>
+        replayOrRun(projectRoot, "edit_page_background", args, toolCallId, async () => {
+          const target = reviewWriteTargetForPage(readActiveReviewGuard(projectRoot), String(args.pageId));
+          const allowed = Boolean(target) && target!.scope.kind !== "elements";
+          if (!allowed)
+            return {
+              outcome: "rejected",
+              error: "PAGE_EDIT_SCOPE_REQUIRED",
+              detail: "edit_page_background requires an active editor page/deck scope for this page",
+              painted: false,
+            };
+          const baseline = readPageFromProject(projectRoot, String(args.pageId));
+          if (baseline.pageSha256 !== String(args.expectedPageSha256).trim().toLowerCase()) {
+            return {
+              outcome: "rejected",
+              error: "PAGE_EDIT_STALE_PAGE",
+              detail: "stale-page: read_page again before editing",
+              painted: false,
+            };
+          }
+          const { pageSha256, ...page } = baseline;
+          const merged = { ...page, background: structuredClone(args.background), expectedPageSha256: pageSha256 };
+          const issues = canonicalWritePageIssues(merged);
+          if (issues.length) throw new ToolArgsError(issues);
+          return executeWritePageOnce(deps, exec, projectRoot, merged, toolCallId);
+        }),
+      );
     },
   });
-  const pageSchema = writePageJsonSchema() as {properties: Record<string, unknown>};
-  return closeToolParameterRoot({...definition, parameters: {
-    type: "object", required: ["pageId", "expectedPageSha256", "background"],
-    properties: {pageId: {type: "string"}, expectedPageSha256: {type: "string"}, background: pageSchema.properties.background},
-  } as ToolDefinition["parameters"]});
+  const pageSchema = writePageJsonSchema() as { properties: Record<string, unknown> };
+  return closeToolParameterRoot({
+    ...definition,
+    parameters: {
+      type: "object",
+      required: ["pageId", "expectedPageSha256", "background"],
+      properties: {
+        pageId: { type: "string" },
+        expectedPageSha256: { type: "string" },
+        background: pageSchema.properties.background,
+      },
+    } as ToolDefinition["parameters"],
+  });
 }
 
 function deletePagesTool(deps: ToolDeps): ToolDefinition {
@@ -1018,22 +952,29 @@ function deletePagesTool(deps: ToolDeps): ToolDefinition {
     description:
       "Remove exactly the pages named by the active editor structural authorization (deletablePageIds). Each pageId may be deleted once; pages outside that list are rejected. For a merge, first write the merged content into the surviving editable page, then delete the absorbed pages. The page list and manifest update atomically; verify rolls everything back if the result does not match the authorized set.",
     parameters: {
-      pageIds: {type: "array", items: {type: "string"}, required: true},
+      pageIds: { type: "array", items: { type: "string" }, required: true },
     },
     output: jsonOutput((value) => JSON.stringify(value)),
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
-      const {projectRoot} = requireBinding(deps, sessionId);
+      const { projectRoot } = requireBinding(deps, sessionId);
       const toolCallId = callIdOf(exec);
-      const clean = {pageIds: Array.isArray(args.pageIds) ? args.pageIds.map(String) : []};
-      return writePageSerial.enqueue(sessionId, () => replayOrRun(projectRoot, "delete_pages", clean, toolCallId, async () =>
-        present(deps, exec, "delete_pages", clean)));
+      const clean = { pageIds: Array.isArray(args.pageIds) ? args.pageIds.map(String) : [] };
+      return writePageSerial.enqueue(sessionId, () =>
+        replayOrRun(projectRoot, "delete_pages", clean, toolCallId, async () =>
+          present(deps, exec, "delete_pages", clean),
+        ),
+      );
     },
   });
-  return closeToolParameterRoot({...definition, parameters: {
-    type: "object", required: ["pageIds"],
-    properties: {pageIds: {type: "array", items: {type: "string"}}},
-  } as ToolDefinition["parameters"]});
+  return closeToolParameterRoot({
+    ...definition,
+    parameters: {
+      type: "object",
+      required: ["pageIds"],
+      properties: { pageIds: { type: "array", items: { type: "string" } } },
+    } as ToolDefinition["parameters"],
+  });
 }
 
 function reorderPagesTool(deps: ToolDeps): ToolDefinition {
@@ -1042,22 +983,29 @@ function reorderPagesTool(deps: ToolDeps): ToolDefinition {
     description:
       "Reorder the deck's pages to exactly the authorized final order (reorderPageIds). pageIds must list every existing page once, in the authorized sequence. It changes the manifest order only — no page content is rewritten. Verify rolls everything back if the result differs from the authorized order.",
     parameters: {
-      pageIds: {type: "array", items: {type: "string"}, required: true},
+      pageIds: { type: "array", items: { type: "string" }, required: true },
     },
     output: jsonOutput((value) => JSON.stringify(value)),
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
-      const {projectRoot} = requireBinding(deps, sessionId);
+      const { projectRoot } = requireBinding(deps, sessionId);
       const toolCallId = callIdOf(exec);
-      const clean = {pageIds: Array.isArray(args.pageIds) ? args.pageIds.map(String) : []};
-      return writePageSerial.enqueue(sessionId, () => replayOrRun(projectRoot, "reorder_pages", clean, toolCallId, async () =>
-        present(deps, exec, "reorder_pages", clean)));
+      const clean = { pageIds: Array.isArray(args.pageIds) ? args.pageIds.map(String) : [] };
+      return writePageSerial.enqueue(sessionId, () =>
+        replayOrRun(projectRoot, "reorder_pages", clean, toolCallId, async () =>
+          present(deps, exec, "reorder_pages", clean),
+        ),
+      );
     },
   });
-  return closeToolParameterRoot({...definition, parameters: {
-    type: "object", required: ["pageIds"],
-    properties: {pageIds: {type: "array", items: {type: "string"}}},
-  } as ToolDefinition["parameters"]});
+  return closeToolParameterRoot({
+    ...definition,
+    parameters: {
+      type: "object",
+      required: ["pageIds"],
+      properties: { pageIds: { type: "array", items: { type: "string" } } },
+    } as ToolDefinition["parameters"],
+  });
 }
 
 function updateDeckTool(deps: ToolDeps): ToolDefinition {
@@ -1066,17 +1014,22 @@ function updateDeckTool(deps: ToolDeps): ToolDefinition {
     description:
       "Change deck-level metadata: the presentation title and/or theme. Only the fields named by the active editor authorization (editableMeta) may be sent — a field outside that whitelist is rejected. Page content and the manifest are untouched. A rewrite lock authorizes both fields. Theme textStyles fontFamily uses the same Office/WPS faces as write_page; an off-list face is rewritten and reported in fontNotes.",
     parameters: {
-      title: {type: "string"},
-      theme: {type: "json"},
+      title: { type: "string" },
+      theme: { type: "json" },
     },
     output: jsonOutput((value) => JSON.stringify(value)),
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
-      const {projectRoot} = requireBinding(deps, sessionId);
+      const { projectRoot } = requireBinding(deps, sessionId);
       const toolCallId = callIdOf(exec);
       const clean: Record<string, unknown> = {};
       if (typeof args.title === "string") clean.title = args.title;
-      if (args.theme !== undefined && args.theme !== null && typeof args.theme === "object" && !Array.isArray(args.theme)) {
+      if (
+        args.theme !== undefined &&
+        args.theme !== null &&
+        typeof args.theme === "object" &&
+        !Array.isArray(args.theme)
+      ) {
         clean.theme = structuredClone(args.theme);
       }
       // A theme carries textStyles[].fontFamily; rewrite any off-list face the
@@ -1085,19 +1038,24 @@ function updateDeckTool(deps: ToolDeps): ToolDefinition {
       const fontNotes = fontReplacements.map(
         (entry) => `字体 ${JSON.stringify(entry.from)} 改成 ${JSON.stringify(entry.to)}`,
       );
-      return writePageSerial.enqueue(sessionId, () => replayOrRun(projectRoot, "update_deck", clean, toolCallId, async () => {
-        const result = await present(deps, exec, "update_deck", clean);
-        if (result.ok && fontNotes.length && result.payload && typeof result.payload === "object") {
-          return { ...result, payload: { ...(result.payload as Record<string, unknown>), fontNotes } };
-        }
-        return result;
-      }));
+      return writePageSerial.enqueue(sessionId, () =>
+        replayOrRun(projectRoot, "update_deck", clean, toolCallId, async () => {
+          const result = await present(deps, exec, "update_deck", clean);
+          if (result.ok && fontNotes.length && result.payload && typeof result.payload === "object") {
+            return { ...result, payload: { ...(result.payload as Record<string, unknown>), fontNotes } };
+          }
+          return result;
+        }),
+      );
     },
   });
-  return closeToolParameterRoot({...definition, parameters: {
-    type: "object",
-    properties: {title: {type: "string"}, theme: {type: "object"}},
-  } as ToolDefinition["parameters"]});
+  return closeToolParameterRoot({
+    ...definition,
+    parameters: {
+      type: "object",
+      properties: { title: { type: "string" }, theme: { type: "object" } },
+    } as ToolDefinition["parameters"],
+  });
 }
 
 function editElementsTool(deps: ToolDeps): ToolDefinition {
@@ -1105,9 +1063,11 @@ function editElementsTool(deps: ToolDeps): ToolDefinition {
     name: "edit_elements",
     description:
       "Replace exactly the selected elements in an active editor element review. Pass only the authorized target elements, but each must be one COMPLETE canonical native PPTD element with its existing elementId. The Host reads the current authoritative page, preserves every other element, page metadata, and element order, then executes the same canonical write_page persistence path. Call read_page immediately before this tool and pass its current pageSha256 as expectedPageSha256. Do not wrap arguments or send aliases. This tool is unavailable outside a live server-verified elements scope.",
-    parameters: JSON.parse(JSON.stringify(EDIT_ELEMENTS_PARAMETER_SPEC, (key, value) =>
-      key === "minItems" || key === "maxItems" ? undefined : value,
-    )) as typeof EDIT_ELEMENTS_PARAMETER_SPEC,
+    parameters: JSON.parse(
+      JSON.stringify(EDIT_ELEMENTS_PARAMETER_SPEC, (key, value) =>
+        key === "minItems" || key === "maxItems" ? undefined : value,
+      ),
+    ) as typeof EDIT_ELEMENTS_PARAMETER_SPEC,
     output: jsonOutput(formatWritePageOutcome),
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
@@ -1148,13 +1108,14 @@ function editElementsTool(deps: ToolDeps): ToolDefinition {
 function writePageTool(deps: ToolDeps): ToolDefinition {
   const definition = defineTool({
     name: "write_page",
-    description:
-      `Write one COMPLETE PPTD v2 page in one call. Host accepts only one write_page at a time: wait for this result before the next page. This is whole-page replacement, never element append: every call must include the full elements[] array. Never omit elements — a background-only page is rejected; a photo cover still carries its title and subtitle as elements above the background. Elements use elementId, elementType, bounds [x,y,w,h], and content.text. Text fontSize/fontFamily/color/alignment fields belong directly on content; content.style is only a string theme reference such as $title, never an object. fontFamily must be one of ${SLIDE_FONTS.map((font) => font.name).join(", ")}; any other face is rewritten to the closest one and the result lists fontNotes. Prefer {latin, ea} so Latin and Chinese are named separately. layoutRole belongs on the element. Put element fill/line fields inside the owning element; optional page-level metadata is background, notes, and animations. Editing uses the same page id. Treat the complete page from read_page as the baseline, preserve its background/notes/animations, and pass its pageSha256 as expectedPageSha256; an editor review lock rejects stale edits. layoutStatus=pass is overflow-only, not a rewrite seal. The same pageId may be rewritten until review_pages records a current structural pass for that revision. After structural pass, rewrite only if the current revision has explicit editor edit authorization, review_pages names the page failing, or review_page says revise. An authorized editor edit uses read_page and expectedPageSha256; do not manufacture a visual review to enable it.`,
+    description: `Write one COMPLETE PPTD v2 page in one call. Host accepts only one write_page at a time: wait for this result before the next page. This is whole-page replacement, never element append: every call must include the full elements[] array. Never omit elements — a background-only page is rejected; a photo cover still carries its title and subtitle as elements above the background. Elements use elementId, elementType, bounds [x,y,w,h], and content.text. Text fontSize/fontFamily/color/alignment fields belong directly on content; content.style is only a string theme reference such as $title, never an object. fontFamily must be one of ${SLIDE_FONTS.map((font) => font.name).join(", ")}; any other face is rewritten to the closest one and the result lists fontNotes. Prefer {latin, ea} so Latin and Chinese are named separately. layoutRole belongs on the element. Put element fill/line fields inside the owning element; optional page-level metadata is background, notes, and animations. Editing uses the same page id. Treat the complete page from read_page as the baseline, preserve its background/notes/animations, and pass its pageSha256 as expectedPageSha256; an editor review lock rejects stale edits. layoutStatus=pass is overflow-only, not a rewrite seal. The same pageId may be rewritten until review_pages records a current structural pass for that revision. After structural pass, rewrite only if the current revision has explicit editor edit authorization, review_pages names the page failing, or review_page says revise. An authorized editor edit uses read_page and expectedPageSha256; do not manufacture a visual review to enable it.`,
     // Lower only for DSH's executor DSL, which rejects standard cardinality
     // keywords. Publish the full JSON Schema from the same source below.
-    parameters: JSON.parse(JSON.stringify(WRITE_PAGE_PARAMETER_SPEC, (key, value) =>
-      key === "minItems" || key === "maxItems" ? undefined : value,
-    )) as typeof WRITE_PAGE_PARAMETER_SPEC,
+    parameters: JSON.parse(
+      JSON.stringify(WRITE_PAGE_PARAMETER_SPEC, (key, value) =>
+        key === "minItems" || key === "maxItems" ? undefined : value,
+      ),
+    ) as typeof WRITE_PAGE_PARAMETER_SPEC,
     output: jsonOutput(formatWritePageOutcome),
     isConcurrencySafe: () => true,
     async execute(args, exec) {
@@ -1163,7 +1124,8 @@ function writePageTool(deps: ToolDeps): ToolDefinition {
       const toolCallId = callIdOf(exec);
       const clean = structuredClone(args as Record<string, unknown>);
       return replayOrRun(projectRoot, "write_page", clean, toolCallId, () =>
-        executeWritePageOnce(deps, exec, projectRoot, clean, toolCallId));
+        executeWritePageOnce(deps, exec, projectRoot, clean, toolCallId),
+      );
     },
   });
   // The author DSL intentionally leaves parameter roots open. The generation
@@ -1262,96 +1224,101 @@ function renderPageTool(deps: ToolDeps): ToolDefinition {
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
       return runExclusivePageStep(reviewPageGate, sessionId, "render_page", async () => {
-      const { projectRoot } = requireBinding(deps, sessionId);
-      const caps = inspectProjectCapabilities(projectRoot);
-      const result = await present(deps, exec, "render_page", args as Record<string, unknown>);
-      const pageId = String(args.pageId ?? "").trim();
-      const pngBytes =
-        rasterBytesFromPayload(projectRoot, result.payload.src) ?? readPageRaster(projectRoot, pageId);
-      const image = await attachPageRasterImage({
-        deps,
-        projectRoot,
-        visionMode: caps.vision.mode,
-        pageId,
-        pngBytes,
-        deliveryToken: typeof result.payload.deliveryToken === "string" ? result.payload.deliveryToken : undefined,
-        exec,
-      });
-      return jsonValue({
-        ok: result.ok,
-        summary: result.summary,
-        detail: result.detail,
-        payload: result.payload,
-        ...(image ? { image } : {}),
-      });
+        const { projectRoot } = requireBinding(deps, sessionId);
+        const caps = inspectProjectCapabilities(projectRoot);
+        const result = await present(deps, exec, "render_page", args as Record<string, unknown>);
+        const pageId = String(args.pageId ?? "").trim();
+        const pngBytes = rasterBytesFromPayload(projectRoot, result.payload.src) ?? readPageRaster(projectRoot, pageId);
+        const image = await attachPageRasterImage({
+          deps,
+          projectRoot,
+          visionMode: caps.vision.mode,
+          pageId,
+          pngBytes,
+          deliveryToken: typeof result.payload.deliveryToken === "string" ? result.payload.deliveryToken : undefined,
+          exec,
+        });
+        return jsonValue({
+          ok: result.ok,
+          summary: result.summary,
+          detail: result.detail,
+          payload: result.payload,
+          ...(image ? { image } : {}),
+        });
       });
     },
   });
 }
 
 function reviewPageTool(deps: ToolDeps): ToolDefinition {
-  return closeToolParameterRoot(defineTool({
-    name: "review_page",
-    description:
-      "Aesthetics-only visual review after a successful render_page for this exact pageId and revision. Host accepts only one review_page at a time: wait for this result before the next page. Copy its complete DELIVERY_TOKEN exactly; do not shorten or reuse it. verdict=pass requires issues=[] because praise is not an unresolved issue. verdict=revise requires one or more concrete visible defects in issues. When vision.mode is none this tool is unavailable; use review_pages for deterministic checks and authorized editor edits for human-requested revisions.",
-    parameters: {
-      pageId: { type: "string", required: true },
-      revision: { type: "integer", required: true },
-      deliveryToken: { type: "string", required: true },
-      verdict: { type: "string", enum: ["pass", "revise"], required: true },
-      issues: { type: "array", items: { type: "string" }, required: true },
-    },
-    output: visionToolOutput(),
-    async execute(args, exec) {
-      const sessionId = sessionIdOf(exec);
-      return runExclusivePageStep(reviewPageGate, sessionId, "review_page", async () => {
-      const { projectRoot } = requireBinding(deps, sessionId);
-      const caps = inspectProjectCapabilities(projectRoot);
-      const pageId = String(args.pageId ?? "").trim();
-      const result = await present(deps, exec, "review_page", args as Record<string, unknown>);
-      const image = await attachPageRasterImage({
-        deps,
-        projectRoot,
-        visionMode: caps.vision.mode,
-        pageId,
-        exec,
-      });
-      return jsonValue({
-        ok: result.ok,
-        summary: result.summary,
-        detail: result.detail,
-        payload: result.payload,
-        ...(image ? { image } : {}),
-      });
-      });
-    },
-  }));
+  return closeToolParameterRoot(
+    defineTool({
+      name: "review_page",
+      description:
+        "Aesthetics-only visual review after a successful render_page for this exact pageId and revision. Host accepts only one review_page at a time: wait for this result before the next page. Copy its complete DELIVERY_TOKEN exactly; do not shorten or reuse it. verdict=pass requires issues=[] because praise is not an unresolved issue. verdict=revise requires one or more concrete visible defects in issues. When vision.mode is none this tool is unavailable; use review_pages for deterministic checks and authorized editor edits for human-requested revisions.",
+      parameters: {
+        pageId: { type: "string", required: true },
+        revision: { type: "integer", required: true },
+        deliveryToken: { type: "string", required: true },
+        verdict: { type: "string", enum: ["pass", "revise"], required: true },
+        issues: { type: "array", items: { type: "string" }, required: true },
+      },
+      output: visionToolOutput(),
+      async execute(args, exec) {
+        const sessionId = sessionIdOf(exec);
+        return runExclusivePageStep(reviewPageGate, sessionId, "review_page", async () => {
+          const { projectRoot } = requireBinding(deps, sessionId);
+          const caps = inspectProjectCapabilities(projectRoot);
+          const pageId = String(args.pageId ?? "").trim();
+          const result = await present(deps, exec, "review_page", args as Record<string, unknown>);
+          const image = await attachPageRasterImage({
+            deps,
+            projectRoot,
+            visionMode: caps.vision.mode,
+            pageId,
+            exec,
+          });
+          return jsonValue({
+            ok: result.ok,
+            summary: result.summary,
+            detail: result.detail,
+            payload: result.payload,
+            ...(image ? { image } : {}),
+          });
+        });
+      },
+    }),
+  );
 }
 
 function reviewPagesTool(deps: ToolDeps): ToolDefinition {
-  return closeToolParameterRoot(defineTool({
-    name: "review_pages",
-    description:
-      "Run deterministic structural review for current page revisions. If it fails, repair the named pages and their concrete issues before reviewing again.",
-    parameters: {},
-    output: jsonOutput((value) => JSON.stringify(value)),
-    async execute(args, exec) {
-      return jsonValue(await present(deps, exec, "review_pages", args as Record<string, unknown>));
-    },
-  }));
+  return closeToolParameterRoot(
+    defineTool({
+      name: "review_pages",
+      description:
+        "Run deterministic structural review for current page revisions. If it fails, repair the named pages and their concrete issues before reviewing again.",
+      parameters: {},
+      output: jsonOutput((value) => JSON.stringify(value)),
+      async execute(args, exec) {
+        return jsonValue(await present(deps, exec, "review_pages", args as Record<string, unknown>));
+      },
+    }),
+  );
 }
 
 function composeDeckTool(deps: ToolDeps): ToolDefinition {
-  return closeToolParameterRoot(defineTool({
-    name: "compose_deck",
-    description:
-      "Seal current PPTD pages after every required gate passes. Pass only the title. On rejection, follow payload.next and the exact missingReferenceChunks/page-id arrays; do not repeat compose_deck without satisfying that step.",
-    parameters: { title: { type: "string", required: true } },
-    output: jsonOutput((value) => JSON.stringify(value)),
-    async execute(args, exec) {
-      return jsonValue(await present(deps, exec, "compose_deck", args as Record<string, unknown>));
-    },
-  }));
+  return closeToolParameterRoot(
+    defineTool({
+      name: "compose_deck",
+      description:
+        "Seal current PPTD pages after every required gate passes. Pass only the title. On rejection, follow payload.next and the exact missingReferenceChunks/page-id arrays; do not repeat compose_deck without satisfying that step.",
+      parameters: { title: { type: "string", required: true } },
+      output: jsonOutput((value) => JSON.stringify(value)),
+      async execute(args, exec) {
+        return jsonValue(await present(deps, exec, "compose_deck", args as Record<string, unknown>));
+      },
+    }),
+  );
 }
 
 export function searchImageTool(deps: ToolDeps): ToolDefinition {

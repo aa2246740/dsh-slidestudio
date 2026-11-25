@@ -2,12 +2,13 @@ import type { Context } from "@deepseek-ai/cordis";
 import { scopeOf } from "@deepseek-ai/dsh-scope";
 import type { AssistantQuestions } from "./assistant-questions.js";
 import { PRODUCE_WEB_SEARCH_NAME, patchProduceAssembly } from "./produce-request-header.js";
+import { restrictGlobalToolsCompat } from "./tool-visibility.js";
 import { registerSliceTools, sessionProduceToolAllowlist, type SliceToolDeps } from "./tools.js";
 
 export const SLIDES_PRESET_ID = "slides";
 
-// Function web_search stays out of the agent layer: hosted web tools own that
-// route and the produce patch strips leaked schemas anyway.
+// Function web_search stays out of the agent layer. rc.5 appends global tool
+// schemas after the assemble waterfall, so a scoped deny is required too.
 const PLANE_EXCLUDED_TOOLS = new Set([PRODUCE_WEB_SEARCH_NAME]);
 
 export type SlidesAgentPlaneDeps = SliceToolDeps & { questions?: AssistantQuestions };
@@ -51,27 +52,39 @@ export function attachSlidesAgentPlane(ctx: Context, deps: SlidesAgentPlaneDeps)
   // Ordinary Work chat sends user input with an RPC receipt. SlideStudio's
   // own validated routes send directly, after acquiring the project lease.
   // Refuse accidental Work prompts before any model step or tool mutation.
-  const disposeInputGuard = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
-    // Pre-step contains the whole conversation. An old rejected Work prompt
-    // must not prevent a later, valid instruction sent from the slide editor.
-    let latestInputFromWork = false;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const source = messages[i]!.source;
-      if (source.kind !== "user") continue;
-      latestInputFromWork = "rpcId" in source && source.rpcId !== undefined;
-      break;
-    }
-    if (deps.store.bindingFor(agent.id) && latestInputFromWork) {
-      throw new Error("请在演示文稿中继续此 PPT；工作区对话为生成记录，不接受编辑指令。Open this deck in SlideStudio to continue.");
-    }
-    return next();
-  }, { prepend: true });
+  const disposeInputGuard = ctx.on(
+    "agent/pre-step",
+    async ({ agent, messages }, next) => {
+      // Pre-step contains the whole conversation. An old rejected Work prompt
+      // must not prevent a later, valid instruction sent from the slide editor.
+      let latestInputFromWork = false;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const source = messages[i]!.source;
+        if (source.kind !== "user") continue;
+        latestInputFromWork = "rpcId" in source && source.rpcId !== undefined;
+        break;
+      }
+      if (deps.store.bindingFor(agent.id) && latestInputFromWork) {
+        throw new Error(
+          "请在演示文稿中继续此 PPT；工作区对话为生成记录，不接受编辑指令。Open this deck in SlideStudio to continue.",
+        );
+      }
+      return next();
+    },
+    { prepend: true },
+  );
   // `ctx.get` resolves services without an inject declaration: a scope
   // context (preset generation or agent) has no `inject` list of its own,
   // while the resolved runtime still registers into the caller's own scope
   // layer.
   const tools = ctx.get("tools") as Parameters<typeof registerSliceTools>[0] | undefined;
   const disposeTools = tools ? registerSliceTools(tools, deps, { exclude: PLANE_EXCLUDED_TOOLS }) : () => undefined;
+  // Root context must not deny web_search for every agent. Do not gate on
+  // local `scopeOf(ctx)`: the Host may load its own copy of `@deepseek-ai/dsh-scope`
+  // with a private Symbol, so `ctx !== ctx.root` identifies non-root scopes and
+  // Host `tools.restrict` validates scope membership in its own copy.
+  const disposeRestricted =
+    tools && ctx !== ctx.root ? restrictGlobalToolsCompat(tools, [PRODUCE_WEB_SEARCH_NAME]) : () => undefined;
   const disposeQuestions = ctx.on(
     "user-questions/request",
     (request, next) => {
@@ -95,6 +108,7 @@ export function attachSlidesAgentPlane(ctx: Context, deps: SlidesAgentPlaneDeps)
     disposeTools();
     disposeQuestions();
     disposeAssemble();
+    disposeRestricted();
   };
 }
 

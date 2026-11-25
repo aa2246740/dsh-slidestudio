@@ -1,1 +1,0 @@
-{"version":3,"file":"protocol.js","sourceRoot":"","sources":["../src/protocol.ts"],"names":[],"mappings":"AAAA,MAAM,CAAC,MAAM,gBAAgB,GAAG;IAC9B,cAAc;IACd,sBAAsB;IACtB,iBAAiB;IACjB,gBAAgB;IAChB,eAAe;IACf,YAAY;IACZ,WAAW;IACX,eAAe;IACf,sBAAsB;IACtB,cAAc;IACd,eAAe;IACf,aAAa;IACb,YAAY;IACZ,aAAa;IACb,aAAa;IACb,cAAc;IACd,cAAc;IACd,aAAa;IACb,YAAY;IACZ,cAAc;IACd,gBAAgB;CACR,CAAC"}

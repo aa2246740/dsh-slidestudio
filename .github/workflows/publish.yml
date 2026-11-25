@@ -31,7 +31,6 @@ jobs:
     timeout-minutes: 40
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
-      HARNESS_REF: dsh-v0.2.0-rc.2
       npm_config_auto_install_peers: 'false'
       PNPM_CONFIG_AUTO_INSTALL_PEERS: 'false'
     steps:
@@ -55,17 +54,8 @@ jobs:
           TAG=${GITHUB_REF_NAME#v}
           if [ "$PKG" != "$TAG" ]; then echo "tag v$TAG != dsh-slidestudio/package.json $PKG"; exit 1; fi
 
-      # Build-time only: the dshx client bundler reads the public Harness source.
-      - name: Prepare DSH Harness source and dshx adapter
-        run: |
-          H="$RUNNER_TEMP/harness"
-          git clone --quiet --depth 1 --branch "$HARNESS_REF" https://github.com/deepseek-ai/deepseek-harness.git "$H"
-          git clone --quiet --depth 1 https://github.com/aa2246740/dsh-external-plugin-devkit.git "$H/tools/dshx"
-          npm ci --prefix "$H/tools/dshx" --ignore-scripts --no-audit --no-fund
-          echo "DSHX_HARNESS=$H" >> "$GITHUB_ENV"
-
       - run: npm ci --no-audit --no-fund
-      - run: pnpm install --dir dsh-slidestudio --frozen-lockfile --config.auto-install-peers=false --config.strict-dep-builds=false
+      - run: pnpm install --dir dsh-slidestudio --ignore-workspace --frozen-lockfile --config.auto-install-peers=false --config.strict-dep-builds=false
       - name: Build release package (native build + plugin build + release.mjs verify)
         run: npm run release:package
 

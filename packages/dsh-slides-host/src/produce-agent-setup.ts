@@ -1,22 +1,10 @@
 import type { Context } from "@deepseek-ai/cordis";
-import {
-  installModelSelection,
-  type AgentSetup,
-  type ModelSelection,
-  type ModelSelectionRef,
-} from "@deepseek-ai/dsh-agent";
+import { type AgentSetup, type ModelSelection, type ModelSelectionRef } from "@deepseek-ai/dsh-agent";
+import { installModelSelectionCompat, type ModelSelectionCompatRef } from "./model-selection-compat.js";
 import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import type { ToolDefinition, ToolRuntime } from "@deepseek-ai/dsh-tools";
-import {
-  generateImageTool,
-  searchImageTool,
-  withProductToolArgumentContract,
-  type SliceToolDeps,
-} from "./tools.js";
-import {
-  wireSlidesAgentPlane,
-  type SlidesAgentPlaneDeps,
-} from "./agent-plane.js";
+import { generateImageTool, searchImageTool, withProductToolArgumentContract, type SliceToolDeps } from "./tools.js";
+import { wireSlidesAgentPlane, type SlidesAgentPlaneDeps } from "./agent-plane.js";
 import { patchProduceAssembly } from "./produce-request-header.js";
 
 type AgentPresetsMount = {
@@ -35,7 +23,7 @@ function agentPresetsOf(ctx: Context): AgentPresetsMount | undefined {
 /** Keep Agent-owned tools on the same provider/model as its mutable live selection. */
 export function bindToolProviderToModelSelection(
   deps: SliceToolDeps,
-  selection: ModelSelectionRef,
+  selection: ModelSelectionRef | ModelSelectionCompatRef,
   resolveProvider: (selected: ModelSelection) => SliceToolDeps["provider"],
 ): SliceToolDeps {
   const fallback = deps.provider;
@@ -85,10 +73,7 @@ export function registerHostedProduceTools(tools: ToolRuntime, deps: SliceToolDe
  * assembled model request. Install on the `slides` preset generation scope
  * (see `attachSlidesAgentPlane`) to cover every bound agent.
  */
-export function attachProduceAssemblePatch(
-  ctx: Context,
-  allowed?: () => ReadonlySet<string>,
-): () => void {
+export function attachProduceAssemblePatch(ctx: Context, allowed?: () => ReadonlySet<string>): () => void {
   return ctx.on(
     "system-prompt/assemble",
     async (_assembly, _context, next) => patchProduceAssembly(await next(), allowed?.()),
@@ -108,19 +93,15 @@ export function createSlidesProduceSetup(
   planeDeps: SlidesAgentPlaneDeps = deps,
 ): AgentSetup {
   return async (agentCtx) => {
-    installModelSelection(
-      agentCtx,
-      modelSelection ?? {
-        current: {
-          provider: deps.provider.providerId,
-          model: deps.provider.modelId,
-          ...(deps.reasoningEffort
-            ? { reasoningEffort: ReasoningEffortId(deps.reasoningEffort) }
-            : {}),
-        },
-        assembled: undefined,
+    const selection = modelSelection ?? {
+      current: {
+        provider: deps.provider.providerId,
+        model: deps.provider.modelId,
+        ...(deps.reasoningEffort ? { reasoningEffort: ReasoningEffortId(deps.reasoningEffort) } : {}),
       },
-    );
+      assembled: undefined,
+    };
+    installModelSelectionCompat(agentCtx, selection);
     const presets = agentPresetsOf(hostCtx);
     if (presets) {
       // Personal mode registers the `slides` preset definition itself; hosts

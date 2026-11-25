@@ -27,9 +27,7 @@ export const CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES = [
   PRODUCE_GENERATE_IMAGE_NAME,
 ] as const;
 
-const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(
-  CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES,
-);
+const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES);
 
 export const PRODUCE_WEB_SEARCH_DESCRIPTION =
   "Search the web for current information. Provide 1–4 queries in the required queries array. Use a one-item array for a single search. Returns facts and source URLs. First-class produce tool via xAI when inspect_capabilities.research.configured. Assistant prose is not a search.";
@@ -77,7 +75,10 @@ export function stripNativeWebForbid(text: string): string {
   for (const pattern of FORBID_SENTENCE_PATTERNS) {
     out = out.replace(pattern, "");
   }
-  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Drop leaked function-calling `web_search` so dsh-oauth hosted tools own the route. */
@@ -85,30 +86,49 @@ export function stripProductWebSearchTools(tools: readonly ToolSchema[]): ToolSc
   return tools.filter((tool) => tool.name !== PRODUCE_WEB_SEARCH_NAME);
 }
 
+/**
+ * 步级工具是否还能出现在本轮。始终去掉函数调用形态的 web_search。
+ * `allowed` 存在时，write_page 与能力裁剪工具必须在集合里。
+ */
+export function isProduceToolAllowed(toolName: string, allowed?: ReadonlySet<string>): boolean {
+  if (toolName === PRODUCE_WEB_SEARCH_NAME) return false;
+  if (!allowed) return true;
+  return (
+    (toolName !== "write_page" || allowed.has("write_page")) &&
+    (!CAPABILITY_FILTERED_PRODUCE_TOOLS.has(toolName) || allowed.has(toolName))
+  );
+}
+
 export function filterUnavailableProduceTools(
   tools: readonly ToolSchema[],
   allowed?: ReadonlySet<string>,
 ): ToolSchema[] {
-  const withoutFunctionWebSearch = stripProductWebSearchTools(tools);
-  if (!allowed) return withoutFunctionWebSearch;
-  return withoutFunctionWebSearch.filter(
-    (tool) =>
-      (tool.name !== "write_page" || allowed.has("write_page")) &&
-      (!CAPABILITY_FILTERED_PRODUCE_TOOLS.has(tool.name) || allowed.has(tool.name)),
-  );
+  return tools.filter((tool) => isProduceToolAllowed(tool.name, allowed));
 }
 
+const CONVERSATION_INTERACTION_TEXT =
+  "与用户交互集中在对话中。用户已明确要求的修改直接执行，不重复确认。只有缺少影响结果的关键信息，或用户明确要求先选择时，调用 ask_user_question；不要用正文中的‘回复 A/B’或‘说开始改’代替问题卡。用户已授权‘选完就改’时，工具返回回答后在同一轮继续完成修改，不再要求用户发一条消息。取消或未回答不等于同意，不执行依赖该回答的修改。只讨论的轮次仍然只读。";
+
 export function patchProduceAssembly<
-  T extends { sections: readonly ProducePromptSection[]; tools: readonly ToolSchema[] },
+  T extends { sections: readonly ProducePromptSection[]; tools?: readonly ToolSchema[] },
 >(assembly: T, allowed?: ReadonlySet<string>): T {
-  return {
-    ...assembly,
-    sections: allowed?.has("ask_user_question") ? [
-      ...assembly.sections.filter(section => section.name !== "slides:conversation-interaction"),
-      { name: "slides:conversation-interaction", text: "与用户交互集中在对话中。用户已明确要求的修改直接执行，不重复确认。只有缺少影响结果的关键信息，或用户明确要求先选择时，调用 ask_user_question；不要用正文中的‘回复 A/B’或‘说开始改’代替问题卡。用户已授权‘选完就改’时，工具返回回答后在同一轮继续完成修改，不再要求用户发一条消息。取消或未回答不等于同意，不执行依赖该回答的修改。只讨论的轮次仍然只读。" },
-    ] : assembly.sections,
-    tools: filterUnavailableProduceTools(assembly.tools, allowed),
-  };
+  const sections = allowed?.has("ask_user_question")
+    ? [
+        ...assembly.sections.filter((section) => section.name !== "slides:conversation-interaction"),
+        { name: "slides:conversation-interaction", text: CONVERSATION_INTERACTION_TEXT },
+      ]
+    : assembly.sections;
+  // rc.2 的装配结果带 tools 数组；rc.5 的 PromptPresentation 没有这个字段。
+  if (Array.isArray(assembly.tools)) {
+    return {
+      ...assembly,
+      sections,
+      tools: filterUnavailableProduceTools(assembly.tools, allowed),
+    };
+  }
+  const patched = { ...assembly, sections };
+  if ("tools" in patched) delete patched.tools;
+  return patched;
 }
 
 export function renderProduceSystem(assembly: ProduceAssembly): string {
@@ -118,8 +138,7 @@ export function renderProduceSystem(assembly: ProduceAssembly): string {
     .join("\n\n");
 }
 
-export type ProduceRequestHeaderConfig = Pick<LlmCallConfig, "provider" | "model"> &
-  Partial<LlmCallConfig>;
+export type ProduceRequestHeaderConfig = Pick<LlmCallConfig, "provider" | "model"> & Partial<LlmCallConfig>;
 
 /**
  * Same JSON shape the agent loop appends as `request/header` (`canonicalHeader`).
