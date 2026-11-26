@@ -11,11 +11,7 @@ import {
   resolveTodoExhibits,
   reviewSkillPages,
 } from "./layout-qa.js";
-import {
-  ensureKidsCoursewarePage,
-  isHostNoteCopy,
-  paintKidsCoursewarePage,
-} from "./kids-courseware.js";
+import { ensureKidsCoursewarePage, isHostNoteCopy, paintKidsCoursewarePage } from "./kids-courseware.js";
 import type { SkillPageInput } from "./skill-pages.js";
 import type { TodoExhibitContract } from "./layout-qa.js";
 import type { ChartElement } from "@open-slidestudio/pptd-v2";
@@ -66,43 +62,149 @@ describe("layout QA — official paper-white recipes", () => {
       id: "02_route",
       pageType: "route",
       elements: [
-        { elementId: "el-01", elementType: "shape", shapeName: "rect", bounds: [48, 36, 72, 6], fill: { type: "solid", color: "#F5987E" } },
-        { elementId: "el-02", elementType: "text", bounds: [48, 56, 400, 40], content: { text: "今天学什么", bold: true } },
-        { elementId: "el-04", elementType: "shape", shapeName: "rect", bounds: [120, 140, 4, 320], fill: { type: "solid", color: "#D7EBCE" } },
-        { elementId: "el-05", elementType: "shape", shapeName: "ellipse", bounds: [108, 148, 28, 28], fill: { type: "solid", color: "#F5987E" } },
-        { elementId: "el-08", elementType: "shape", shapeName: "ellipse", bounds: [108, 230, 28, 28], fill: { type: "solid", color: "#44712E" } },
-        { elementId: "el-11", elementType: "shape", shapeName: "ellipse", bounds: [108, 312, 28, 28], fill: { type: "solid", color: "#F5987E" } },
-        { elementId: "el-14", elementType: "shape", shapeName: "ellipse", bounds: [108, 394, 28, 28], fill: { type: "solid", color: "#44712E" } },
-        { elementId: "n1", elementType: "text", bounds: [160, 148, 320, 28], content: { text: "认识种子" } },
+        {
+          elementId: "el-01",
+          elementType: "shape",
+          shapeName: "rect",
+          bounds: [48, 36, 72, 6],
+          fill: { type: "solid", color: "#F5987E" },
+        },
+        {
+          elementId: "el-02",
+          elementType: "text",
+          bounds: [48, 56, 400, 40],
+          content: { text: "今天学什么", bold: true },
+        },
+        {
+          elementId: "el-04",
+          elementType: "shape",
+          shapeName: "rect",
+          bounds: [120, 140, 4, 320],
+          fill: { type: "solid", color: "#D7EBCE" },
+        },
+        {
+          elementId: "el-05",
+          elementType: "shape",
+          shapeName: "ellipse",
+          bounds: [108, 148, 28, 28],
+          fill: { type: "solid", color: "#F5987E" },
+        },
+        {
+          elementId: "el-08",
+          elementType: "shape",
+          shapeName: "ellipse",
+          bounds: [108, 230, 28, 28],
+          fill: { type: "solid", color: "#44712E" },
+        },
+        {
+          elementId: "el-11",
+          elementType: "shape",
+          shapeName: "ellipse",
+          bounds: [108, 312, 28, 28],
+          fill: { type: "solid", color: "#F5987E" },
+        },
+        {
+          elementId: "el-14",
+          elementType: "shape",
+          shapeName: "ellipse",
+          bounds: [108, 394, 28, 28],
+          fill: { type: "solid", color: "#44712E" },
+        },
+        {
+          elementId: "n1",
+          elementType: "text",
+          bounds: [160, 148, 320, 28],
+          content: { text: "认识种子" },
+        },
       ],
     };
     const concept: SkillPageInput = {
       id: "03_concept",
       pageType: "concept",
       elements: [
-        { elementId: "el-01", elementType: "shape", shapeName: "rect", bounds: [48, 36, 72, 6], fill: { type: "solid", color: "#F5987E" } },
-        { elementId: "el-02", elementType: "text", bounds: [48, 56, 400, 40], content: { text: "发芽是什么", bold: true } },
-        { elementId: "el-05", elementType: "text", bounds: [48, 156, 400, 160], content: { text: "发芽是胚重新开始生长。" } },
-        { elementId: "el-10", elementType: "text", bounds: [530, 160, 390, 280], content: { text: "种皮、胚、子叶。" } },
+        {
+          elementId: "el-01",
+          elementType: "shape",
+          shapeName: "rect",
+          bounds: [48, 36, 72, 6],
+          fill: { type: "solid", color: "#F5987E" },
+        },
+        {
+          elementId: "el-02",
+          elementType: "text",
+          bounds: [48, 56, 400, 40],
+          content: { text: "发芽是什么", bold: true },
+        },
+        {
+          elementId: "el-05",
+          elementType: "text",
+          bounds: [48, 156, 400, 160],
+          content: { text: "发芽是胚重新开始生长。" },
+        },
+        {
+          elementId: "el-10",
+          elementType: "text",
+          bounds: [530, 160, 390, 280],
+          content: { text: "种皮、胚、子叶。" },
+        },
       ],
     };
     const transfer: SkillPageInput = {
       id: "06_transfer",
       pageType: "transfer",
       elements: [
-        { elementId: "el-01", elementType: "shape", shapeName: "rect", bounds: [0, 0, 960, 64], fill: { type: "solid", color: "#D7EBCE" } },
-        { elementId: "el-02", elementType: "text", bounds: [48, 18, 700, 36], content: { text: "迁移：回家种一颗", color: "#44712E", bold: true } },
-        { elementId: "el-04", elementType: "shape", shapeName: "roundRect", bounds: [48, 150, 864, 260], fill: { type: "solid", color: "#D7EBCE" } },
-        { elementId: "el-05", elementType: "text", bounds: [72, 172, 800, 28], content: { text: "下一步行动" } },
-        { elementId: "el-06", elementType: "text", bounds: [72, 210, 800, 180], content: { text: "绿豆对照实验。" } },
+        {
+          elementId: "el-01",
+          elementType: "shape",
+          shapeName: "rect",
+          bounds: [0, 0, 960, 64],
+          fill: { type: "solid", color: "#D7EBCE" },
+        },
+        {
+          elementId: "el-02",
+          elementType: "text",
+          bounds: [48, 18, 700, 36],
+          content: { text: "迁移：回家种一颗", color: "#44712E", bold: true },
+        },
+        {
+          elementId: "el-04",
+          elementType: "shape",
+          shapeName: "roundRect",
+          bounds: [48, 150, 864, 260],
+          fill: { type: "solid", color: "#D7EBCE" },
+        },
+        {
+          elementId: "el-05",
+          elementType: "text",
+          bounds: [72, 172, 800, 28],
+          content: { text: "下一步行动" },
+        },
+        {
+          elementId: "el-06",
+          elementType: "text",
+          bounds: [72, 210, 800, 180],
+          content: { text: "绿豆对照实验。" },
+        },
       ],
     };
     assert.equal(hasPaperWhiteStructure(route.elements), true);
     assert.equal(hasPaperWhiteStructure(concept.elements), true);
     assert.equal(hasPaperWhiteStructure(transfer.elements), true);
-    assert.equal(coursewarePageIssues(route, { body: true }).length, 0, JSON.stringify(coursewarePageIssues(route, { body: true })));
-    assert.equal(coursewarePageIssues(concept, { body: true }).length, 0, JSON.stringify(coursewarePageIssues(concept, { body: true })));
-    assert.equal(coursewarePageIssues(transfer, { body: true }).length, 0, JSON.stringify(coursewarePageIssues(transfer, { body: true })));
+    assert.equal(
+      coursewarePageIssues(route, { body: true }).length,
+      0,
+      JSON.stringify(coursewarePageIssues(route, { body: true })),
+    );
+    assert.equal(
+      coursewarePageIssues(concept, { body: true }).length,
+      0,
+      JSON.stringify(coursewarePageIssues(concept, { body: true })),
+    );
+    assert.equal(
+      coursewarePageIssues(transfer, { body: true }).length,
+      0,
+      JSON.stringify(coursewarePageIssues(transfer, { body: true })),
+    );
   });
 
   it("paints a cream classroom page into a colored exhibit", () => {
@@ -115,15 +217,21 @@ describe("layout QA — official paper-white recipes", () => {
     assert.ok(painted.elements.some((el) => el.elementType === "shape"));
     const review = reviewSkillPages(
       [
-        paintKidsCoursewarePage({ ...creamWall, id: "page-01", pageType: "cover" }, {
-          brief: "给二年级讲一讲种子怎么发芽",
-          index: 0,
-        }),
+        paintKidsCoursewarePage(
+          { ...creamWall, id: "page-01", pageType: "cover" },
+          {
+            brief: "给二年级讲一讲种子怎么发芽",
+            index: 0,
+          },
+        ),
         painted,
-        paintKidsCoursewarePage({ ...creamWall, id: "page-03", pageType: "close" }, {
-          brief: "给二年级讲一讲种子怎么发芽",
-          index: 2,
-        }),
+        paintKidsCoursewarePage(
+          { ...creamWall, id: "page-03", pageType: "close" },
+          {
+            brief: "给二年级讲一讲种子怎么发芽",
+            index: 2,
+          },
+        ),
       ],
       { mode: "strict", courseware: true },
     );
@@ -154,7 +262,10 @@ describe("layout QA — official paper-white recipes", () => {
     assert.equal(hasCoursewareColor(emptyBox), true);
     assert.equal(hasDrawnExhibit(emptyBox.elements), false);
     const issues = coursewarePageIssues(emptyBox, { body: true });
-    assert.ok(issues.some((i) => i.code === "empty_box"), JSON.stringify(issues));
+    assert.ok(
+      issues.some((i) => i.code === "empty_box"),
+      JSON.stringify(issues),
+    );
     const ensured = ensureKidsCoursewarePage(emptyBox, {
       brief: "给二年级讲一讲种子怎么发芽",
       index: 3,
@@ -188,7 +299,10 @@ describe("layout QA — official paper-white recipes", () => {
       ],
     };
     const issues = coursewarePageIssues(emptyCover, { body: true });
-    assert.ok(issues.some((i) => i.code === "empty_box" || i.code === "doc_wall"), JSON.stringify(issues));
+    assert.ok(
+      issues.some((i) => i.code === "empty_box" || i.code === "doc_wall"),
+      JSON.stringify(issues),
+    );
     const ensured = ensureKidsCoursewarePage(emptyCover, {
       brief: "给二年级讲一讲种子怎么发芽",
       index: 0,
@@ -241,7 +355,10 @@ describe("layout QA — official paper-white recipes", () => {
     };
     assert.equal(hasDrawnExhibit(cards.elements), false);
     const issues = coursewarePageIssues(cards, { body: true });
-    assert.ok(issues.some((i) => i.code === "empty_box"), JSON.stringify(issues));
+    assert.ok(
+      issues.some((i) => i.code === "empty_box"),
+      JSON.stringify(issues),
+    );
     const ensured = ensureKidsCoursewarePage(cards, {
       brief: "给二年级讲一讲种子怎么发芽",
       index: 5,
@@ -253,10 +370,13 @@ describe("layout QA — official paper-white recipes", () => {
     assert.equal(coursewarePageIssues(ensured.page, { body: true }).length, 0);
     const review = reviewSkillPages(
       [
-        paintKidsCoursewarePage({ ...creamWall, id: "cover", pageType: "cover" }, {
-          brief: "给二年级讲一讲种子怎么发芽",
-          index: 0,
-        }),
+        paintKidsCoursewarePage(
+          { ...creamWall, id: "cover", pageType: "cover" },
+          {
+            brief: "给二年级讲一讲种子怎么发芽",
+            index: 0,
+          },
+        ),
         paintKidsCoursewarePage(creamWall, { brief: "给二年级讲一讲种子怎么发芽", index: 2 }),
         ensured.page,
       ],
@@ -363,9 +483,7 @@ describe("layout QA — chart semantics", () => {
       { mode: "compose" },
     );
     assert.equal(
-      review.issues.some(
-        (issue) => issue.code === "invalid_chart_data" || issue.code === "unsupported_chart",
-      ),
+      review.issues.some((issue) => issue.code === "invalid_chart_data" || issue.code === "unsupported_chart"),
       false,
     );
   });
@@ -400,8 +518,7 @@ describe("layout QA — promised exhibit contract", () => {
     );
     assert.ok(
       review.issues.some(
-        (issue) =>
-          issue.code === "missing_requested_exhibit" && issue.message.includes("chart:waterfall"),
+        (issue) => issue.code === "missing_requested_exhibit" && issue.message.includes("chart:waterfall"),
       ),
       JSON.stringify(review.issues),
     );
@@ -508,10 +625,7 @@ describe("layout QA — promised exhibit contract", () => {
     };
     const bar: SkillPageInput = {
       id: "page-05",
-      elements: [
-        title,
-        chart,
-      ],
+      elements: [title, chart],
     };
     const missing = reviewSkillPages([bar], {
       mode: "compose",
@@ -554,10 +668,7 @@ describe("layout QA — promised exhibit contract", () => {
     };
     const pie: SkillPageInput = {
       id: "page-07",
-      elements: [
-        title,
-        chart,
-      ],
+      elements: [title, chart],
     };
     const missing = reviewSkillPages([pie], {
       mode: "compose",
@@ -624,7 +735,12 @@ describe("layout QA — promised exhibit contract", () => {
           elementType: "shape" as const,
           exhibitRole: "matrix" as const,
           shapeName: "rect",
-          bounds: [100 + (index % 2) * 220, 120 + Math.floor(index / 2) * 120, 200, 100] as [number, number, number, number],
+          bounds: [100 + (index % 2) * 220, 120 + Math.floor(index / 2) * 120, 200, 100] as [
+            number,
+            number,
+            number,
+            number,
+          ],
           fill: { type: "solid" as const, color: "#FFFFFF00" },
         })),
         ...["投入", "收益"].map((text, index) => ({
@@ -653,24 +769,12 @@ describe("layout QA — promised exhibit contract", () => {
       "【第10页 现金流与回款】",
       "版式：上瀑布，下左仪表盘，下右账龄条。",
     ].join("\n");
-    assert.deepEqual(inferBriefPageExhibits(brief, 6), [
-      "chart:waterfall",
-      "chart:line",
-      "chart:bar",
-      "table",
-    ]);
-    assert.deepEqual(inferBriefPageExhibits(brief, 10), [
-      "chart:waterfall",
-      "chart:bar",
-      "diagram:gauge",
-    ]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 6), ["chart:waterfall", "chart:line", "chart:bar", "table"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 10), ["chart:waterfall", "chart:bar", "diagram:gauge"]);
   });
 
   it("does not turn an explicit no-table page into a table obligation", () => {
-    const brief = [
-      "【第1页 封面】无图表、无经营数字。",
-      "【第2页 目录】左右分栏，无数据表。",
-    ].join("\n");
+    const brief = ["【第1页 封面】无图表、无经营数字。", "【第2页 目录】左右分栏，无数据表。"].join("\n");
     assert.deepEqual(inferBriefPageExhibits(brief, 1), []);
     assert.deepEqual(inferBriefPageExhibits(brief, 2), []);
   });
@@ -686,11 +790,25 @@ describe("layout QA — promised exhibit contract", () => {
     assert.deepEqual(inferBriefPageExhibits(brief, 11), ["diagram:timeline"]);
   });
 
-  it("merges explicit, legacy-outline, and page-specific brief requirements", () => {
+  it("recognizes Chinese keyword fallbacks for all five diagram types", () => {
     const brief = [
-      "【第1页 封面】无图表。",
-      "【第2页 会员】中左金字塔，底双轴图。",
+      "【第1页 转化】全链路转化漏斗分析。",
+      "【第2页 达成率】核心目标进度环与达成率环。",
+      "【第3页 架构】客户分层层级塔。",
+      "【第4页 评估】四象限与九宫格评估矩阵。",
+      "【第5页 历程】公司发展历程、时间轴与演进路线。",
+      "【第6页 风险】可能性与影响的风险矩阵散点。",
     ].join("\n");
+    assert.deepEqual(inferBriefPageExhibits(brief, 1), ["diagram:funnel"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 2), ["diagram:gauge"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 3), ["diagram:pyramid"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 4), ["diagram:matrix"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 5), ["diagram:timeline"]);
+    assert.deepEqual(inferBriefPageExhibits(brief, 6), ["chart:scatter"]);
+  });
+
+  it("merges explicit, legacy-outline, and page-specific brief requirements", () => {
+    const brief = ["【第1页 封面】无图表。", "【第2页 会员】中左金字塔，底双轴图。"].join("\n");
     assert.deepEqual(
       resolveTodoExhibits(
         {
@@ -703,317 +821,5 @@ describe("layout QA — promised exhibit contract", () => {
       ),
       ["chart:bar", "kpi-cards", "chart:combo", "diagram:pyramid"],
     );
-  });
-});
-
-describe("layout QA — measurable taste gates", () => {
-  const frame = (target: SkillPageInput): SkillPageInput[] => [
-    {
-      id: "cover",
-      pageType: "cover",
-      elements: [
-        {
-          elementId: "cover-title",
-          elementType: "text",
-          bounds: [80, 200, 800, 60],
-          content: { text: "封面", bold: true, fontSize: 40 },
-        },
-      ],
-    },
-    target,
-    {
-      id: "close",
-      pageType: "close",
-      elements: [
-        {
-          elementId: "close-title",
-          elementType: "text",
-          bounds: [80, 200, 800, 60],
-          content: { text: "谢谢", bold: true, fontSize: 40 },
-        },
-      ],
-    },
-  ];
-  const issuesFor = (target: SkillPageInput, opts?: { tasteGates?: boolean }) =>
-    reviewSkillPages(frame(target), { mode: "compose", tasteGates: true, ...opts }).issues.filter(
-      (issue) => issue.pageId === target.id,
-    );
-
-  const goodBody: SkillPageInput = {
-    id: "page-02",
-    pageType: "content",
-    elements: [
-      {
-        elementId: "title",
-        elementType: "text",
-        bounds: [60, 40, 700, 44],
-        content: { text: "七月经营概览", bold: true, fontSize: 28 },
-      },
-      {
-        elementId: "kicker",
-        elementType: "text",
-        bounds: [60, 100, 400, 24],
-        content: { text: "收入与毛利双升", fontSize: 14 },
-      },
-      {
-        elementId: "panel",
-        elementType: "shape",
-        shapeName: "rect",
-        bounds: [120, 150, 640, 320],
-        fill: { type: "solid", color: "#1B6B93" },
-      },
-    ],
-  };
-
-  it("passes a well-scaled, breathing body page", () => {
-    assert.deepEqual(issuesFor(goodBody), []);
-  });
-
-  it("rejects a 14pt title and 9pt supporting copy", () => {
-    const weak: SkillPageInput = {
-      id: "page-03",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 30],
-          content: { text: "太小的标题", bold: true, fontSize: 14 },
-        },
-        {
-          elementId: "note",
-          elementType: "text",
-          bounds: [60, 100, 400, 20],
-          content: { text: "9pt 的脚注", fontSize: 9 },
-        },
-      ],
-    };
-    const issues = issuesFor(weak);
-    assert.ok(issues.some((i) => i.code === "weak_title"));
-    assert.ok(issues.some((i) => i.code === "tiny_text" && /note/.test(i.message)));
-  });
-
-  it("rejects a text wall over the density budget", () => {
-    const wall: SkillPageInput = {
-      id: "page-04",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 44],
-          content: { text: "密度超标", bold: true, fontSize: 28 },
-        },
-        {
-          elementId: "body",
-          elementType: "text",
-          bounds: [60, 100, 840, 400],
-          content: { text: "字".repeat(901), fontSize: 14 },
-        },
-      ],
-    };
-    assert.ok(issuesFor(wall).some((i) => i.code === "text_wall"));
-  });
-
-  it("rejects a chart pileup and an unreadable chart", () => {
-    const chart = (elementId: string, x: number, w: number): ChartElement =>
-      ({
-        elementId,
-        elementType: "chart",
-        bounds: [x, 120, w, 300],
-        series: [{ type: "bar", fill: "#1B6B93" }],
-        data: { cols: ["月份"], rows: [["7月"]] },
-      }) as unknown as ChartElement;
-    const pileup: SkillPageInput = {
-      id: "page-05",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 44],
-          content: { text: "图表堆叠", bold: true, fontSize: 28 },
-        },
-        chart("c1", 20, 280),
-        chart("c2", 340, 280),
-        chart("c3", 660, 280),
-      ],
-    };
-    assert.ok(issuesFor(pileup).some((i) => i.code === "chart_pileup"));
-
-    const small: SkillPageInput = {
-      ...pileup,
-      id: "page-06",
-      elements: [pileup.elements[0]!, chart("tiny", 20, 120)],
-    };
-    assert.ok(issuesFor(small).some((i) => i.code === "chart_too_small"));
-  });
-
-  it("rejects text clinging to the slide edge", () => {
-    const cling: SkillPageInput = {
-      id: "page-07",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 44],
-          content: { text: "贴边文字", bold: true, fontSize: 28 },
-        },
-        {
-          elementId: "edge",
-          elementType: "text",
-          bounds: [4, 120, 300, 24],
-          content: { text: "贴着左边", fontSize: 14 },
-        },
-      ],
-    };
-    assert.ok(issuesFor(cling).some((i) => i.code === "edge_cling" && /edge/.test(i.message)));
-  });
-
-  it("holds cover pages to a larger title but skips body-only budgets", () => {
-    const cover: SkillPageInput = {
-      id: "page-01",
-      pageType: "cover",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [80, 200, 800, 60],
-          content: { text: "封面标题太小", bold: true, fontSize: 22 },
-        },
-      ],
-    };
-    const issues = issuesFor(cover);
-    assert.ok(issues.some((i) => i.code === "weak_title"));
-    assert.ok(!issues.some((i) => i.code === "tiny_text" || i.code === "overstuffed"));
-  });
-
-  it("stays silent when taste gates are off", () => {
-    const weak: SkillPageInput = {
-      ...goodBody,
-      id: "page-08",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 30],
-          content: { text: "小标题", bold: true, fontSize: 14 },
-        },
-      ],
-    };
-    const issues = reviewSkillPages(frame(weak), { mode: "compose" }).issues;
-    assert.ok(!issues.some((i) => i.code === "weak_title"));
-  });
-});
-
-describe("layout QA — gauge composition gate", () => {
-  const gaugeTodo: TodoExhibitContract = { title: "逾期仪表盘", exhibits: ["diagram:gauge"] };
-
-  it("rejects a donut beside a flattened offset ellipse", () => {
-    const page: SkillPageInput = {
-      id: "page-10",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 44],
-          content: { text: "回款健康", bold: true, fontSize: 28 },
-        },
-        {
-          elementId: "g1",
-          elementType: "shape",
-          exhibitRole: "gauge",
-          shapeName: "donut",
-          bounds: [752, 158, 80, 80],
-          fill: { type: "solid", color: "#1B7F4A" },
-        },
-        {
-          elementId: "g2",
-          elementType: "shape",
-          exhibitRole: "gauge",
-          shapeName: "ellipse",
-          bounds: [812, 178, 100, 50],
-          fill: { type: "solid", color: "#E8F5EE" },
-        },
-        {
-          elementId: "gt",
-          elementType: "text",
-          bounds: [760, 250, 160, 30],
-          content: { text: "逾期 2.1%", fontSize: 14 },
-        },
-      ],
-    };
-    const issues = reviewSkillPages([page], {
-      mode: "compose",
-      tasteGates: true,
-      todos: [gaugeTodo],
-    }).issues;
-    const gauge = issues.filter((i) => i.code === "broken_gauge");
-    assert.ok(gauge.length >= 1, `expected broken_gauge, got ${JSON.stringify(issues.map((i) => i.code))}`);
-    assert.ok(gauge.some((i) => /flattened/.test(i.message)));
-  });
-
-  it("accepts concentric circular discs", () => {
-    const page: SkillPageInput = {
-      id: "page-11",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [60, 40, 700, 44],
-          content: { text: "回款健康", bold: true, fontSize: 28 },
-        },
-        {
-          elementId: "ring-outer",
-          elementType: "shape",
-          exhibitRole: "gauge",
-          shapeName: "donut",
-          bounds: [700, 150, 120, 120],
-          fill: { type: "solid", color: "#E5E7EB" },
-        },
-        {
-          elementId: "ring-value",
-          elementType: "shape",
-          exhibitRole: "gauge",
-          shapeName: "arc",
-          bounds: [708, 158, 104, 104],
-          fill: { type: "solid", color: "#10B981" },
-        },
-        {
-          elementId: "gt",
-          elementType: "text",
-          bounds: [720, 190, 80, 30],
-          content: { text: "96.2%", fontSize: 16 },
-        },
-      ],
-    };
-    const issues = reviewSkillPages([page], {
-      mode: "compose",
-      tasteGates: true,
-      todos: [{ title: "逾期仪表盘", exhibits: ["diagram:gauge"] }],
-    }).issues.filter((i) => i.code === "broken_gauge");
-    assert.deepEqual(issues, []);
-  });
-
-  it("ignores pages that never promised a gauge", () => {
-    const page: SkillPageInput = {
-      id: "page-12",
-      pageType: "content",
-      elements: [
-        {
-          elementId: "blob",
-          elementType: "shape",
-          exhibitRole: "gauge",
-          shapeName: "ellipse",
-          bounds: [100, 150, 200, 60],
-          fill: { type: "solid", color: "#E8F5EE" },
-        },
-      ],
-    };
-    const issues = reviewSkillPages([page], { mode: "compose", tasteGates: true }).issues;
-    assert.ok(!issues.some((i) => i.code === "broken_gauge"));
   });
 });

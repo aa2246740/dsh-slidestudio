@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  ensureRunLedger,
-  inspectRunLedger,
-  persistPresentationRunProvider,
-} from "../index.js";
+import { ensureRunLedger, inspectRunLedger, persistPresentationRunProvider } from "../index.js";
 
 function projectRoot(modalities: readonly string[]): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "design-gate-"));

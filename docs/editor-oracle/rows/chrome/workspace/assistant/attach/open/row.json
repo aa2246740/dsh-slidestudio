@@ -1,0 +1,52 @@
+{
+  "id": "chrome.workspace.assistant.attach.open",
+  "version": 1,
+  "status": "verified",
+  "surface": "chrome.global",
+  "title": "Open composer attachment picker",
+  "description": "#composer-plus in the assistant composer opens the file picker for reference attachments (PNG/JPG/WebP/GIF, PPTX, XLSX, CSV/TSV, PDF, DOCX, TXT/MD/JSON)",
+  "kimiUi": {
+    "controlLabel": "附件",
+    "location": "Editor assistant composer",
+    "appearsWhen": "assistant chat panel is open"
+  },
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "pageIndex": 0,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Product-only control; the frozen Kimi capture has no composer attachment flow"
+  },
+  "action": {
+    "type": "click",
+    "steps": ["Open a project editor, click #composer-plus in the assistant composer"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "no PPTD — composer intake control"
+    },
+    "network": "POST /api/attachments/upload when applicable"
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "POST /api/attachments/upload",
+    "uiParityNotes": "Product attachment UX; no direct Kimi counterpart captured"
+  },
+  "test": {
+    "id": "EO-ASSISTANT-ATT-001",
+    "automated": true,
+    "selfTestChecklist": ["DOM tests in apps/native-web/src/editor-attachment-dom.test.mjs"]
+  },
+  "oracle": {
+    "source": "product-only",
+    "capturedAt": "2026-10-19T00:00:00.000Z",
+    "agent": "editor-composer-attachments",
+    "sessionId": "5b7d7ef527b2"
+  },
+  "updatedAt": "2026-10-19T00:00:00.000Z"
+}

@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  contrastRatio,
-  createEmptyProject,
-  loadProject,
-} from "@open-slidestudio/pptd-v2";
+import { contrastRatio, createEmptyProject, loadProject } from "@open-slidestudio/pptd-v2";
 import {
   parseComposeDeck,
   assertComposeHasBody,
@@ -46,7 +42,9 @@ describe("open-kimi playbook", () => {
   });
 
   it("uses a Markdown heading as the deck title without splitting 16:9", () => {
-    const outline = briefToOutline("# 客户运营中心 2026 年 7 月经营月报\n\n请制作 7 页 16:9 中文办公 PPT，受众是经营层。");
+    const outline = briefToOutline(
+      "# 客户运营中心 2026 年 7 月经营月报\n\n请制作 7 页 16:9 中文办公 PPT，受众是经营层。",
+    );
     assert.equal(outline.title, "客户运营中心 2026 年 7 月经营月报");
     assert.match(outline.claims.join(" "), /16∶9/);
   });
@@ -58,17 +56,11 @@ describe("open-kimi playbook", () => {
     });
     assert.match(bundle.designSystemId, /pine-green-strategy/);
     assert.ok(bundle.designMarkdown.includes("PART B"));
-    assert.equal(
-      bundle.skillExcerpt,
-      fs.readFileSync(path.join(bundle.skillRoot, "SKILL.md"), "utf8"),
-    );
+    assert.equal(bundle.skillExcerpt, fs.readFileSync(path.join(bundle.skillRoot, "SKILL.md"), "utf8"));
     assert.doesNotMatch(bundle.skillExcerpt, /\[truncated\]/);
     assert.match(bundle.skillExcerpt, /Image priority/);
     assert.match(bundle.pptdExcerpt, /bounds/);
-    assert.equal(
-      bundle.pptdExcerpt,
-      fs.readFileSync(path.join(bundle.skillRoot, "reference", "pptd.md"), "utf8"),
-    );
+    assert.equal(bundle.pptdExcerpt, fs.readFileSync(path.join(bundle.skillRoot, "reference", "pptd.md"), "utf8"));
     assert.doesNotMatch(bundle.pptdExcerpt, /\[truncated\]/);
     const ids = listDesignSystems(bundle.skillRoot).map((s) => s.id);
     assert.ok(ids.includes("consulting/pine-green-strategy"));
@@ -92,26 +84,17 @@ describe("open-kimi playbook", () => {
   it("extractPalette honors black-gold and red-black signatures", () => {
     const root = loadPlaybook().skillRoot;
     const blackGold = extractPalette(
-      fs.readFileSync(
-        path.join(root, "reference/design_system/finance/black-gold-ledger/design.md"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(root, "reference/design_system/finance/black-gold-ledger/design.md"), "utf8"),
     );
     assert.equal(blackGold.primary, "#151515");
     assert.equal(blackGold.accent, "#D6A000");
     const cream = extractPalette(
-      fs.readFileSync(
-        path.join(root, "reference/design_system/promotion/cream-collage/design.md"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(root, "reference/design_system/promotion/cream-collage/design.md"), "utf8"),
     );
     assert.equal(cream.background, "#F3E8D4");
     assert.ok(["#F05A39", "#2657D7"].includes(cream.primary));
     const redBlack = extractPalette(
-      fs.readFileSync(
-        path.join(root, "reference/design_system/consulting/red-black-growth/design.md"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(root, "reference/design_system/consulting/red-black-growth/design.md"), "utf8"),
     );
     assert.ok(["#1C0B0B", "#0F0605"].includes(redBlack.primary));
     assert.equal(redBlack.accent, "#FF4D4D");
@@ -120,10 +103,7 @@ describe("open-kimi playbook", () => {
   it("uses an accessible title color instead of a light accent on paper-white courseware", () => {
     const root = loadPlaybook().skillRoot;
     const paperWhite = extractPalette(
-      fs.readFileSync(
-        path.join(root, "reference/design_system/academic/paper-white-courseware/design.md"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(root, "reference/design_system/academic/paper-white-courseware/design.md"), "utf8"),
     );
     assert.equal(paperWhite.background, "#FDFAF5");
     assert.equal(paperWhite.primary, "#44712E");
@@ -276,10 +256,7 @@ describe("open-kimi playbook", () => {
     assert.match(roles, /evidence/);
     assert.match(roles, /close/);
     const hasRound = project.pages.some((pg) =>
-      pg.page.elements.some(
-        (el) =>
-          "shapeName" in el && (el as { shapeName?: string }).shapeName === "roundRect",
-      ),
+      pg.page.elements.some((el) => "shapeName" in el && (el as { shapeName?: string }).shapeName === "roundRect"),
     );
     assert.equal(hasRound, false);
   });
@@ -319,11 +296,7 @@ describe("open-kimi playbook", () => {
               {
                 role: "content",
                 title: "资本开支必须赶在 2028 年前锁定",
-                bullets: [
-                  "长周期设备交期不可压缩",
-                  "窗口一旦错过，示范堆并网只能后移",
-                  "先锁资本开支，再谈扩容叙事",
-                ],
+                bullets: ["长周期设备交期不可压缩", "窗口一旦错过，示范堆并网只能后移", "先锁资本开支，再谈扩容叙事"],
               },
               {
                 role: "evidence",
@@ -515,19 +488,10 @@ describe("open-kimi playbook", () => {
       ),
       "teach",
     );
+    assert.equal(inferDeckIntent("这不是科普。管理层决策是否批准试点，预算含培训与变更费用"), "decide");
+    assert.equal(resolvePlaybookCategory("给二年级讲一讲种子怎么发芽", "analysis-decision"), "education-training");
     assert.equal(
-      inferDeckIntent("这不是科普。管理层决策是否批准试点，预算含培训与变更费用"),
-      "decide",
-    );
-    assert.equal(
-      resolvePlaybookCategory("给二年级讲一讲种子怎么发芽", "analysis-decision"),
-      "education-training",
-    );
-    assert.equal(
-      resolveGenerateDesign(
-        "给二年级讲一讲种子怎么发芽",
-        "consulting/pine-green-strategy",
-      ),
+      resolveGenerateDesign("给二年级讲一讲种子怎么发芽", "consulting/pine-green-strategy"),
       DEFAULT_TEACH_DESIGN,
     );
   });
@@ -547,16 +511,10 @@ describe("open-kimi playbook", () => {
     assert.equal(resolveGenerateDesign(launch, HUB_DEFAULT_DESIGN), DEFAULT_PROMO_DESIGN);
     assert.equal(resolveGenerateDesign(recap, HUB_DEFAULT_DESIGN), HUB_DEFAULT_DESIGN);
     assert.equal(resolveGenerateDesign(lesson, HUB_DEFAULT_DESIGN), DEFAULT_TEACH_DESIGN);
-    assert.equal(
-      resolveGenerateDesign("本周进度周报：缺数据标占位", HUB_DEFAULT_DESIGN),
-      DEFAULT_REPORT_DESIGN,
-    );
+    assert.equal(resolveGenerateDesign("本周进度周报：缺数据标占位", HUB_DEFAULT_DESIGN), DEFAULT_REPORT_DESIGN);
     const monthly = "根据附件写华北零售 7 月经营月报，只引用虚构演示数字";
     assert.equal(inferDeckIntent(monthly), "report");
-    assert.equal(
-      inferDeckIntent("澄光生活是新消费品牌，请生成 2026 年 7 月经营月报"),
-      "report",
-    );
+    assert.equal(inferDeckIntent("澄光生活是新消费品牌，请生成 2026 年 7 月经营月报"), "report");
     assert.equal(resolvePlaybookCategory(monthly, "analysis-decision"), "management-report");
     assert.equal(resolveGenerateDesign(monthly, HUB_DEFAULT_DESIGN), DEFAULT_REPORT_DESIGN);
     const reportHint = intentComposeGuidance("report", monthly).join("\n");
@@ -600,14 +558,8 @@ describe("open-kimi playbook", () => {
     assert.ok(track);
     assert.equal(labels.length, 7);
     const box = (el: { bounds: [number, number, number, number] }) => el.bounds;
-    const overlap = (
-      a: [number, number, number, number],
-      b: [number, number, number, number],
-    ) =>
-      a[0] < b[0] + b[2] - 2 &&
-      a[0] + a[2] > b[0] + 2 &&
-      a[1] < b[1] + b[3] - 2 &&
-      a[1] + a[3] > b[1] + 2;
+    const overlap = (a: [number, number, number, number], b: [number, number, number, number]) =>
+      a[0] < b[0] + b[2] - 2 && a[0] + a[2] > b[0] + 2 && a[1] < b[1] + b[3] - 2 && a[1] + a[3] > b[1] + 2;
     for (let i = 0; i < labels.length; i++) {
       const a = box(labels[i]!);
       assert.ok(a[0] >= 0);
@@ -631,14 +583,14 @@ describe("open-kimi playbook", () => {
     assert.match(blob, /待补|示意|占位/);
     assert.ok(deck.pages.length >= 4);
     assert.ok(deck.pages.length < 7);
-    assert.equal(deck.pages.some((p) => p.role === "matrix"), false);
+    assert.equal(
+      deck.pages.some((p) => p.role === "matrix"),
+      false,
+    );
   });
 
   it("classroom briefs use a lesson outline instead of the consulting skeleton", () => {
-    const deck = deterministicDeck(
-      "介绍一下勾股定理，面向小学生",
-      "consulting/pine-green-strategy",
-    );
+    const deck = deterministicDeck("介绍一下勾股定理，面向小学生", "consulting/pine-green-strategy");
     const roles = deck.pages.map((p) => p.role);
     assert.deepEqual(roles, ["cover", "toc", "content", "content", "evidence", "close"]);
     assert.equal(deck.pages.length, 6);
@@ -656,30 +608,23 @@ describe("open-kimi playbook", () => {
 
   it("resolves Hub All + a kids explainer onto the education skill", () => {
     assert.equal(inferDeckIntent("介绍一下勾股定理，面向小学生"), "teach");
-    assert.equal(
-      resolvePlaybookCategory("介绍一下勾股定理，面向小学生", "analysis-decision"),
-      "education-training",
-    );
-    assert.equal(
-      inferDeckIntent("华北区域 Q3 增长复盘：试点成效与下周动作"),
-      "decide",
-    );
-    const recap = deterministicDeck(
-      "华北区域 Q3 增长复盘：试点成效与下周动作",
-      "consulting/pine-green-strategy",
-    );
+    assert.equal(resolvePlaybookCategory("介绍一下勾股定理，面向小学生", "analysis-decision"), "education-training");
+    assert.equal(inferDeckIntent("华北区域 Q3 增长复盘：试点成效与下周动作"), "decide");
+    const recap = deterministicDeck("华北区域 Q3 增长复盘：试点成效与下周动作", "consulting/pine-green-strategy");
     const thin = deterministicDeck("仅有一句话主题", "consulting/pine-green-strategy");
     assert.notEqual(recap.pages.length, thin.pages.length);
     assert.ok(recap.pages.some((p) => p.role === "evidence"));
     assert.ok(recap.pages.some((p) => p.role === "timeline"));
-    assert.equal(thin.pages.some((p) => p.role === "evidence"), false);
+    assert.equal(
+      thin.pages.some((p) => p.role === "evidence"),
+      false,
+    );
   });
 
   it("referenceText reaches the LLM user prompt", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playbook-ref-llm-"));
     let capturedUser = "";
-    const referenceText =
-      "## 参考: brand-voice.md\n松绿主色贯穿封面与证据页\n禁止编造客户案例";
+    const referenceText = "## 参考: brand-voice.md\n松绿主色贯穿封面与证据页\n禁止编造客户案例";
     const brain = createPlaybookBrain({
       referenceText,
       llm: {
@@ -693,11 +638,7 @@ describe("open-kimi playbook", () => {
               {
                 role: "content",
                 title: "只引用附件原文",
-                bullets: [
-                  "松绿主色贯穿封面与证据页",
-                  "禁止编造客户案例",
-                  "缺材料的位置保持占位",
-                ],
+                bullets: ["松绿主色贯穿封面与证据页", "禁止编造客户案例", "缺材料的位置保持占位"],
               },
               {
                 role: "evidence",
@@ -746,11 +687,7 @@ describe("open-kimi playbook", () => {
     assert.deepEqual(parsed.names, ["brand-voice.md", "brand-palette.md"]);
     assert.ok(parsed.lines[0]?.includes("松绿主色贯穿封面"));
 
-    const deck = deterministicDeck(
-      "季度复盘主题说明文字",
-      "consulting/pine-green-strategy",
-      referenceText,
-    );
+    const deck = deterministicDeck("季度复盘主题说明文字", "consulting/pine-green-strategy", referenceText);
     const content = deck.pages.find((p) => p.role === "content");
     assert.ok(content?.bullets?.some((b) => b.includes("松绿主色贯穿封面")));
     const ev = deck.pages.find((p) => p.role === "evidence");

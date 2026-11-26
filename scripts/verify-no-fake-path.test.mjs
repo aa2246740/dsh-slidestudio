@@ -38,6 +38,9 @@ function makeFixture() {
   write("packages/dsh-slides-client/lib/client.js", "");
   write("packages/dsh-slides-bundle/cordis.patch.yml", "");
   write("packages/presentation-run/src/index.ts", "");
+  write("packages/slides-tools/src/index.ts", "");
+  write("packages/slides-mcp/src/index.ts", "");
+  write("packages/slides-runtime/src/index.ts", "");
   write("scripts/dsh-slides.mjs", "");
   write(
     "package.json",
@@ -45,7 +48,15 @@ function makeFixture() {
       scripts: { start: "npm run dsh:slides", "dsh:profile:init": "node scripts/x.mjs" },
     }),
   );
-  for (const pkg of ["dsh-slides-host", "dsh-slides-bundle", "dsh-slides-client", "presentation-run"]) {
+  for (const pkg of [
+    "dsh-slides-host",
+    "dsh-slides-bundle",
+    "dsh-slides-client",
+    "presentation-run",
+    "slides-tools",
+    "slides-mcp",
+    "slides-runtime",
+  ]) {
     write(`packages/${pkg}/package.json`, "{}");
   }
   write("packages/agent-harness/src/pi-hands.ts", "export async function runPiHand() {}\n");
@@ -95,5 +106,28 @@ test("forbidden symbols in product sources are flagged", () => {
   const { root, write } = makeFixture();
   write("packages/presentation-run/src/evil.ts", 'import { x } from "y";\ncreatePiBrain();\n');
   const hits = collectFakePathHits(root);
-  assert.ok(hits.some((h) => h.includes("createPiBrain(")), JSON.stringify(hits));
+  assert.ok(
+    hits.some((h) => h.includes("createPiBrain(")),
+    JSON.stringify(hits),
+  );
+});
+
+test("ADR-0012: pi-agent-core / pi-ai imports pass, pi-coding-agent imports and deps are flagged", () => {
+  const { root, write } = makeFixture();
+  write(
+    "packages/slides-runtime/src/loop.ts",
+    'import { Agent } from "@earendil-works/pi-agent-core";\nimport { createModels } from "@earendil-works/pi-ai";\n',
+  );
+  assert.deepEqual(collectFakePathHits(root), []);
+  write("packages/slides-runtime/src/coding.ts", 'import { main } from "@earendil-works/pi-coding-agent";\n');
+  write(
+    "packages/slides-runtime/package.json",
+    JSON.stringify({ dependencies: { "@earendil-works/pi-coding-agent": "0.80.10" } }),
+  );
+  const hits = collectFakePathHits(root);
+  assert.ok(hits.includes("packages/slides-runtime/src/coding.ts: pi-coding-agent"), JSON.stringify(hits));
+  assert.ok(
+    hits.includes("packages/slides-runtime/package.json: production dep on pi-coding-agent"),
+    JSON.stringify(hits),
+  );
 });

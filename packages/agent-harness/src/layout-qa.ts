@@ -13,14 +13,10 @@ import type {
   ShapeElement,
   TextElement,
 } from "@open-slidestudio/pptd-v2";
-import { colorAlpha } from "@open-slidestudio/pptd-v2";
+import { colorAlpha, drawnBorderWidth } from "@open-slidestudio/pptd-v2";
 import type { SkillPageInput } from "./skill-pages.js";
 import { mediaExists } from "./media-store.js";
-import {
-  hasHomemadeFourCircles,
-  hasKidsDoodle,
-  hasOfficialRecipe,
-} from "./playbook-recipes.js";
+import { hasHomemadeFourCircles, hasKidsDoodle, hasOfficialRecipe } from "./playbook-recipes.js";
 
 export type LayoutIssue = {
   pageId: string;
@@ -114,25 +110,18 @@ export function inferTodoExhibits(text: string): TodoExhibitKind[] {
   add("chart:bar", /\bbars\b|\bbar\s+(?:chart|graph)\b|stack(?:ed)?|柱|条形|堆[叠积]条|时效条|拆分条|账龄条/i);
   add("chart:combo", /combo|dual[-\s]?axis|双轴图/i);
   add("table", /\btables?\b|四列表|区域表|附表|数据表|底表|活动表|拆解表|缺货表|表格/i);
-  add("diagram:funnel", /funnel|漏斗/i);
-  add("diagram:gauge", /gauge|仪表盘/i);
-  add("diagram:pyramid", /pyramid|金字塔/i);
-  add("diagram:matrix", /decision\s*matrix|priority\s*matrix|决策矩阵|优先级矩阵|二维矩阵|2[×x]2/i);
-  add("diagram:timeline", /timeline|时间线|路线图|里程碑/i);
+  add("diagram:funnel", /funnel|转化漏斗|漏斗/i);
+  add("diagram:gauge", /gauge|仪表盘|进度环|达成率环/i);
+  add("diagram:pyramid", /pyramid|金字塔|层级塔/i);
+  add("diagram:matrix", /decision\s*matrix|priority\s*matrix|2[×x]2|四象限|九宫格|(?<!风险)矩阵/i);
+  add("diagram:timeline", /timeline|时间线|时间轴|路线图|里程碑|发展历程|演进路线/i);
   add("kpi-cards", /\bkpi\b|kpi\s*卡|(?:大|小)?卡片/i);
   add("comparison-cards", /comparison\s*cards?|对照卡/i);
   return found;
 }
 
-export function inferBriefPageExhibits(
-  brief: string,
-  pageNumber: number,
-): TodoExhibitKind[] {
-  const sections = [
-    ...brief.matchAll(
-      /【第\s*(\d+)\s*页[^】]*】([\s\S]*?)(?=【第\s*\d+\s*页|$)/g,
-    ),
-  ];
+export function inferBriefPageExhibits(brief: string, pageNumber: number): TodoExhibitKind[] {
+  const sections = [...brief.matchAll(/【第\s*(\d+)\s*页[^】]*】([\s\S]*?)(?=【第\s*\d+\s*页|$)/g)];
   const section = sections.find((match) => Number(match[1]) === pageNumber)?.[2];
   return section ? inferTodoExhibits(section) : [];
 }
@@ -142,11 +131,7 @@ export function inferBriefPageExhibits(
  * Explicit declarations, legacy outline wording, and page-specific brief
  * requirements are additive. A real requirement always removes `none`.
  */
-export function resolveTodoExhibits(
-  todo: TodoExhibitContract,
-  index: number,
-  brief: string,
-): TodoExhibitKind[] {
+export function resolveTodoExhibits(todo: TodoExhibitContract, index: number, brief: string): TodoExhibitKind[] {
   const supplied = todo.exhibits?.filter(isTodoExhibitKind) ?? [];
   const inferred = inferTodoExhibits(`${todo.title}\n${todo.note ?? ""}`);
   const briefRequired = inferBriefPageExhibits(brief, index + 1);
@@ -232,9 +217,7 @@ function diagramContributorIsVisible(element: PptdElement): boolean {
   if (element.elementType === "text") {
     const text = element as TextElement;
     return (
-      text.content.text.trim().length > 0 &&
-      (text.content.fontSize ?? 18) >= 4 &&
-      colorIsVisible(text.content.color)
+      text.content.text.trim().length > 0 && (text.content.fontSize ?? 18) >= 4 && colorIsVisible(text.content.color)
     );
   }
   if (element.elementType === "line") {
@@ -242,8 +225,7 @@ function diagramContributorIsVisible(element: PptdElement): boolean {
   }
   if (element.elementType !== "shape") return false;
   const shape = element as ShapeElement;
-  const borderVisible =
-    (shape.border?.width ?? 0) > 0 && colorIsVisible(shape.border?.color);
+  const borderVisible = drawnBorderWidth(shape.border) > 0 && colorIsVisible(shape.border?.color);
   if (borderVisible) return true;
   if (!shape.fill) {
     // Path-based shapes have a visible native default paint; CSS primitives
@@ -288,23 +270,18 @@ function hasStructuredDiagram(
   return widths.every((width, index) => index === 0 || width + 2 >= widths[index - 1]!);
 }
 
-function satisfiesRequestedExhibit(
-  page: SkillPageInput,
-  requirement: TodoExhibitKind,
-): boolean {
+function satisfiesRequestedExhibit(page: SkillPageInput, requirement: TodoExhibitKind): boolean {
   if (requirement === "none") return true;
   if (requirement === "table") {
     return page.elements.some((element) => element.elementType === "table");
   }
   if (requirement === "kpi-cards") {
-    return visibleRoleElements(page, "kpi-card").filter(
-      (element) => element.elementType === "shape",
-    ).length >= 3;
+    return visibleRoleElements(page, "kpi-card").filter((element) => element.elementType === "shape").length >= 3;
   }
   if (requirement === "comparison-cards") {
-    return visibleRoleElements(page, "comparison-card").filter(
-      (element) => element.elementType === "shape",
-    ).length >= 2;
+    return (
+      visibleRoleElements(page, "comparison-card").filter((element) => element.elementType === "shape").length >= 2
+    );
   }
   if (requirement.startsWith("chart:")) {
     const expected = requirement.slice("chart:".length);
@@ -312,10 +289,7 @@ function satisfiesRequestedExhibit(
       return page.elements.some((element) => {
         if (!isVisibleChartExhibit(element)) return false;
         const chart = element;
-        return (
-          new Set(chartTypesOf(chart)).size >= 2 &&
-          chart.series.some((series) => series.axis === "secondary")
-        );
+        return new Set(chartTypesOf(chart)).size >= 2 && chart.series.some((series) => series.axis === "secondary");
       });
     }
     return page.elements.some((element) => {
@@ -326,30 +300,17 @@ function satisfiesRequestedExhibit(
       return actual.includes(expected);
     });
   }
-  const role = requirement.slice("diagram:".length) as
-    | "funnel"
-    | "gauge"
-    | "pyramid"
-    | "matrix"
-    | "timeline";
-  if (
-    role === "matrix" &&
-    page.elements.some((element) => chartTypesOf(element).includes("scatter"))
-  ) {
+  const role = requirement.slice("diagram:".length) as "funnel" | "gauge" | "pyramid" | "matrix" | "timeline";
+  if (role === "matrix" && page.elements.some((element) => chartTypesOf(element).includes("scatter"))) {
     return true;
   }
   return hasStructuredDiagram(page, role);
 }
 
-export function requestedExhibitIssues(
-  page: SkillPageInput,
-  todo: TodoExhibitContract | undefined,
-): LayoutIssue[] {
+export function requestedExhibitIssues(page: SkillPageInput, todo: TodoExhibitContract | undefined): LayoutIssue[] {
   if (!todo) return [];
   const declared = todo.exhibits?.filter(isTodoExhibitKind) ?? [];
-  const requested = declared.length
-    ? declared
-    : inferTodoExhibits(`${todo.title}\n${todo.note ?? ""}`);
+  const requested = declared.length ? declared : inferTodoExhibits(`${todo.title}\n${todo.note ?? ""}`);
   return requested
     .filter((requirement) => !satisfiesRequestedExhibit(page, requirement))
     .map((requirement) => ({
@@ -388,11 +349,7 @@ function isBody(page: SkillPageInput, index: number, last: number): boolean {
 }
 
 /** Every classroom page, including cover and takeaway, needs a drawing — not cards+copy. */
-export function isCoursewareExhibitPage(
-  _page: SkillPageInput,
-  _index: number,
-  _last?: number,
-): boolean {
+export function isCoursewareExhibitPage(_page: SkillPageInput, _index: number, _last?: number): boolean {
   return true;
 }
 
@@ -429,7 +386,9 @@ export function hasPaperWhiteStructure(elements: PptdElement[]): boolean {
   if (coralRule && left && right) return true;
   const columns = plates.filter((el) => el.bounds[2] >= 220 && el.bounds[2] <= 340 && el.bounds[3] >= 180);
   if (columns.length >= 3) return true;
-  const topBand = plates.some((el) => el.bounds[0] <= 8 && el.bounds[2] >= 800 && el.bounds[3] >= 48 && el.bounds[3] <= 140);
+  const topBand = plates.some(
+    (el) => el.bounds[0] <= 8 && el.bounds[2] >= 800 && el.bounds[3] >= 48 && el.bounds[3] <= 140,
+  );
   const resultBar = plates.some((el) => el.bounds[2] >= 700 && el.bounds[3] >= 48 && el.bounds[1] >= 350);
   if (topBand && (resultBar || texts.length >= 4)) return true;
   const actionPanel = plates.some((el) => el.bounds[2] >= 700 && el.bounds[3] >= 160);
@@ -459,9 +418,7 @@ export function detectExhibit(elements: PptdElement[]): string | null {
   }
   if (elements.some((el) => el.elementType === "table")) return "table";
   if (elements.some((el) => el.elementType === "chart")) return "chart";
-  const big = elements.filter(
-    (el) => el.elementType === "shape" && area(el) >= 200 * 140,
-  );
+  const big = elements.filter((el) => el.elementType === "shape" && area(el) >= 200 * 140);
   if (big.length >= 1) return "shape";
   return null;
 }
@@ -489,15 +446,7 @@ function collectImageSrcs(page: SkillPageInput): string[] {
   return srcs;
 }
 
-const SUPPORTED_CHART_TYPES = new Set([
-  "bar",
-  "column",
-  "line",
-  "area",
-  "pie",
-  "waterfall",
-  "scatter",
-]);
+const SUPPORTED_CHART_TYPES = new Set(["bar", "column", "line", "area", "pie", "waterfall", "scatter"]);
 
 function chartIssues(page: SkillPageInput): LayoutIssue[] {
   const issues: LayoutIssue[] = [];
@@ -539,9 +488,7 @@ function chartIssues(page: SkillPageInput): LayoutIssue[] {
 const HEX_RE = /#([0-9A-Fa-f]{6})\b/g;
 
 /** Cream / white / gray / near-black — a Google-Doc wall, not courseware. */
-const COURSEWARE_HEX = new Set(
-  ["#44712E", "#F5987E", "#D7EBCE", "#F9DED8", "#56687A"].map((h) => h.toUpperCase()),
-);
+const COURSEWARE_HEX = new Set(["#44712E", "#F5987E", "#D7EBCE", "#F9DED8", "#56687A"].map((h) => h.toUpperCase()));
 
 export function isNeutralHex(hex: string): boolean {
   const h = hex.replace("#", "").toUpperCase();
@@ -570,10 +517,7 @@ export function hasCoursewareColor(page: SkillPageInput): boolean {
   return collectPageHexes(page).some((hex) => !isNeutralHex(hex));
 }
 
-export function coursewarePageIssues(
-  page: SkillPageInput,
-  opts: { body: boolean },
-): LayoutIssue[] {
+export function coursewarePageIssues(page: SkillPageInput, opts: { body: boolean }): LayoutIssue[] {
   const issues: LayoutIssue[] = [];
   const shapes = page.elements.filter((el) => el.elementType === "shape");
   if (hasHomemadeFourCircles(page.elements) || hasKidsDoodle(page.elements)) {
@@ -636,9 +580,7 @@ export function coursewarePageIssues(
 
 export function hasUnlabeledStat(text: string, researchHadGap: boolean): boolean {
   if (!researchHadGap) return false;
-  const hasStat = /人均|[¥￥$€]\s*\d|\d{2,}\s*(?:元|万|亿|人|次|分钟)|(?:\d{1,3}(?:\.\d+)?\s*%)/.test(
-    text,
-  );
+  const hasStat = /人均|[¥￥$€]\s*\d|\d{2,}\s*(?:元|万|亿|人|次|分钟)|(?:\d{1,3}(?:\.\d+)?\s*%)/.test(text);
   if (!hasStat) return false;
   return !/占位|示意|待补|课堂练习|不是统计/.test(text);
 }
@@ -687,40 +629,24 @@ function tasteVisibleElement(element: PptdElement): boolean {
   return Math.max(width, height) >= 8;
 }
 
-const GAUGE_CIRCLE_FAMILY = new Set([
-  "donut",
-  "ellipse",
-  "pie",
-  "arc",
-  "blockarc",
-  "block_arc",
-  "chord",
-  "circle",
-]);
+const GAUGE_CIRCLE_FAMILY = new Set(["donut", "ellipse", "pie", "arc", "blockarc", "block_arc", "chord", "circle"]);
 
 /**
  * A gauge is one concentric circular instrument. The first real deck drew a
  * small donut beside an unrelated flat ellipse and the loose structural check
  * (≥2 shapes, ≥1 label) passed it as a gauge that reads like a broken pie.
  */
-export function gaugeCompositionIssues(
-  page: SkillPageInput,
-  todo: TodoExhibitContract | undefined,
-): LayoutIssue[] {
+export function gaugeCompositionIssues(page: SkillPageInput, todo: TodoExhibitContract | undefined): LayoutIssue[] {
   if (!todo) return [];
   const declared = todo.exhibits?.filter(isTodoExhibitKind) ?? [];
-  const requested = declared.length
-    ? declared
-    : inferTodoExhibits(`${todo.title}\n${todo.note ?? ""}`);
+  const requested = declared.length ? declared : inferTodoExhibits(`${todo.title}\n${todo.note ?? ""}`);
   if (!requested.includes("diagram:gauge")) return [];
   const shapes = visibleRoleElements(page, "gauge").filter(
     (element): element is ShapeElement => element.elementType === "shape",
   );
   if (shapes.length < 2) return [];
   const issues: LayoutIssue[] = [];
-  const offFamily = shapes.filter(
-    (shape) => !GAUGE_CIRCLE_FAMILY.has(String(shape.shapeName || "").toLowerCase()),
-  );
+  const offFamily = shapes.filter((shape) => !GAUGE_CIRCLE_FAMILY.has(String(shape.shapeName || "").toLowerCase()));
   if (offFamily.length) {
     issues.push({
       pageId: page.id,
@@ -747,14 +673,10 @@ export function gaugeCompositionIssues(
     const [x, y, w, h] = shape.bounds;
     return { x: x + w / 2, y: y + h / 2 };
   });
-  const maxDiameter = Math.max(
-    ...discs.map((shape) => Math.max(shape.bounds[2], shape.bounds[3])),
-  );
+  const maxDiameter = Math.max(...discs.map((shape) => Math.max(shape.bounds[2], shape.bounds[3])));
   const medianX = centers.map((c) => c.x).sort((a, b) => a - b)[Math.floor(centers.length / 2)] ?? 0;
   const medianY = centers.map((c) => c.y).sort((a, b) => a - b)[Math.floor(centers.length / 2)] ?? 0;
-  const scattered = centers.filter(
-    (center) => Math.hypot(center.x - medianX, center.y - medianY) > maxDiameter * 0.6,
-  );
+  const scattered = centers.filter((center) => Math.hypot(center.x - medianX, center.y - medianY) > maxDiameter * 0.6);
   if (discs.length >= 2 && scattered.length) {
     issues.push({
       pageId: page.id,
@@ -772,9 +694,7 @@ export function tasteGateIssues(
   const issues: LayoutIssue[] = [];
   const texts = page.elements.filter(tasteVisibleText);
   const titleSize = Math.max(0, ...texts.map((el) => el.content.fontSize ?? 18));
-  const minTitle = opts.body
-    ? TASTE_GATE_LIMITS.minTitleFontSize
-    : TASTE_GATE_LIMITS.minCoverTitleFontSize;
+  const minTitle = opts.body ? TASTE_GATE_LIMITS.minTitleFontSize : TASTE_GATE_LIMITS.minCoverTitleFontSize;
   if (texts.length && titleSize < minTitle) {
     issues.push({
       pageId: page.id,
@@ -809,10 +729,7 @@ export function tasteGateIssues(
     }
     const visibleCount = page.elements.filter(tasteVisibleElement).length;
     const coverage = pageCoverage(page.elements);
-    if (
-      visibleCount > TASTE_GATE_LIMITS.maxVisibleElements ||
-      coverage > TASTE_GATE_LIMITS.maxPageCoverage
-    ) {
+    if (visibleCount > TASTE_GATE_LIMITS.maxVisibleElements || coverage > TASTE_GATE_LIMITS.maxPageCoverage) {
       issues.push({
         pageId: page.id,
         code: "overstuffed",
@@ -885,13 +802,7 @@ export function reviewSkillPages(
     }
     issues.push(...requestedExhibitIssues(page, opts.todos?.[i]));
 
-    const minCover = isBody(page, i, last)
-      ? mode === "strict"
-        ? 0.32
-        : 0.18
-      : mode === "strict"
-        ? 0.14
-        : 0.08;
+    const minCover = isBody(page, i, last) ? (mode === "strict" ? 0.32 : 0.18) : mode === "strict" ? 0.14 : 0.08;
     if (coverage < minCover) {
       issues.push({
         pageId: page.id,
@@ -921,14 +832,10 @@ export function reviewSkillPages(
       });
     }
     if (opts.courseware) {
-      issues.push(
-        ...coursewarePageIssues(page, { body: isCoursewareExhibitPage(page, i, last) }),
-      );
+      issues.push(...coursewarePageIssues(page, { body: isCoursewareExhibitPage(page, i, last) }));
     }
     if (opts.tasteGates) {
-      issues.push(
-        ...tasteGateIssues(page, { body: isBody(page, i, last), todo: opts.todos?.[i] }),
-      );
+      issues.push(...tasteGateIssues(page, { body: isBody(page, i, last), todo: opts.todos?.[i] }));
       issues.push(...gaugeCompositionIssues(page, opts.todos?.[i]));
     }
     if (opts.projectRoot) {

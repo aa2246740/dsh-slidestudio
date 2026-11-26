@@ -1,0 +1,54 @@
+{
+  "id": "chrome.workspace.assistant.attach.vision.models",
+  "version": 1,
+  "status": "verified",
+  "surface": "chrome.global",
+  "title": "Switch to a vision-capable model",
+  "description": "换看图模型 button in the editor composer vision notice opens the assistant model picker when a needsVision attachment is present and the selected model cannot see images",
+  "kimiUi": {
+    "controlLabel": "附件",
+    "location": "Editor assistant composer",
+    "appearsWhen": "a parsed image attachment exists while the selected model cannot see images"
+  },
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "pageIndex": 0,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Product-only control; the frozen Kimi capture has no composer attachment flow"
+  },
+  "action": {
+    "type": "click",
+    "steps": [
+      "Attach an image in the editor composer with a text-only model selected, then click 换看图模型 in the notice below the attachment chips"
+    ]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "no PPTD — composer intake control"
+    },
+    "network": "GET /slides/models for inputModalities; POST /api/attachments/upload when applicable"
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "POST /api/attachments/upload",
+    "uiParityNotes": "Product attachment UX; no direct Kimi counterpart captured"
+  },
+  "test": {
+    "id": "EO-ASSISTANT-ATT-005",
+    "automated": true,
+    "selfTestChecklist": ["DOM tests in apps/native-web/src/vision-notice-dom.test.mjs"]
+  },
+  "oracle": {
+    "source": "product-only",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "agent": "timeline-and-vision-notice",
+    "sessionId": "13bd8bc3501c"
+  },
+  "updatedAt": "2026-10-20T00:00:00.000Z"
+}

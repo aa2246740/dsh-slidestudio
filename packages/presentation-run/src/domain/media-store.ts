@@ -8,7 +8,11 @@ import { writeFileAtomic } from "./atomic-file.js";
 const SAFE_ID = /[^a-zA-Z0-9_-]+/g;
 
 export function mediaId(raw: string, fallback = "img"): string {
-  const id = raw.trim().replace(SAFE_ID, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  const id = raw
+    .trim()
+    .replace(SAFE_ID, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
   return id || fallback;
 }
 
@@ -17,9 +21,22 @@ export function saveMediaFile(
   id: string,
   bytes: Buffer,
   ext = "png",
+  options: { preserveId?: boolean } = {},
 ): { src: string; abs: string } {
-  const base = mediaId(id);
+  // Host-owned material filenames retain their complete id (including CJK)
+  // instead of the short, lossy ids used by agent-authored media.
+  const base = options.preserveId ? id : mediaId(id);
   const suffix = ext.replace(/^\./, "");
+  if (
+    options.preserveId &&
+    (!base ||
+      /[\\/\0]/.test(base) ||
+      base.includes("..") ||
+      !/^[a-z0-9]+$/i.test(suffix) ||
+      Buffer.byteLength(`${base}.${suffix}`) > 240)
+  ) {
+    throw new Error("资料媒体文件名无效或过长，请缩短文件名后重新上传");
+  }
   const dir = path.join(projectRoot, "media");
   fs.mkdirSync(dir, { recursive: true });
   // Sanitized ids collide (e.g. "a b" and "a-b"): never clobber different

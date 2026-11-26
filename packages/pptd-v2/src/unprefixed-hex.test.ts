@@ -1,12 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  InvalidPptdColorError,
-  elementFillPaint,
-  officialPptdColorKind,
-  toCssColor,
-  toRgbHex,
-} from "./theme.js";
+import { InvalidPptdColorError, elementFillPaint, officialPptdColorKind, toCssColor, toRgbHex } from "./theme.js";
 
 describe("EDITH unprefixed hex inversion", () => {
   it("official PPTD Color lists #RRGGBB not RRGGBB; 0E0807 and E8DED7 never become 000000", () => {

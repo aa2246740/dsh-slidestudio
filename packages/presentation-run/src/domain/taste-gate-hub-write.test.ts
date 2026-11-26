@@ -6,11 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEmptyProject, loadProject } from "@open-slidestudio/pptd-v2";
 import { createPresentationRun } from "../run.js";
-import {
-  ensureRunLedger,
-  inspectRunLedger,
-  persistPresentationRunProvider,
-} from "../index.js";
+import { ensureRunLedger, inspectRunLedger, persistPresentationRunProvider } from "../index.js";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -69,10 +65,7 @@ describe("Hub template path: commit_design then write_page", () => {
       abortSignal: new AbortController().signal,
     });
 
-    const committed = await run.execute(
-      { name: "commit_design", args: { slidePlan: SLIDE_PLAN } },
-      ctx("commit-1"),
-    );
+    const committed = await run.execute({ name: "commit_design", args: { slidePlan: SLIDE_PLAN } }, ctx("commit-1"));
     assert.equal(committed.ok, true, committed.detail);
     assert.equal(
       fs.existsSync(path.join(root, "_agent", "design-contract.v1.json")),

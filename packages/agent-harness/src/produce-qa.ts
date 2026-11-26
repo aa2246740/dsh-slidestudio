@@ -5,12 +5,7 @@ import type { PptdElement } from "@open-slidestudio/pptd-v2";
 import type { HostPageCopy } from "./exhibit-paint.js";
 import type { SkillPageInput } from "./skill-pages.js";
 
-export type ProduceIssueCode =
-  | "overflow"
-  | "overlap"
-  | "empty"
-  | "missing_number"
-  | "no_exhibit";
+export type ProduceIssueCode = "overflow" | "overlap" | "empty" | "missing_number" | "no_exhibit";
 
 export type ProduceIssue = {
   pageId: string;
@@ -114,10 +109,7 @@ export function repairPaintedPage(page: SkillPageInput): SkillPageInput {
   };
 }
 
-export function qaScriptFidelity(
-  painted: SkillPageInput[],
-  scripted: HostPageCopy[],
-): ProduceIssue[] {
+export function qaScriptFidelity(painted: SkillPageInput[], scripted: HostPageCopy[]): ProduceIssue[] {
   const issues: ProduceIssue[] = [];
   if (scripted.length >= 3 && painted.length !== scripted.length) {
     issues.push({

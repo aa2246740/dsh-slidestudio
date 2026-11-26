@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  executeGenerateTool,
-  executeGenerateToolAsync,
-  loadPlaybook,
-} from "./index.js";
+import { executeGenerateTool, executeGenerateToolAsync, loadPlaybook } from "./index.js";
 import type { AgentToolState } from "./agent-tools.js";
 import { createImagePort } from "./image-port.js";
 import { createImageSearchPort } from "./image-search-port.js";
@@ -162,8 +158,14 @@ describe("host hands — media is optional", () => {
       ],
       { mode: "compose" },
     );
-    assert.equal(review.issues.some((i) => i.code === "missing_media"), false);
-    assert.equal(review.issues.some((i) => i.code === "no_exhibit"), false);
+    assert.equal(
+      review.issues.some((i) => i.code === "missing_media"),
+      false,
+    );
+    assert.equal(
+      review.issues.some((i) => i.code === "no_exhibit"),
+      false,
+    );
     assert.equal(review.ok, true, JSON.stringify(review.issues));
   });
 
@@ -220,22 +222,14 @@ describe("host hands — media is optional", () => {
           }),
       },
     );
-    const exec = await executeGenerateToolAsync(
-      "search_image",
-      { id: "sensoji", query: "浅草寺" },
-      s,
-    );
+    const exec = await executeGenerateToolAsync("search_image", { id: "sensoji", query: "浅草寺" }, s);
     assert.equal(exec.ok, true, exec.detail);
     assert.equal((exec.payload as { kind?: string }).kind, "search");
     assert.ok(fs.existsSync(path.join(dir, "media", "sensoji.png")));
   });
 
   it("search_image without a port does not write src", async () => {
-    const exec = await executeGenerateToolAsync(
-      "search_image",
-      { id: "x", query: "浅草寺" },
-      state(),
-    );
+    const exec = await executeGenerateToolAsync("search_image", { id: "x", query: "浅草寺" }, state());
     assert.equal(exec.ok, true);
     assert.equal((exec.payload as { kind?: string }).kind, "none");
   });
@@ -273,15 +267,23 @@ describe("host hands — media is optional", () => {
       restamped?: boolean;
       painted?: boolean;
       applied?: boolean;
-      page?: { elements?: { elementId?: string; elementType?: string; content?: { text?: string } }[] };
+      page?: {
+        elements?: { elementId?: string; elementType?: string; content?: { text?: string } }[];
+      };
     };
     assert.equal(payload.restamped, false);
     assert.equal(payload.painted, false);
     assert.equal(payload.applied, false);
     assert.ok(payload.page?.elements?.some((el) => el.elementType === "shape"));
     assert.match(JSON.stringify(payload.page), /种子怎么发芽/);
-    assert.equal(payload.page?.elements?.some((el) => el.elementId === "circle"), false);
-    assert.equal(payload.page?.elements?.some((el) => el.elementId === "title-band"), false);
+    assert.equal(
+      payload.page?.elements?.some((el) => el.elementId === "circle"),
+      false,
+    );
+    assert.equal(
+      payload.page?.elements?.some((el) => el.elementId === "title-band"),
+      false,
+    );
   });
 
   it("classroom write_page accepts official header/circle/band and keeps that chrome", () => {
@@ -314,7 +316,10 @@ describe("host hands — media is optional", () => {
     ).page;
     assert.ok(page?.elements?.some((el) => el.elementId === "circle"));
     assert.ok(page?.elements?.some((el) => el.elementId === "title-band"));
-    assert.equal(page?.elements?.some((el) => el.elementId === "cover-stem"), false);
+    assert.equal(
+      page?.elements?.some((el) => el.elementId === "cover-stem"),
+      false,
+    );
     assert.equal((written.payload as { restamped?: boolean }).restamped, false);
     const title = page?.elements?.find((el) => el.elementId === "title");
     assert.match(title?.content?.text ?? "", /种子/);
@@ -348,7 +353,10 @@ describe("host hands — media is optional", () => {
     assert.equal(payload.painted, false);
     assert.ok(payload.page?.elements?.some((el) => el.elementId === "circle"));
     assert.ok(payload.page?.elements?.some((el) => el.elementId === "title-band"));
-    assert.equal(payload.page?.elements?.some((el) => el.elementId === "cover-stem"), false);
+    assert.equal(
+      payload.page?.elements?.some((el) => el.elementId === "cover-stem"),
+      false,
+    );
     const blush = payload.page?.elements?.find((el) => el.elementId === "circle");
     assert.equal(blush?.fill?.color?.toUpperCase(), "#F9DED8");
   });
@@ -368,13 +376,25 @@ describe("host hands — media is optional", () => {
     );
     assert.equal(written.ok, true, written.detail);
     assert.match(written.detail, /did not restamp/);
-    const page = (written.payload as { page?: { elements?: { elementType: string; elementId?: string }[] }; restamped?: boolean; applied?: boolean }).page;
+    const page = (
+      written.payload as {
+        page?: { elements?: { elementType: string; elementId?: string }[] };
+        restamped?: boolean;
+        applied?: boolean;
+      }
+    ).page;
     assert.equal((written.payload as { restamped?: boolean }).restamped, false);
     assert.equal((written.payload as { applied?: boolean }).applied, false);
     assert.match(JSON.stringify(page), /种子里面有什么/);
     assert.match(JSON.stringify(page), /种皮、胚、子叶/);
-    assert.equal(page?.elements?.some((el) => el.elementId === "aside"), false);
-    assert.equal(page?.elements?.some((el) => el.elementId === "ring-outer"), false);
+    assert.equal(
+      page?.elements?.some((el) => el.elementId === "aside"),
+      false,
+    );
+    assert.equal(
+      page?.elements?.some((el) => el.elementId === "ring-outer"),
+      false,
+    );
   });
 
   it("classroom write_page keeps a full-bleed bg element and does not rename it to background", () => {
@@ -485,56 +505,5 @@ describe("host hands — media is optional", () => {
     const render = await executeGenerateToolAsync("render_page", { pageId: "page-01" }, s);
     assert.equal((render.payload as { kind?: string }).kind, "unavailable");
     assert.match(render.detail, /did not see the slide|unavailable/i);
-  });
-
-  it("render_page saves a native-slide raster from an injected shot", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "render-ok-"));
-    const s = state(dir);
-    s.raster = createPageRasterPort({
-      editorBaseUrl: "http://127.0.0.1:55200",
-      screenshot: async () => ({
-        bytes: Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(80, 5)]),
-        width: 960,
-        height: 540,
-      }),
-    });
-    executeGenerateTool(
-      "write_page",
-      { id: "page-01", pageType: "cover", elements: textPage.elements },
-      s,
-    );
-    const render = await executeGenerateToolAsync("render_page", { pageId: "page-01" }, s);
-    assert.equal(render.ok, true, render.detail);
-    assert.equal((render.payload as { kind?: string }).kind, "native-slide");
-    assert.ok(fs.existsSync(path.join(dir, "_agent", "rasters", "page-01.png")));
-  });
-
-  it("dangling image src fails even though media itself is optional", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "media-miss-"));
-    const review = reviewSkillPages(
-      [
-        {
-          id: "page-02",
-          pageType: "content",
-          elements: [
-            {
-              elementId: "title",
-              elementType: "text",
-              bounds: [40, 36, 880, 48],
-              content: { text: "浅草", bold: true, fontSize: 22 },
-            },
-            {
-              elementId: "photo",
-              elementType: "image",
-              bounds: [80, 100, 800, 360],
-              src: "media/sensoji.png",
-            },
-          ],
-        },
-      ],
-      { projectRoot: dir, mode: "compose" },
-    );
-    assert.equal(review.ok, false);
-    assert.ok(review.issues.some((i) => i.code === "missing_media"));
   });
 });

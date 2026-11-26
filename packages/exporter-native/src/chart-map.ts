@@ -14,9 +14,13 @@ import {
   formatChartValue,
   resolveChartLegend,
   seriesDecimals,
+  widestTickText,
+  type CategoricalKind,
   type ChartElement,
+  type ChartGrouping,
   type ChartLayout,
   type ChartScale,
+  type GradientFill,
   type LegendSpec,
 } from "@open-slidestudio/pptd-v2";
 
@@ -28,15 +32,19 @@ export type ChartExportSeries = {
   name: string;
   labels: string[];
   values: number[];
-  pptxType: "bar" | "line" | "pie" | "area";
+  pptxType: CategoricalKind;
   axis: "primary" | "secondary";
   color: string;
   /** Per-series Excel format code for its data labels. */
   formatCode: string;
+  /** Gradient fill the series paints with; written as `a:gradFill` in its `c:spPr`. */
+  gradient?: GradientFill;
 };
 
 export type ChartExportModel = {
-  pptxType: "bar" | "line" | "pie" | "area";
+  pptxType: CategoricalKind;
+  /** Bar grouping. Stacked and percent-stacked bars take a full overlap (`c:overlap` 100). */
+  grouping: ChartGrouping;
   barDir?: "col" | "bar";
   categories: string[];
   series: ChartExportSeries[];
@@ -70,6 +78,15 @@ function chartTitle(el: ChartElement): string | undefined {
   return undefined;
 }
 
+/**
+ * The gradient a series paints with. A single-series chart shares its one fill across every
+ * series, as the editor's chart paint does (`chartFillPlan`).
+ */
+function seriesGradient(el: ChartElement, index: number): GradientFill | undefined {
+  const fill = el.series.length === 1 ? el.series[0]?.fill : el.series[index]?.fill;
+  return typeof fill === "object" && fill.type === "gradient" ? fill : undefined;
+}
+
 export function mapChartElement(el: ChartElement): ChartExportModel {
   const semantic = categoricalChartModel(el);
   const categories = semantic.categories;
@@ -82,9 +99,7 @@ export function mapChartElement(el: ChartElement): ChartExportModel {
         semantic.scale,
       )
     : undefined;
-  const dataLabelFormatCode = chartNumberFormatCode(
-    Math.max(0, ...values.map((v) => seriesDecimals(v))),
-  );
+  const dataLabelFormatCode = chartNumberFormatCode(Math.max(0, ...values.map((v) => seriesDecimals(v))));
   const series: ChartExportSeries[] = semantic.series.map((item, index) => ({
     name: item.name,
     labels: categories,
@@ -93,27 +108,28 @@ export function mapChartElement(el: ChartElement): ChartExportModel {
     axis: item.axis,
     color: chartSwatch(el, index),
     formatCode: chartNumberFormatCode(seriesDecimals(item.values)),
+    gradient: seriesGradient(el, index),
   }));
   const pptxType = semantic.kind;
+  // A gradient bar series paints one fill across its bars, so it skips the per-point colours
+  // pptxgenjs writes for a single series.
   const perCategoryColors =
-    pptxType === "bar" && semantic.series.length === 1 && semantic.orientation === "vertical";
-  const colors =
-    pptxType === "pie"
-      ? categories.map((_, i) => chartSwatch(el, i, categories.length))
-      : perCategoryColors
-        ? categories.map((_, i) => chartSwatch(el, i, categories.length))
-        : series.map((_, s) => chartSwatch(el, s, series.length));
+    pptxType === "bar" && semantic.series.length === 1 && semantic.orientation === "vertical" && !series[0]?.gradient;
+  const sliced = pptxType === "pie" || pptxType === "doughnut";
+  const colors = sliced
+    ? categories.map((_, i) => chartSwatch(el, i, categories.length))
+    : perCategoryColors
+      ? // One series is one color. Passing the category count made later bars
+        // look like extra series and pull CHART_PALETTE (amber/green) even
+        // when the author set a single fill.
+        categories.map((_, i) => chartSwatch(el, i, 1))
+      : series.map((_, s) => chartSwatch(el, s, series.length));
   const primaryValues = semantic.series
     .filter((series) => series.axis === "primary")
     .flatMap((series) => series.values);
   const secondaryValues = secondarySeries.flatMap((s) => s.values);
-  const tickLabels = semantic.scale.ticks.map((t) =>
-    formatChartValue(t, semantic.scale.tickDecimals),
-  );
-  const widestTickLabel = tickLabels.reduce(
-    (best, label) => (label.length > best.length ? label : best),
-    "0",
-  );
+  // A percent-stacked axis paints whole percentages, so its left reserve is sized from them.
+  const widestTickLabel = widestTickText(semantic.scale, semantic.grouping === "percentStacked");
   const secondaryTickLabels = secondaryScale
     ? secondaryScale.ticks.map((t) => formatChartValue(t, secondaryScale.tickDecimals))
     : undefined;
@@ -125,8 +141,7 @@ export function mapChartElement(el: ChartElement): ChartExportModel {
     (best, label) => (String(label).length > best.length ? String(label) : best),
     "",
   );
-  const legendItems =
-    pptxType === "pie" ? categories : series.map((series) => series.name);
+  const legendItems = sliced ? categories : series.map((series) => series.name);
   const bounds = el.bounds;
   const layout = chartLayout(
     { w: bounds[2], h: bounds[3] },
@@ -141,19 +156,13 @@ export function mapChartElement(el: ChartElement): ChartExportModel {
       widestSecondaryTickLabel,
       axis: el.axis,
       reserveBelowLabel:
-        pptxType !== "pie" &&
-        semantic.orientation !== "horizontal" &&
-        (semantic.scale.min < 0 || (secondaryScale?.min ?? 0) < 0),
+        !sliced && semantic.orientation !== "horizontal" && (semantic.scale.min < 0 || (secondaryScale?.min ?? 0) < 0),
     },
   );
   return {
     pptxType,
-    barDir:
-      pptxType === "bar"
-        ? semantic.orientation === "horizontal"
-          ? "bar"
-          : "col"
-        : undefined,
+    grouping: semantic.grouping,
+    barDir: pptxType === "bar" ? (semantic.orientation === "horizontal" ? "bar" : "col") : undefined,
     categories,
     series,
     colors,

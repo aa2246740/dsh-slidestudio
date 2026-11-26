@@ -1,4 +1,5 @@
 import { describe, it } from "node:test";
+import { tasteDraft } from "./pi-hands.fixtures.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -103,11 +104,9 @@ describe("pi hands", () => {
       { name: "write_page", ok: false },
     ];
     fs.writeFileSync(log, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const merged = mergeSkillStackEvidence(
-      [{ event: "tool:write_todo" }, { event: "tool:write_page" }],
-      dir,
-      { compose: true },
-    );
+    const merged = mergeSkillStackEvidence([{ event: "tool:write_todo" }, { event: "tool:write_page" }], dir, {
+      compose: true,
+    });
     assert.equal(merged.pageWrites, 2);
     assert.equal(merged.renderPages, 2);
     assert.equal(merged.renderCoverage, true);
@@ -146,10 +145,7 @@ describe("pi hands", () => {
       skillsExecutionMode([{ event: "agent_start" }, { event: "tool:write:skill-deck.json" }]),
       "flags-only",
     );
-    assert.equal(
-      skillsExecutionMode([{ event: "agent_start" }, { event: "tool:write_todo" }]),
-      "pi-tools",
-    );
+    assert.equal(skillsExecutionMode([{ event: "agent_start" }, { event: "tool:write_todo" }]), "pi-tools");
   });
 
   it("loads the hands extension on the Pi argv and does not allow generic write", () => {
@@ -199,18 +195,17 @@ describe("pi hands", () => {
 
     const listed = await runPiHand("list_references", args("list"), dir);
     assert.equal(listed.ok, true, listed.detail);
-    const sources = (listed.payload as {
-      sources?: Array<{
-        sourceId: string;
-        reason: string;
-        chunks: Array<{ chunkIndex: number }>;
-      }>;
-    }).sources ?? [];
-    assert.equal(
-      sources.length,
-      5,
-      "local color and ratio hints must not remove the selected OpenKimi design source",
-    );
+    const sources =
+      (
+        listed.payload as {
+          sources?: Array<{
+            sourceId: string;
+            reason: string;
+            chunks: Array<{ chunkIndex: number }>;
+          }>;
+        }
+      ).sources ?? [];
+    assert.equal(sources.length, 5, "local color and ratio hints must not remove the selected OpenKimi design source");
     assert.ok(sources.some((source) => source.reason === "preset-design"));
     for (const source of sources) {
       for (const chunk of source.chunks) {
@@ -237,11 +232,7 @@ describe("pi hands", () => {
       );
       assert.equal(page.ok, true, page.detail);
     }
-    const compose = await runPiHand(
-      "compose_deck",
-      args("compose", { title: "澄光生活 2026年7月经营月报" }),
-      dir,
-    );
+    const compose = await runPiHand("compose_deck", args("compose", { title: "澄光生活 2026年7月经营月报" }), dir);
     assert.equal(compose.ok, false);
     assert.match(compose.detail, /current raster missing/);
   });
@@ -273,9 +264,12 @@ describe("pi hands", () => {
       __openSlideStudio: { commandId, contextEpochId: "taste-epoch" },
     });
     const listed = await runPiHand("list_references", args("list"), dir);
-    const sources = (listed.payload as {
-      sources?: Array<{ sourceId: string; chunks: Array<{ chunkIndex: number }> }>;
-    }).sources ?? [];
+    const sources =
+      (
+        listed.payload as {
+          sources?: Array<{ sourceId: string; chunks: Array<{ chunkIndex: number }> }>;
+        }
+      ).sources ?? [];
     assert.equal(sources.length, 5);
     for (const source of sources) {
       for (const chunk of source.chunks) {
@@ -306,11 +300,7 @@ describe("pi hands", () => {
       .find((row) => row.name === "commit_design");
     assert.equal(blockedLog?.ok, false);
     assert.match(blockedLog?.detail ?? "", /must emit the selected preview/);
-    const emitted = await runPiHand(
-      "_mark_image_emitted",
-      args("emit-preview", { deliveryToken: token }),
-      dir,
-    );
+    const emitted = await runPiHand("_mark_image_emitted", args("emit-preview", { deliveryToken: token }), dir);
     assert.equal(emitted.ok, true, emitted.detail);
     const committed = await runPiHand("commit_design", args("commit", tasteDraft()), dir);
     assert.equal(committed.ok, true, committed.detail);
@@ -373,11 +363,7 @@ describe("pi hands", () => {
     );
     assert.equal(todo.ok, true, todo.detail);
     for (const [i, title] of titles.entries()) {
-      const page = await runPiHand(
-        "write_page",
-        textPage(`page-0${i + 1}`, title, `${title}的说明写在这一页。`),
-        dir,
-      );
+      const page = await runPiHand("write_page", textPage(`page-0${i + 1}`, title, `${title}的说明写在这一页。`), dir);
       assert.equal(page.ok, true, page.detail);
     }
     const review = await runPiHand("review_pages", {}, dir);
@@ -405,9 +391,9 @@ describe("pi hands", () => {
 
     assert.equal(todo.ok, true, todo.detail);
     assert.equal((todo.payload as { items?: unknown[] }).items?.length, 20);
-    const outline = JSON.parse(
-      fs.readFileSync(path.join(dir, "_agent", "outline.json"), "utf8"),
-    ) as { items?: unknown[] };
+    const outline = JSON.parse(fs.readFileSync(path.join(dir, "_agent", "outline.json"), "utf8")) as {
+      items?: unknown[];
+    };
     assert.equal(outline.items?.length, 20);
   });
 
@@ -426,11 +412,7 @@ describe("pi hands", () => {
       dir,
     );
     assert.equal(todo.ok, true, todo.detail);
-    const page = await runPiHand(
-      "write_page",
-      textPage("page-01", "封面", "澄光生活7月经营月报"),
-      dir,
-    );
+    const page = await runPiHand("write_page", textPage("page-01", "封面", "澄光生活7月经营月报"), dir);
     assert.equal(page.ok, true, page.detail);
     const compose = await runPiHand("compose_deck", { title: "澄光" }, dir);
     assert.equal(compose.ok, false);
@@ -470,8 +452,12 @@ describe("pi hands", () => {
           bounds: [16, 64, 928, 400],
           columnWidths: [118, 72, 78, 78, 72, 72, 72, 72],
           rows: [
-            ["SKU", "营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道"].map((text) => ({ text })),
-            ["晨光纯奶", "186", "+3.1", "-1.2", "28.4", "41", "1.8", "线上"].map((text) => ({ text })),
+            ["SKU", "营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道"].map((text) => ({
+              text,
+            })),
+            ["晨光纯奶", "186", "+3.1", "-1.2", "28.4", "41", "1.8", "线上"].map((text) => ({
+              text,
+            })),
           ],
         },
       ],
@@ -490,81 +476,8 @@ describe("pi hands", () => {
       categoryId: "management-report",
       designSystemId: "work/warm-jade-annual-report",
     });
-    const page = await runPiHand(
-      "write_page",
-      textPage("page-01", "封面", "本月收入达成 94%，缺口在北区续约"),
-      dir,
-    );
+    const page = await runPiHand("write_page", textPage("page-01", "封面", "本月收入达成 94%，缺口在北区续约"), dir);
     assert.equal(page.ok, false);
     assert.match(page.detail ?? "", /公司名和至少一组/);
   });
 });
-
-function tasteDraft(): Record<string, unknown> & {
-  slidePlan: Array<{
-    pageId: string;
-    title: string;
-    narrativeJob: string;
-    layoutFamily: string;
-    focalPoint: string;
-  }>;
-} {
-  const layouts = [
-    "cover",
-    "chart-led",
-    "table-led",
-    "editorial-asymmetric",
-    "process-diagram",
-    "conclusion",
-  ];
-  return {
-    audience: "内部团队",
-    scene: "现场培训",
-    purpose: "让团队理解并开始使用 AI 助手",
-    designRead: "纸白底色承载内容，深蓝建立层级，强调色只标记关键动作",
-    necessaryJudgment: {
-      removeOrDemote: ["平均卡片墙"],
-      mustRemain: ["结论、证据、动作"],
-      inevitableRelationships: ["为什么、怎么做、下一步"],
-    },
-    tasteDials: {
-      visualVariance: 4,
-      informationDensity: 3,
-      brandDistinction: 4,
-      typeExpressiveness: 3,
-      experimentRisk: 2,
-    },
-    typeSystem: {
-      personality: "清晰、理性、有编辑感",
-      title: "结论式标题",
-      body: "紧凑中文正文",
-      data: "数字优先",
-      mixedScript: "中英文层级一致",
-    },
-    palette: {
-      background: "#FDFAF5",
-      text: "#172033",
-      primary: "#153B63",
-      accent: "#F5987E",
-      neutral: "#8290A3",
-      areaRules: ["深蓝不超过页面三分之一"],
-    },
-    grid: "12 栏和 48px 安全边距",
-    densityRules: ["一页一个判断"],
-    chartGrammar: ["关键值直接标注"],
-    visualMemory: { feature: "细珊瑚色标尺", recurrence: "章节转换", avoid: "不铺满每页" },
-    referenceUse: { adopt: ["纸白层级"], adapt: ["深蓝覆盖主色"], doNotCopy: ["不复制示例文案"] },
-    antiDefaultLocks: ["禁止平均卡片墙", "禁止每页同一分栏"],
-    slidePlan: layouts.map((layoutFamily, index) => ({
-      pageId: `page-${String(index + 1).padStart(2, "0")}`,
-      title: ["开始使用", "先看判断", "证据清单", "工作方式", "执行流程", "下一步"][index]!,
-      narrativeJob: `完成叙事任务 ${index + 1}`,
-      layoutFamily,
-      focalPoint: `焦点 ${index + 1}`,
-    })),
-    userOverrides: [
-      { quote: "深蓝", effect: "覆盖参考主色" },
-      { quote: "16:9", effect: "使用宽屏比例" },
-    ],
-  };
-}

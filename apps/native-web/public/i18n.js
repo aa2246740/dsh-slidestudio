@@ -1,5 +1,4 @@
-import { TOOL_RUNTIME_I18N } from "./tool-runtime-i18n.js";
-import { WORKSPACE_REVIEW_I18N } from "./workspace-review-i18n.js";
+import { FEATURE_I18N } from "./feature-i18n.js";
 
 /**
  * Shared UI language for the hub and editor pages. Language resolves from the
@@ -12,8 +11,7 @@ import { WORKSPACE_REVIEW_I18N } from "./workspace-review-i18n.js";
 
 /** @type {Record<string, string>} */
 const EN = {
-  ...TOOL_RUNTIME_I18N,
-  ...WORKSPACE_REVIEW_I18N,
+  ...FEATURE_I18N,
   "当前模型尚未连接，请在 DSH 设置中完成登录或配置": "This model is not connected. Sign in or configure it in DSH Settings.",
   "Harness 未声明当前模型支持图片输入，请选择支持看图的模型": "Harness does not declare image input for this model. Choose an image-capable model.",
 

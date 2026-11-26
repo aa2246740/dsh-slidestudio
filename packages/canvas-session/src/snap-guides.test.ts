@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Animation } from "@open-slidestudio/pptd-v2";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+await import(pathToFileURL(path.join(repoRoot, "apps/native-web/public/snap-guides.js")).href);
 
 type GuideLib = {
   computeSnapGuides: (
@@ -12,18 +13,13 @@ type GuideLib = {
     others: number[][],
     threshold?: number,
   ) => { guides: { axis: "x" | "y"; pos: number; kind: string }[]; snap: number[] };
-  animationGroups: (anims: { effect?: string; trigger?: string; elementId?: string }[]) => unknown[][];
-  staggerDelays: (
-    anims: { effect?: string; trigger?: string; durationMs?: number; delayMs?: number }[],
-    stepMs?: number,
-  ) => { delayMs: number }[];
+  animationGroups: (anims: Animation[]) => Animation[][];
+  staggerDelays: (anims: Animation[], stepMs?: number) => { delayMs: number }[];
   isDarkCss: (css: string) => boolean;
 };
 
 function loadGuides(): GuideLib {
-  const src = fs.readFileSync(path.join(repoRoot, "apps/native-web/public/snap-guides.js"), "utf8");
-  const g: Partial<GuideLib> = {};
-  new Function("globalThis", src)(g);
+  const g = globalThis as unknown as Partial<GuideLib>;
   if (typeof g.computeSnapGuides !== "function") throw new Error("snap-guides.js missing computeSnapGuides");
   return g as GuideLib;
 }
@@ -66,8 +62,8 @@ describe("selection snap guides + animation groups", () => {
   it("staggers simultaneous items by 70ms", () => {
     const { staggerDelays } = loadGuides();
     const next = staggerDelays([
-      { effect: "fade-in", trigger: "onClick", durationMs: 400 },
-      { effect: "fly-in", trigger: "withPrevious", durationMs: 400 },
+      { elementId: "a", effect: "fade-in", trigger: "onClick", durationMs: 400 },
+      { elementId: "b", effect: "fly-in", trigger: "withPrevious", durationMs: 400 },
     ]);
     assert.equal(next[0]!.delayMs, 0);
     assert.equal(next[1]!.delayMs, 70);

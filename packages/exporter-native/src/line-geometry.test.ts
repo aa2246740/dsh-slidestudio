@@ -4,12 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import JSZip from "jszip";
-import {
-  createEmptyProject,
-  listComposedPage,
-  saveProject,
-  titleOnlyCoverPage,
-} from "@open-slidestudio/pptd-v2";
+import { createEmptyProject, listComposedPage, saveProject, titleOnlyCoverPage } from "@open-slidestudio/pptd-v2";
 import { exportProjectToPptx } from "./export-pptd.js";
 
 function lineProject(title: string) {

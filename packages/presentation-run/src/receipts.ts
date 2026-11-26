@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { quarantineCorruptFile, writeJsonAtomic } from "./domain/atomic-file.js";
+import { canonicalDesignSourceId } from "./domain/theme-pack.js";
 import type { SourceReceipt, SourceReceiptState } from "./types.js";
 
 const RECEIPTS_REL = path.join("_agent", "presentation-receipts.v1.json");
@@ -44,17 +45,16 @@ export function listSourceReceipts(projectRoot: string): SourceReceipt[] {
   return load(projectRoot);
 }
 
-export function recordSourceReceipt(
-  projectRoot: string,
-  receipt: SourceReceipt,
-): SourceReceipt[] {
+export function recordSourceReceipt(projectRoot: string, receipt: SourceReceipt): SourceReceipt[] {
+  const canonical = canonicalDesignSourceId(receipt.sourceId);
+  const stored = canonical ? { ...receipt, sourceId: canonical } : receipt;
   const rows = load(projectRoot);
-  const idx = rows.findIndex((row) => row.sourceId === receipt.sourceId);
+  const idx = rows.findIndex((row) => row.sourceId === stored.sourceId);
   if (idx < 0) {
-    rows.push(receipt);
+    rows.push(stored);
   } else {
     const prev = rows[idx]!;
-    if (RANK[receipt.state] >= RANK[prev.state]) rows[idx] = { ...prev, ...receipt };
+    if (RANK[stored.state] >= RANK[prev.state]) rows[idx] = { ...prev, ...stored };
   }
   save(projectRoot, rows);
   return rows;
@@ -73,13 +73,13 @@ export function consultedAdoptedExecuted(projectRoot: string): {
   };
 }
 
-export function requireConsultAdoptBeforeWrite(projectRoot: string): string | undefined {
+export function requireConsultAdoptBeforeWrite(projectRoot: string, tool = "write_page"): string | undefined {
   const counts = consultedAdoptedExecuted(projectRoot);
   if (counts.consulted < 1) {
-    return "write_page blocked: no consulted reference receipt (read_reference)";
+    return `${tool} blocked: no consulted reference receipt (read_reference)`;
   }
   if (counts.adopted < 1) {
-    return "write_page blocked: no adopted design receipt (commit_design)";
+    return `${tool} blocked: no adopted design receipt (commit_design)`;
   }
   return undefined;
 }

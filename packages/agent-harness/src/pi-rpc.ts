@@ -1,5 +1,6 @@
 /**
  * Pi `--mode rpc` transport (stdio JSONL).
+ * Product generation uses the exact repository dependency by default.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -71,34 +72,17 @@ function bundledPiBin(): string | undefined {
   return fs.existsSync(candidate) ? candidate : undefined;
 }
 
-const FIRE_AND_FORGET = new Set([
-  "setStatus",
-  "setWidget",
-  "notify",
-  "setTitle",
-  "set_editor_text",
-]);
+const FIRE_AND_FORGET = new Set(["setStatus", "setWidget", "notify", "setTitle", "set_editor_text"]);
 
-export function resolveXaiAuthExtension(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
+export function resolveXaiAuthExtension(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const home = env.HOME?.trim() || env.USERPROFILE?.trim() || os.homedir();
   const agentDir = env.PI_CODING_AGENT_DIR?.trim() || path.join(home, ".pi", "agent");
-  const rel = path.join(
-    "git",
-    "github.com",
-    "BlockedPath",
-    "pi-xai-oauth",
-    "extensions",
-    "xai-oauth.ts",
-  );
+  const rel = path.join("git", "github.com", "BlockedPath", "pi-xai-oauth", "extensions", "xai-oauth.ts");
   const candidate = path.join(agentDir, rel);
   return fs.existsSync(candidate) ? candidate : undefined;
 }
 
-export function piConfigFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): PiRpcConfig {
+export function piConfigFromEnv(env: NodeJS.ProcessEnv = process.env): PiRpcConfig {
   const timeoutRaw = Number(env.SLIDESTUDIO_PI_TIMEOUT_MS);
   const provider = inferPiProvider(env);
   const explicitModel = env.SLIDESTUDIO_PI_MODEL?.trim();
@@ -193,10 +177,7 @@ export function assistantTextsFromEvents(events: PiRpcLine[]): string[] {
   const out: string[] = [];
   for (const ev of events) {
     if (ev.type !== "message_end" && ev.type !== "turn_end") continue;
-    const msg =
-      ev.message && typeof ev.message === "object"
-        ? (ev.message as Record<string, unknown>)
-        : undefined;
+    const msg = ev.message && typeof ev.message === "object" ? (ev.message as Record<string, unknown>) : undefined;
     if (!msg) continue;
     if (typeof msg.role === "string" && msg.role !== "assistant") continue;
     const text = textFromContent(msg.content).trim();
@@ -233,12 +214,13 @@ const PUBLIC_TOOL_LABELS: Record<string, string> = {
 };
 
 function argRecord(ev: PiRpcLine): Record<string, unknown> {
-  return ev.args && typeof ev.args === "object" && !Array.isArray(ev.args)
-    ? (ev.args as Record<string, unknown>)
-    : {};
+  return ev.args && typeof ev.args === "object" && !Array.isArray(ev.args) ? (ev.args as Record<string, unknown>) : {};
 }
 
-function publicToolSummary(tool: string, args: Record<string, unknown>): {
+function publicToolSummary(
+  tool: string,
+  args: Record<string, unknown>,
+): {
   summary?: string;
   progress?: PiPublicRuntimeEvent["progress"];
 } {
@@ -287,12 +269,7 @@ export function publicPiRuntimeEvent(ev: PiRpcLine): PiPublicRuntimeEvent | unde
     id,
     at,
     kind: "tool",
-    status:
-      ev.type === "tool_execution_start"
-        ? "running"
-        : ev.isError === true
-          ? "failed"
-          : "completed",
+    status: ev.type === "tool_execution_start" ? "running" : ev.isError === true ? "failed" : "completed",
     tool,
     label: PUBLIC_TOOL_LABELS[tool] ?? tool,
     ...meta,
@@ -302,35 +279,18 @@ export function publicPiRuntimeEvent(ev: PiRpcLine): PiPublicRuntimeEvent | unde
 function nameFromRpcEvent(ev: PiRpcLine): string | undefined {
   if (typeof ev.type !== "string") return undefined;
   if (ev.type === "tool_execution_start") {
-    const name =
-      typeof ev.toolName === "string"
-        ? ev.toolName
-        : typeof ev.name === "string"
-          ? ev.name
-          : "tool";
+    const name = typeof ev.toolName === "string" ? ev.toolName : typeof ev.name === "string" ? ev.name : "tool";
     const args = ev.args && typeof ev.args === "object" ? (ev.args as Record<string, unknown>) : {};
-    const target =
-      typeof args.path === "string"
-        ? args.path
-        : typeof args.file === "string"
-          ? args.file
-          : "";
+    const target = typeof args.path === "string" ? args.path : typeof args.file === "string" ? args.file : "";
     return target ? `tool:${name}:${path.basename(target)}` : `tool:${name}`;
   }
   if (ev.type === "message_update") return undefined;
-  const msg =
-    ev.message && typeof ev.message === "object"
-      ? (ev.message as Record<string, unknown>)
-      : undefined;
+  const msg = ev.message && typeof ev.message === "object" ? (ev.message as Record<string, unknown>) : undefined;
   const stop = msg?.stopReason ?? ev.stopReason;
   const err = msg?.errorMessage ?? ev.errorMessage ?? ev.error;
   if (stop === "error" || (typeof err === "string" && err.trim())) {
     const blob = typeof err === "string" ? err : "";
-    const tag = /429|RESOURCE_EXHAUSTED/i.test(blob)
-      ? "429"
-      : /401|API key/i.test(blob)
-        ? "auth"
-        : "error";
+    const tag = /429|RESOURCE_EXHAUSTED/i.test(blob) ? "429" : /401|API key/i.test(blob) ? "auth" : "error";
     return `stop:${tag}`;
   }
   return ev.type;
@@ -357,10 +317,7 @@ export class PiRpcSession {
   private stderr = "";
   private exitError: Error | null = null;
   private requestId = 0;
-  private readonly pending = new Map<
-    string,
-    { resolve: (v: PiRpcLine) => void; reject: (e: Error) => void }
-  >();
+  private readonly pending = new Map<string, { resolve: (v: PiRpcLine) => void; reject: (e: Error) => void }>();
   private readonly listeners = new Set<(event: PiRpcLine) => void>();
   private stopReading: (() => void) | null = null;
 
@@ -403,9 +360,7 @@ export class PiRpcSession {
 
     child.once("exit", (code, signal) => {
       if (this.child !== child) return;
-      const err = new Error(
-        `Pi exited (code=${code} signal=${signal}). Stderr: ${this.stderr.slice(-800)}`,
-      );
+      const err = new Error(`Pi exited (code=${code} signal=${signal}). Stderr: ${this.stderr.slice(-800)}`);
       this.failAll(err);
     });
 
@@ -454,11 +409,7 @@ export class PiRpcSession {
     return new Promise<PiRpcLine>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(
-          new Error(
-            `Timeout waiting for Pi ${String(command.type)}. Stderr: ${this.stderr.slice(-400)}`,
-          ),
-        );
+        reject(new Error(`Timeout waiting for Pi ${String(command.type)}. Stderr: ${this.stderr.slice(-400)}`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (v) => {
@@ -570,10 +521,7 @@ export class PiRpcSession {
     } else if (method === "select") {
       const opts = Array.isArray(raw.options) ? raw.options : [];
       const first = opts[0];
-      body =
-        typeof first === "string"
-          ? { ...body, value: first }
-          : { ...body, cancelled: true };
+      body = typeof first === "string" ? { ...body, value: first } : { ...body, cancelled: true };
     } else {
       body = { ...body, value: "" };
     }

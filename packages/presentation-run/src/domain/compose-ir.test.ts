@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyBriefKind, inferDeckIntent, briefToOutline, briefWithoutNegatedDocTypes, composeBodyRules, requestedPageCountFromBrief, parseComposeDeck } from "./compose-ir.js";
+import {
+  classifyBriefKind,
+  inferDeckIntent,
+  briefToOutline,
+  briefWithoutNegatedDocTypes,
+  composeBodyRules,
+  requestedPageCountFromBrief,
+  parseComposeDeck,
+} from "./compose-ir.js";
 
 export const BEILU_H1 =
   "给公司董事会做一份「北麓制造 2026 上半年经营汇报」。办公场景，给董事会的半年经营审议，不是门店月报，不是产品立项。内容要有：H1 收入/毛利/现金一句话结论，三条业务线达成，产能与交期，客户与回款，资本开支，下半年要拍的板。 16 页左右。虚构演示数据。不要澄光生活，不要青岚费控，不要学习分享，不要个人答辩。\n视觉不要素白公文：深色封面、杂志感排版、数字很大、对比强、克制留白、琥珀或铜点缀。仍是董事会半年经营汇报，不是花哨营销页，不是月报换皮。";
@@ -35,11 +43,13 @@ describe("brief kind routing", () => {
     assert.equal(deck.pages[0]?.title, "光合作用");
   });
 
-  it("honors an explicit page count before genre minimums", () => {
+  it("honors an explicit page count and invents no total when the brief omits one", () => {
     assert.equal(requestedPageCountFromBrief("请制作 4 页教学课件"), 4);
     assert.equal(requestedPageCountFromBrief("页数 12；封面深蓝"), 12);
     assert.equal(composeBodyRules("请制作 4 页教学课件：概念、例题、练习、总结").minPages, 4);
-    assert.equal(composeBodyRules("教学课件：概念、例题、练习、总结").minPages, 6);
+    const unspecifiedTeaching = composeBodyRules("教学课件：概念、例题、练习、总结");
+    assert.deepEqual(unspecifiedTeaching.pageCount, { kind: "unspecified" });
+    assert.equal(unspecifiedTeaching.minPages, 1);
   });
 
   it("keeps Markdown heading titles intact when the body says 16:9", () => {
@@ -85,10 +95,7 @@ describe("brief kind routing", () => {
   it("still treats 开题答辩 as academic and 勾股 as teach", () => {
     assert.equal(classifyBriefKind("开题报告：城市热岛。只有方法边界，没有实验数据。"), "academic");
     assert.equal(inferDeckIntent("开题报告：城市热岛。只有方法边界，没有实验数据。"), "academic");
-    assert.equal(
-      inferDeckIntent("硕士答辩：城市热岛对课间活动时长的影响。只有方法边界。"),
-      "academic",
-    );
+    assert.equal(inferDeckIntent("硕士答辩：城市热岛对课间活动时长的影响。只有方法边界。"), "academic");
     assert.equal(
       classifyBriefKind("做一次硕士「个人答辩」。开题答辩，约 16 页。不是经营月报，不是学习分享。"),
       "academic",
@@ -114,8 +121,7 @@ describe("brief kind routing", () => {
   });
 
   it("does not route a knowledge share to monthly when it says to avoid monthly styling", () => {
-    const brief =
-      "内部知识分享：如何把复盘写成可执行结论。避免经营月报样式，不要使用财务账本式密集表格。";
+    const brief = "内部知识分享：如何把复盘写成可执行结论。避免经营月报样式，不要使用财务账本式密集表格。";
     assert.equal(classifyBriefKind(brief), "learn-share");
     assert.equal(inferDeckIntent(brief, "education-training"), "teach");
     assert.doesNotMatch(briefWithoutNegatedDocTypes(brief), /经营月报/);
@@ -147,8 +153,7 @@ describe("brief kind routing", () => {
   });
 
   it("keeps a stated 述职报告 ahead of a rejected company monthly style", () => {
-    const brief =
-      "产品经理 2026 年中述职报告。区分个人贡献与团队成果。不要做成学术答辩或公司经营月报。";
+    const brief = "产品经理 2026 年中述职报告。区分个人贡献与团队成果。不要做成学术答辩或公司经营月报。";
     assert.equal(classifyBriefKind(brief), "performance-review");
     assert.equal(inferDeckIntent(brief), "report");
   });

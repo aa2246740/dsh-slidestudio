@@ -73,9 +73,7 @@ export type LlmToolSpec = {
   };
 };
 
-export type LlmContentPart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
+export type LlmContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 
 export type LlmChatMessage =
   | { role: "system"; content: string }
@@ -94,24 +92,15 @@ export type LlmPort = {
    * Multimodal variant: user text + images. Backends that cannot read
    * images will throw; callers must catch and fall back to completeJson.
    */
-  completeJsonWithImages?: (
-    system: string,
-    user: string,
-    images: LlmImage[],
-  ) => Promise<unknown>;
+  completeJsonWithImages?: (system: string, user: string, images: LlmImage[]) => Promise<unknown>;
   /**
    * One chat turn. When `tools` is set the model may return `tool_calls`
    * instead of a final JSON object — this is the agent runtime loop.
    */
-  completeTurn?: (
-    messages: LlmChatMessage[],
-    tools?: LlmToolSpec[],
-  ) => Promise<LlmTurnResult>;
+  completeTurn?: (messages: LlmChatMessage[], tools?: LlmToolSpec[]) => Promise<LlmTurnResult>;
 };
 
-export function llmConfigFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): LlmPortConfig | undefined {
+export function llmConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LlmPortConfig | undefined {
   const baseUrl = env.SLIDESTUDIO_LLM_BASE_URL?.trim();
   if (!baseUrl) return undefined;
   return {
@@ -149,10 +138,7 @@ export function kindFromLlmStatus(status: number): LlmFailureKind {
   return "client";
 }
 
-export function parseRetryAfterMs(
-  header: string | null | undefined,
-  now = Date.now(),
-): number | undefined {
+export function parseRetryAfterMs(header: string | null | undefined, now = Date.now()): number | undefined {
   if (!header) return undefined;
   const trimmed = header.trim();
   if (!trimmed) return undefined;
@@ -262,10 +248,7 @@ export function parseLlmConfig(raw: unknown): LlmPortConfig | undefined {
     model: typeof o.model === "string" && o.model.trim() ? o.model.trim() : "local",
     timeoutMs: typeof o.timeoutMs === "number" ? o.timeoutMs : 120_000,
     image: o.image === false ? false : undefined,
-    retry:
-      o.retry && typeof o.retry === "object"
-        ? (o.retry as LlmRetryPolicy)
-        : undefined,
+    retry: o.retry && typeof o.retry === "object" ? (o.retry as LlmRetryPolicy) : undefined,
   };
 }
 
@@ -286,10 +269,7 @@ export function normalizeToolCalls(raw: unknown): LlmToolCall[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
-    const fn =
-      o.function && typeof o.function === "object"
-        ? (o.function as Record<string, unknown>)
-        : o;
+    const fn = o.function && typeof o.function === "object" ? (o.function as Record<string, unknown>) : o;
     const name = typeof fn.name === "string" ? fn.name.trim() : "";
     if (!name) continue;
     const args =
@@ -298,14 +278,9 @@ export function normalizeToolCalls(raw: unknown): LlmToolCall[] {
         : fn.arguments && typeof fn.arguments === "object"
           ? JSON.stringify(fn.arguments)
           : "{}";
-    const id =
-      typeof o.id === "string" && o.id.trim()
-        ? o.id.trim()
-        : `call_${out.length + 1}`;
+    const id = typeof o.id === "string" && o.id.trim() ? o.id.trim() : `call_${out.length + 1}`;
     const extra =
-      o.extra_content && typeof o.extra_content === "object"
-        ? (o.extra_content as Record<string, unknown>)
-        : undefined;
+      o.extra_content && typeof o.extra_content === "object" ? (o.extra_content as Record<string, unknown>) : undefined;
     out.push({
       id,
       type: "function",
@@ -353,9 +328,7 @@ async function postChatOnce(
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    const retryAfterMs =
-      parseRetryAfterMs(res.headers.get("retry-after"), now()) ??
-      parseGoogleRetryDelayMs(body);
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"), now()) ?? parseGoogleRetryDelayMs(body);
     throw new LlmHttpError(
       `LLM HTTP ${res.status}: ${body.slice(0, 240)}`,
       res.status,
@@ -387,9 +360,7 @@ async function postChat(
       lastError = e;
       const info = classifyLlmFailure(e);
       if (!info.retryable || attempt >= maxRetries) {
-        throw e instanceof LlmHttpError
-          ? e
-          : new Error(info.message);
+        throw e instanceof LlmHttpError ? e : new Error(info.message);
       }
       const kind = info.kind === "client" ? "transient" : info.kind;
       const waitMs = computeBackoffMs({
@@ -488,9 +459,7 @@ export function createLlmPort(config: LlmPortConfig, deps: LlmPortDeps = {}): Ll
       };
       if (tools?.length) payload.tools = tools;
       const message = await postChat(config, payload, deps);
-      const legacy = message.function_call
-        ? normalizeToolCalls([message.function_call])
-        : [];
+      const legacy = message.function_call ? normalizeToolCalls([message.function_call]) : [];
       return {
         content: contentToText(message.content).trim(),
         toolCalls: normalizeToolCalls(message.tool_calls).concat(legacy),

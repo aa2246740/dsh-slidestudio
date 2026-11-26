@@ -17,11 +17,7 @@ import {
 import { createPageRasterPort } from "./page-raster.js";
 import { loadPlaybook } from "./playbook.js";
 import { imageConfigured, imageConfigFromEnv, createImagePort } from "./image-port.js";
-import {
-  imageSearchConfigured,
-  imageSearchConfigFromEnv,
-  createImageSearchPort,
-} from "./image-search-port.js";
+import { imageSearchConfigured, imageSearchConfigFromEnv, createImageSearchPort } from "./image-search-port.js";
 import type { SkillDeckInput, SkillPageInput } from "./skill-pages.js";
 import {
   listOpenKimiSourceRequirements,
@@ -146,15 +142,9 @@ export function resolvePiHandsExtension(): string {
 }
 
 export function resolvePiHandsCli(): string {
-  const fromDist = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "pi-hands-cli.js",
-  );
+  const fromDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "pi-hands-cli.js");
   if (fs.existsSync(fromDist)) return fromDist;
-  const fromSrc = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "pi-hands-cli.ts",
-  );
+  const fromSrc = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "pi-hands-cli.ts");
   if (fs.existsSync(fromSrc)) return fromSrc;
   throw new Error("pi-hands-cli.js not built");
 }
@@ -162,11 +152,7 @@ export function resolvePiHandsCli(): string {
 export function writePiRuntime(root: string, runtime: PiHandsRuntime): void {
   const dir = path.join(root, "_agent");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(root, RUNTIME_REL),
-    `${JSON.stringify(runtime, null, 2)}\n`,
-    "utf8",
-  );
+  fs.writeFileSync(path.join(root, RUNTIME_REL), `${JSON.stringify(runtime, null, 2)}\n`, "utf8");
   if (runtime.strictExecution) initializePiRunLedger(root);
 }
 
@@ -185,8 +171,7 @@ function loadRuntime(root: string): PiHandsRuntime {
         ? rec.designDirection
         : undefined;
     const categoryId = typeof rec.categoryId === "string" ? rec.categoryId.trim() : "";
-    const designSystemId =
-      typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
+    const designSystemId = typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
     return {
       brief: String(rec.brief ?? "").trim(),
       categoryId: categoryId || undefined,
@@ -204,12 +189,7 @@ function loadRuntime(root: string): PiHandsRuntime {
 }
 
 function repositoryRoot(): string {
-  const marker = path.join(
-    "packages",
-    "agent-harness",
-    "reference",
-    "openkimi-source-manifest.v1.json",
-  );
+  const marker = path.join("packages", "agent-harness", "reference", "openkimi-source-manifest.v1.json");
   const candidates: string[] = [];
   const envRoot = process.env.OPEN_SLIDESTUDIO_ROOT?.trim();
   if (envRoot) candidates.push(envRoot);
@@ -225,7 +205,7 @@ function repositoryRoot(): string {
     const root = path.resolve(candidate);
     if (fs.existsSync(path.join(root, marker))) return root;
   }
-  throw new Error(`DSH SlideStudio repo root not found (looked for ${marker})`);
+  throw new Error(`Open SlideStudio repo root not found (looked for ${marker})`);
 }
 
 export function hasExplicitUserDesign(brief: string): boolean {
@@ -234,10 +214,7 @@ export function hasExplicitUserDesign(brief: string): boolean {
   );
 }
 
-function resolveDesignDirection(
-  runtime: PiHandsRuntime,
-  pack: VerifiedOpenKimiPack,
-): DesignDirection {
+function resolveDesignDirection(runtime: PiHandsRuntime, pack: VerifiedOpenKimiPack): DesignDirection {
   if (runtime.designDirection === "self-directed" && !runtime.tasteExecution) {
     return { kind: "self-directed" };
   }
@@ -249,10 +226,7 @@ function resolveDesignDirection(
   };
 }
 
-function toLedgerRequirement(
-  pack: VerifiedOpenKimiPack,
-  requirement: SourceRequirement,
-): ReferenceRequirement {
+function toLedgerRequirement(pack: VerifiedOpenKimiPack, requirement: SourceRequirement): ReferenceRequirement {
   const entry = pack.entriesById.get(requirement.sourceId);
   if (!entry) throw new Error(`OpenKimi requirement is missing: ${requirement.sourceId}`);
   return {
@@ -281,19 +255,13 @@ export function initializePiRunLedger(root: string): void {
     });
     return;
   }
-  const selectedDesignSourceId = resolveOpenKimiPresetDesignSourceId(
-    pack,
-    runtime.designSystemId ?? "",
-  );
+  const selectedDesignSourceId = resolveOpenKimiPresetDesignSourceId(pack, runtime.designSystemId ?? "");
   const selectedDesign = pack.entriesById.get(selectedDesignSourceId);
   if (!selectedDesign) throw new Error("selected OpenKimi design source is missing");
   const tasteGate = runtime.tasteExecution
     ? (() => {
         const visualPack = verifyOpenKimiVisualPack(repoRoot);
-        const preview = resolveOpenKimiDesignPreview(
-          visualPack,
-          runtime.designSystemId ?? "",
-        );
+        const preview = resolveOpenKimiDesignPreview(visualPack, runtime.designSystemId ?? "");
         return {
           version: TASTE_EXECUTION_GATE_VERSION,
           visualManifestSha256: bytesSha256(fs.readFileSync(visualPack.manifestPath)),
@@ -328,11 +296,7 @@ function loadHandsState(root: string): HandsStateFile {
 
 function saveHandsState(root: string, state: HandsStateFile): void {
   fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, HANDS_STATE_REL),
-    `${JSON.stringify(state, null, 2)}\n`,
-    "utf8",
-  );
+  fs.writeFileSync(path.join(root, HANDS_STATE_REL), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
 function buildToolState(root: string): AgentToolState {
@@ -358,10 +322,7 @@ function buildToolState(root: string): AgentToolState {
   };
 }
 
-function explicitComposeMutations(
-  state: AgentToolState,
-  result: ToolExecution,
-): SkillPageInput[] {
+function explicitComposeMutations(state: AgentToolState, result: ToolExecution): SkillPageInput[] {
   const payload = result.payload as Partial<SkillDeckInput> | undefined;
   if (!payload || !Array.isArray(payload.pages)) return [];
   const historical = state.writtenPages ?? [];
@@ -372,22 +333,14 @@ function explicitComposeMutations(
   });
 }
 
-function persistFromState(
-  root: string,
-  state: AgentToolState,
-  pageMutations?: readonly SkillPageInput[],
-): void {
+function persistFromState(root: string, state: AgentToolState, pageMutations?: readonly SkillPageInput[]): void {
   saveHandsState(root, {
     todos: state.todos,
     writtenPages: state.writtenPages ?? [],
     skillDeck: state.skillDeck,
   });
   if (state.todos.length) {
-    fs.writeFileSync(
-      path.join(root, OUTLINE_REL),
-      `${JSON.stringify({ items: state.todos }, null, 2)}\n`,
-      "utf8",
-    );
+    fs.writeFileSync(path.join(root, OUTLINE_REL), `${JSON.stringify({ items: state.todos }, null, 2)}\n`, "utf8");
   }
   if (pageMutations) persistWrittenPages(state, pageMutations);
 }
@@ -519,9 +472,7 @@ function listReferencesResult(root: string, context: RunToolContext): ToolExecut
   if (!ledger) throw new Error("run ledger is not initialized");
   const pack = verifyOpenKimiPack(repositoryRoot());
   const status = inspectRunLedger(root, context.contextEpochId);
-  const missing = new Set(
-    status.missingReferenceChunks.map((item) => `${item.sourceId}#${item.chunkIndex}`),
-  );
+  const missing = new Set(status.missingReferenceChunks.map((item) => `${item.sourceId}#${item.chunkIndex}`));
   const sources = ledger.sourcePack.requirements.map((requirement) => {
     const entry = pack.entriesById.get(requirement.sourceId);
     if (!entry) throw new Error(`required source is absent: ${requirement.sourceId}`);
@@ -554,11 +505,7 @@ function listReferencesResult(root: string, context: RunToolContext): ToolExecut
   };
 }
 
-function readReferenceResult(
-  root: string,
-  context: RunToolContext,
-  args: Record<string, unknown>,
-): ToolExecution {
+function readReferenceResult(root: string, context: RunToolContext, args: Record<string, unknown>): ToolExecution {
   const sourceId = String(args.sourceId ?? "").trim();
   const chunkIndex = Number(args.chunkIndex);
   if (!sourceId || !Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
@@ -610,10 +557,7 @@ function writeCheckedProjectBytes(root: string, relativePath: string, bytes: Buf
   return relativePath;
 }
 
-function viewDesignReferenceResult(
-  root: string,
-  context: RunToolContext,
-): ToolExecution {
+function viewDesignReferenceResult(root: string, context: RunToolContext): ToolExecution {
   const ledger = readRunLedger(root);
   const gate = ledger?.sourcePack.tasteGate;
   if (!gate) throw new Error("taste execution gate is not enabled for this run");
@@ -655,11 +599,7 @@ function viewDesignReferenceResult(
   };
 }
 
-function commitDesignResult(
-  root: string,
-  context: RunToolContext,
-  args: Record<string, unknown>,
-): ToolExecution {
+function commitDesignResult(root: string, context: RunToolContext, args: Record<string, unknown>): ToolExecution {
   requireReferencesComplete(root, context.contextEpochId);
   requireDesignReferenceEmitted(root, context.contextEpochId);
   const runtime = loadRuntime(root);
@@ -711,19 +651,14 @@ function readDesignResult(root: string, context: RunToolContext): ToolExecution 
     name: "read_design",
     ok: true,
     summary: `design contract ${contract.contractSha256.slice(0, 12)}`,
-    detail: [
-      `EXACT COMMITTED DESIGN CONTRACT ${contract.contractSha256}`,
-      "",
-      JSON.stringify(contract, null, 2),
-    ].join("\n"),
+    detail: [`EXACT COMMITTED DESIGN CONTRACT ${contract.contractSha256}`, "", JSON.stringify(contract, null, 2)].join(
+      "\n",
+    ),
     payload: { contractSha256: contract.contractSha256, contract },
   };
 }
 
-async function renderDeckResult(
-  root: string,
-  context: RunToolContext,
-): Promise<ToolExecution> {
+async function renderDeckResult(root: string, context: RunToolContext): Promise<ToolExecution> {
   const snapshot = currentDeckSnapshot(root, context.contextEpochId);
   const overview = await renderDeckOverview({
     projectRoot: root,
@@ -762,11 +697,7 @@ async function renderDeckResult(
   };
 }
 
-function reviewDeckResult(
-  root: string,
-  context: RunToolContext,
-  args: Record<string, unknown>,
-): ToolExecution {
+function reviewDeckResult(root: string, context: RunToolContext, args: Record<string, unknown>): ToolExecution {
   if (args.verdict !== "pass" && args.verdict !== "revise") {
     throw new Error("review_deck verdict must be pass or revise");
   }
@@ -802,11 +733,7 @@ function reviewDeckResult(
   };
 }
 
-export async function runPiHand(
-  name: string,
-  args: Record<string, unknown>,
-  root: string,
-): Promise<ToolExecution> {
+export async function runPiHand(name: string, args: Record<string, unknown>, root: string): Promise<ToolExecution> {
   if (
     !PI_SKILL_TOOL_NAMES.includes(name as PiSkillToolName) &&
     !PI_OPTIONAL_IMAGE_TOOLS.includes(name as (typeof PI_OPTIONAL_IMAGE_TOOLS)[number]) &&
@@ -919,10 +846,7 @@ export async function runPiHand(
         if (readRunLedger(root)?.sourcePack.tasteGate) {
           const contract = readDesignContract(root);
           if (!contract) throw new Error("design contract is not committed");
-          if (
-            typeof cleanArgs.pageType !== "string" ||
-            !cleanArgs.pageType.trim()
-          ) {
+          if (typeof cleanArgs.pageType !== "string" || !cleanArgs.pageType.trim()) {
             cleanArgs.pageType = requirePlannedLayoutFamily(contract, pageId);
           }
           assertPageMatchesDesignContract(
@@ -947,28 +871,19 @@ export async function runPiHand(
     name === "review_deck" ||
     name === "_mark_image_emitted"
   ) {
-    return loggedToolExecution(
-      root,
-      name,
-      cleanArgs,
-      failedTool(name, "run ledger is not initialized"),
-    );
+    return loggedToolExecution(root, name, cleanArgs, failedTool(name, "run ledger is not initialized"));
   }
 
   const state = buildToolState(root);
   let result: ToolExecution;
   try {
-    const executionArgs = strict && name === "compose_deck"
-      ? { title: String(cleanArgs.title ?? "").trim() }
-      : cleanArgs;
+    const executionArgs =
+      strict && name === "compose_deck" ? { title: String(cleanArgs.title ?? "").trim() } : cleanArgs;
     result =
       name === "render_page" || name === "search_image" || name === "generate_image"
         ? await executeGenerateToolAsync(name, executionArgs, state)
         : executeGenerateTool(name, executionArgs, state);
-    const pageMutations =
-      name === "compose_deck" && result.ok
-        ? explicitComposeMutations(state, result)
-        : [];
+    const pageMutations = name === "compose_deck" && result.ok ? explicitComposeMutations(state, result) : [];
     persistFromState(root, state, name === "compose_deck" && result.ok ? pageMutations : undefined);
     if (strict && context && result.ok) {
       if (name === "write_todo") {
@@ -998,9 +913,7 @@ export async function runPiHand(
         });
         recordImagePrepared(root, context, recorded.fact, recorded.deliveryToken);
         const layoutDetail = recorded.fact.layoutIssues.length
-          ? recorded.fact.layoutIssues
-              .map((issue) => `- ${issue.code}: ${issue.detail}`)
-              .join("\n")
+          ? recorded.fact.layoutIssues.map((issue) => `- ${issue.code}: ${issue.detail}`).join("\n")
           : "- none";
         result = {
           ...result,
@@ -1112,33 +1025,20 @@ export function mergeSkillStackEvidence(
 ): SkillStackEvidence {
   const fromEvents = skillStackEvidence(timed);
   const fromHands = root ? skillStackFromHandsLog(root) : skillStackEvidence([]);
-  const pageWrites = Math.max(
-    fromEvents.pageWrites,
-    fromHands.pageWrites,
-    root ? diskPageCount(root) : 0,
-  );
-  const renderPages = Math.max(
-    fromEvents.renderPages,
-    fromHands.renderPages,
-    root ? diskRasterCount(root) : 0,
-  );
+  const pageWrites = Math.max(fromEvents.pageWrites, fromHands.pageWrites, root ? diskPageCount(root) : 0);
+  const renderPages = Math.max(fromEvents.renderPages, fromHands.renderPages, root ? diskRasterCount(root) : 0);
   const outline =
     fromEvents.outline ||
     fromHands.outline ||
     Boolean(root && fs.existsSync(path.join(root, "_agent", "outline.json")));
   const visualOrReview =
-    fromEvents.visualOrReview ||
-    fromHands.visualOrReview ||
-    Boolean(root && diskRasterCount(root) > 0);
+    fromEvents.visualOrReview || fromHands.visualOrReview || Boolean(root && diskRasterCount(root) > 0);
   const review = fromEvents.review || fromHands.review;
   const compose = fromEvents.compose || fromHands.compose || Boolean(extra?.compose);
   const oneShotDump = fromEvents.oneShotDump && fromHands.pageWrites === 0;
   const uniquePages = root ? diskPageCount(root) : 0;
   const uniqueRasters = root ? diskRasterCount(root) : 0;
-  const renderCoverage =
-    uniquePages >= 2
-      ? uniqueRasters >= uniquePages
-      : pageWrites >= 2 && renderPages >= pageWrites;
+  const renderCoverage = uniquePages >= 2 ? uniqueRasters >= uniquePages : pageWrites >= 2 && renderPages >= pageWrites;
   const ok = outline && pageWrites >= 2 && visualOrReview && review && compose && !oneShotDump;
   return {
     ok,
@@ -1164,9 +1064,7 @@ function appendHandsLog(root: string, row: Record<string, unknown>): void {
 }
 
 /** `--skill` flags vs produce tools that actually executed. */
-export function skillsExecutionMode(
-  timed: Array<{ event: string }>,
-): "pi-tools" | "flags-only" {
+export function skillsExecutionMode(timed: Array<{ event: string }>): "pi-tools" | "flags-only" {
   const ran = timed.some((e) =>
     /^(tool:think|tool:list_references|tool:read_reference|tool:write_todo|tool:write_page|tool:render_page|tool:review_page|tool:review_pages|tool:compose_deck)/.test(
       e.event,
@@ -1178,12 +1076,8 @@ export function skillsExecutionMode(
 export function skillStackEvidence(timed: Array<{ event: string }>): SkillStackEvidence {
   const names = timed.map((e) => e.event);
   const outline = names.some((e) => e === "tool:write_todo" || e.startsWith("tool:write_todo:"));
-  const pageWrites = names.filter(
-    (e) => e === "tool:write_page" || e.startsWith("tool:write_page:"),
-  ).length;
-  const renderPages = names.filter(
-    (e) => e === "tool:render_page" || e.startsWith("tool:render_page:"),
-  ).length;
+  const pageWrites = names.filter((e) => e === "tool:write_page" || e.startsWith("tool:write_page:")).length;
+  const renderPages = names.filter((e) => e === "tool:render_page" || e.startsWith("tool:render_page:")).length;
   const renderCoverage = pageWrites >= 2 && renderPages >= pageWrites;
   const visualOrReview = names.some(
     (e) =>
@@ -1192,14 +1086,9 @@ export function skillStackEvidence(timed: Array<{ event: string }>): SkillStackE
       e === "tool:review_pages" ||
       e.startsWith("tool:review_pages:"),
   );
-  const review = names.some(
-    (e) => e === "tool:review_pages" || e.startsWith("tool:review_pages:"),
-  );
-  const compose = names.some(
-    (e) => e === "tool:compose_deck" || e.startsWith("tool:compose_deck:"),
-  );
-  const oneShotDump =
-    names.some((e) => e === "tool:write:skill-deck.json") && pageWrites === 0 && !outline;
+  const review = names.some((e) => e === "tool:review_pages" || e.startsWith("tool:review_pages:"));
+  const compose = names.some((e) => e === "tool:compose_deck" || e.startsWith("tool:compose_deck:"));
+  const oneShotDump = names.some((e) => e === "tool:write:skill-deck.json") && pageWrites === 0 && !outline;
   const ok = outline && pageWrites >= 2 && visualOrReview && review && compose && !oneShotDump;
   const missing: string[] = [];
   if (!outline) missing.push("write_todo");
@@ -1218,8 +1107,6 @@ export function skillStackEvidence(timed: Array<{ event: string }>): SkillStackE
     review,
     compose,
     oneShotDump,
-    reason: ok
-      ? "OpenKimi stack ran as Pi tools"
-      : `skills did not run as Pi tools: ${missing.join(", ")}`,
+    reason: ok ? "OpenKimi stack ran as Pi tools" : `skills did not run as Pi tools: ${missing.join(", ")}`,
   };
 }

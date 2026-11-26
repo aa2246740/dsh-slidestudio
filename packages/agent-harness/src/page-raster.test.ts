@@ -4,10 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createEmptyProject } from "@open-slidestudio/pptd-v2";
-import {
-  createPageRasterPort,
-  savePageRaster,
-} from "./page-raster.js";
+import { createPageRasterPort, savePageRaster } from "./page-raster.js";
 
 function stripedPng(): Buffer {
   // Minimal valid PNG header + we only need length > 64 for the port.

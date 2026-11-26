@@ -25,10 +25,7 @@ function normalize(runs: RichTextRun[]): RichTextRun[] {
 
 describe("pptd-v2 theme helpers", () => {
   it("strips HTML rich text to plain", () => {
-    assert.equal(
-      stripHtmlToText('<p><span style="font-size:16px">NEODECK</span></p>'),
-      "NEODECK",
-    );
+    assert.equal(stripHtmlToText('<p><span style="font-size:16px">NEODECK</span></p>'), "NEODECK");
     assert.equal(stripHtmlToText("plain"), "plain");
   });
 
@@ -50,10 +47,7 @@ describe("pptd-v2 theme helpers", () => {
 
   it("normalizes 8-digit hex and theme refs", () => {
     assert.equal(toRgbHex("#000000F2"), "#000000");
-    assert.equal(
-      toRgbHex("$primary", { colors: { primary: "#FF6900" } }),
-      "#FF6900",
-    );
+    assert.equal(toRgbHex("$primary", { colors: { primary: "#FF6900" } }), "#FF6900");
     let unresolved: string | undefined;
     try {
       unresolved = toRgbHex("$nope");
@@ -175,10 +169,7 @@ describe("pptd-v2 theme helpers", () => {
   });
 
   it("keeps theme alpha on body text ($w70)", () => {
-    const st = resolveTextStyle(
-      { text: "slogan", color: "$w70", fontSize: 15 },
-      { colors: { w70: "#FFFFFFB3" } },
-    );
+    const st = resolveTextStyle({ text: "slogan", color: "$w70", fontSize: 15 }, { colors: { w70: "#FFFFFFB3" } });
     assert.match(st.color, /^rgba\(255, 255, 255, 0\.7/);
   });
 
@@ -197,9 +188,7 @@ describe("serializeRichText / parseRichText round-trip", () => {
   it("leaves a single unstyled paragraph as a plain escaped string", () => {
     assert.equal(serializeRichText([{ text: "plain" }]), "plain");
     assert.equal(serializeRichText([{ text: 'a <b> & "c"' }]), "a &lt;b&gt; &amp; &quot;c&quot;");
-    assert.deepEqual(parseRichText(serializeRichText([{ text: 'a <b> & "c"' }])), [
-      { text: 'a <b> & "c"' },
-    ]);
+    assert.deepEqual(parseRichText(serializeRichText([{ text: 'a <b> & "c"' }])), [{ text: 'a <b> & "c"' }]);
   });
 
   it("uses style-only spans with canonical css", () => {
@@ -232,9 +221,7 @@ describe("serializeRichText / parseRichText round-trip", () => {
     assert.equal(fromTag.length, 1);
     assert.equal(fromTag[0]!.text, "under");
     assert.equal(fromTag[0]!.underline, true);
-    const fromCss = parseRichText(
-      '<p><span style="text-decoration:underline">under</span></p>',
-    );
+    const fromCss = parseRichText('<p><span style="text-decoration:underline">under</span></p>');
     assert.deepEqual(fromCss, [{ text: "under", underline: true }]);
     assert.deepEqual(parseRichText(serializeRichText(fromTag)), fromCss);
   });
@@ -261,11 +248,7 @@ describe("serializeRichText / parseRichText round-trip", () => {
 describe("applyRangeStyle", () => {
   it("splits a mid-run range and merges identical neighbors", () => {
     const out = applyRangeStyle([{ text: "Hello" }], 1, 4, { bold: true });
-    assert.deepEqual(out, [
-      { text: "H" },
-      { text: "ell", bold: true },
-      { text: "o" },
-    ]);
+    assert.deepEqual(out, [{ text: "H" }, { text: "ell", bold: true }, { text: "o" }]);
     const merged = applyRangeStyle(out, 1, 4, { bold: null });
     assert.deepEqual(merged, [{ text: "Hello" }]);
   });
@@ -275,10 +258,7 @@ describe("applyRangeStyle", () => {
       bold: true,
       color: "#FF6900",
     });
-    assert.deepEqual(prefix, [
-      { text: "He", bold: true, color: "#FF6900" },
-      { text: "llo" },
-    ]);
+    assert.deepEqual(prefix, [{ text: "He", bold: true, color: "#FF6900" }, { text: "llo" }]);
     const crossed = applyRangeStyle(
       [
         { text: "AB", bold: true },
@@ -301,11 +281,7 @@ describe("applyRangeStyle", () => {
       underline: true,
       fontSize: 20,
     });
-    assert.deepEqual(multi, [
-      { text: "hel" },
-      { text: "lo\nwo", underline: true, fontSize: 20 },
-      { text: "rld" },
-    ]);
+    assert.deepEqual(multi, [{ text: "hel" }, { text: "lo\nwo", underline: true, fontSize: 20 }, { text: "rld" }]);
     assert.deepEqual(parseRichText(serializeRichText(multi)), multi);
     const cleared = applyRangeStyle(multi, 3, 8, {
       underline: null,
@@ -316,21 +292,14 @@ describe("applyRangeStyle", () => {
 
   it("clamps inverted and empty ranges", () => {
     const runs: RichTextRun[] = [{ text: "Hi", italic: true }];
-    assert.deepEqual(applyRangeStyle(runs, 2, 0, { bold: true }), [
-      { text: "Hi", italic: true, bold: true },
-    ]);
-    assert.deepEqual(applyRangeStyle(runs, 1, 1, { bold: true } as RangeStylePatch), [
-      { text: "Hi", italic: true },
-    ]);
+    assert.deepEqual(applyRangeStyle(runs, 2, 0, { bold: true }), [{ text: "Hi", italic: true, bold: true }]);
+    assert.deepEqual(applyRangeStyle(runs, 1, 1, { bold: true } as RangeStylePatch), [{ text: "Hi", italic: true }]);
   });
 });
 
 describe("rich text hardening", () => {
   it("drops HTML comments including clipboard StartFragment markers", () => {
-    assert.deepEqual(
-      parseRichText("<!--StartFragment--><p>hello</p><!--EndFragment-->"),
-      [{ text: "hello" }],
-    );
+    assert.deepEqual(parseRichText("<!--StartFragment--><p>hello</p><!--EndFragment-->"), [{ text: "hello" }]);
     assert.deepEqual(parseRichText("<p>a<!-- hidden -->b</p>"), [{ text: "ab" }]);
   });
 
@@ -356,9 +325,7 @@ describe("rich text hardening", () => {
   });
 
   it("rejects hostile or malformed inline css values", () => {
-    const runs = parseRichText(
-      '<p><span style="color:url(javascript:alert(1));font-size:99999px">x</span></p>',
-    );
+    const runs = parseRichText('<p><span style="color:url(javascript:alert(1));font-size:99999px">x</span></p>');
     assert.deepEqual(runs, [{ text: "x" }]);
   });
 });

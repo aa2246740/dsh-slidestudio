@@ -37,7 +37,10 @@ describe("image rebuild via multimodal LLM", () => {
       },
     };
     const nodes = await rebuildNodesFromImage(llm, tmpPng());
-    assert.deepEqual(nodes.map((n) => n.text), ["感知", "路由", "决策"]);
+    assert.deepEqual(
+      nodes.map((n) => n.text),
+      ["感知", "路由", "决策"],
+    );
   });
 
   it("text-only backend throws so the caller falls back", async () => {

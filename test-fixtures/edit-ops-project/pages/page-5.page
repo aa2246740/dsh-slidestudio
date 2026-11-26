@@ -1,0 +1,101 @@
+pageType: content
+layoutId: body
+elements:
+  - elementId: mst-main-pageno
+    inherited:
+      scope: master
+      ownerId: main
+      elementId: pageno
+    elementType: text
+    bounds:
+      - 880
+      - 506
+      - 60
+      - 22
+    layoutRole: footer
+    content:
+      text: "{page}"
+      field: pageNumber
+      fontSize: 12
+      color: "#6B7280"
+      align:
+        - right
+        - middle
+  - elementId: lyt-body-header-rule
+    inherited:
+      scope: layout
+      ownerId: body
+      elementId: header-rule
+    elementType: line
+    bounds:
+      - 0
+      - 56
+      - 960
+      - 2
+    viewBox:
+      - 960
+      - 2
+    points: 0,1 960,1
+    border:
+      width: 1.5
+      color: "#1D4ED8"
+  - elementId: lyt-body-logo
+    inherited:
+      scope: layout
+      ownerId: body
+      elementId: logo
+    elementType: image
+    bounds:
+      - 24
+      - 12
+      - 120
+      - 40
+    src: media/logo-a.png
+  - elementId: lyt-body-footer
+    inherited:
+      scope: layout
+      ownerId: body
+      elementId: footer
+    elementType: text
+    bounds:
+      - 40
+      - 506
+      - 600
+      - 22
+    layoutRole: footer
+    content:
+      text: 编辑操作检查 · 正文
+      fontSize: 12
+      color: "#6B7280"
+      align:
+        - left
+        - middle
+  - elementId: title
+    elementType: text
+    bounds:
+      - 40
+      - 84
+      - 880
+      - 56
+    content:
+      text: 结论与下一步
+      fontSize: 28
+      bold: true
+      color: "#111827"
+      align:
+        - left
+        - middle
+  - elementId: summary
+    elementType: text
+    bounds:
+      - 40
+      - 160
+      - 880
+      - 120
+    content:
+      text: 下一步：继续跟进各区域的季度目标，按月复盘。
+      fontSize: 18
+      color: "#374151"
+      align:
+        - left
+        - top

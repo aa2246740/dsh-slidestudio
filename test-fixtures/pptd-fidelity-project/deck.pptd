@@ -1,0 +1,23 @@
+version: v2
+title: PPTD 保真检查
+size:
+  - 960
+  - 540
+theme:
+  colors:
+    primary: "#2563EB"
+    text: "#111111"
+    background: "#FFFFFF"
+  textStyles:
+    title:
+      fontSize: 36
+      bold: true
+      color: $text
+    body:
+      fontSize: 18
+      color: $text
+pages:
+  - pages/01-paths.page
+  - pages/02-pictures.page
+  - pages/03-background.page
+  - pages/04-charts.page

@@ -67,9 +67,7 @@ export function findPiSdkRoot(env: NodeJS.ProcessEnv = process.env): string | un
   return undefined;
 }
 
-export function piAvailable(
-  env: NodeJS.ProcessEnv = process.env,
-): PiAvailability {
+export function piAvailable(env: NodeJS.ProcessEnv = process.env): PiAvailability {
   const bin = piConfigFromEnv(env).bin;
   if (bin.includes("/") || bin.includes("\\")) {
     if (existsSync(bin)) {

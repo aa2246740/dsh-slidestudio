@@ -1,0 +1,155 @@
+{
+  "schema": "dsh-surface-manifest-v1",
+  "capturedFor": "0.2.2-rc.5",
+  "compatibleRange": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0-0",
+    "node": "^22.19.0 || >=24.9.0"
+  },
+  "server": {
+    "current": [
+      {
+        "service": "webServer",
+        "symbols": ["ctx.webServer.register", "ctx.webServer.port"],
+        "status": "keep-thin",
+        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+      },
+      {
+        "service": "connection",
+        "symbols": ["connection.requestRejection", "connection.authorizeIndex"],
+        "status": "keep-thin",
+        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+      },
+      {
+        "service": "llm",
+        "symbols": ["ctx.llm.listProviders", "ctx.llm.listModels", "ctx.llm.resolveModelInfo", "ctx.llm.stream"],
+        "status": "keep-thin",
+        "owners": ["dsh-slides-host"]
+      },
+      {
+        "service": "attachments",
+        "symbols": ["ctx.attachments.saveImage"],
+        "status": "keep-thin",
+        "owners": ["dsh-slides-host"]
+      }
+    ],
+    "targetThinShell": ["webServer", "connection", "llm", "attachments"],
+    "optional": [
+      {
+        "service": "mcpManager",
+        "symbols": ["mcpManager.register"],
+        "status": "optional",
+        "flag": "mcp_register",
+        "owners": ["dsh-slidestudio"],
+        "note": "rc.5 only; rc.2 hosts without mcpManager skip the registration with a warning."
+      }
+    ],
+    "removed": [
+      {
+        "service": "tools",
+        "symbols": ["tools.register", "tools.guard", "tools.execute", "tools.restrict"],
+        "replacedBy": "slides-runtime canonical tools (createSlideTools) with the Hub tool policy as excludeTools"
+      },
+      {
+        "service": "agents",
+        "symbols": ["ctx.agents.create", "ctx.agents.resume", "ctx.agents.get", "ctx.agents.list"],
+        "replacedBy": "SessionRuntimeManager: one SlidesAgentRuntime per session"
+      },
+      {
+        "service": "agentPresets",
+        "symbols": ["agentPresets.mount", "agentPresets.composedPreset", "agentPresets.register"],
+        "replacedBy": "runtime systemPrompt (SLIDES_DIRECTOR_PERSONA + conversation interaction section)"
+      },
+      {
+        "service": "profileContext",
+        "symbols": ["profileContext.home"],
+        "replacedBy": "resolveUserDshHome(): DSH_HOME, else ~/.dsh"
+      },
+      {
+        "service": "workspaceRegistry",
+        "symbols": ["workspaceRegistry"],
+        "replacedBy": "none: runtime sessions never enter the DSH Work sidebar"
+      },
+      {
+        "service": "sessionQuery",
+        "symbols": ["sessionQuery.listSessions"],
+        "replacedBy": "none: runtime sessions never enter the DSH Work sidebar"
+      },
+      {
+        "service": "sessionProjections",
+        "symbols": ["sessionProjections.stateOf"],
+        "replacedBy": "none: no DSH preset binding to probe"
+      }
+    ],
+    "removedEvents": [
+      "agent/created",
+      "agent/status",
+      "agent/error",
+      "agent/disposed",
+      "agent/assistant-stream",
+      "agent-preset/selected",
+      "session/event",
+      "system-prompt/assemble",
+      "user-questions/request",
+      "agent/pre-step"
+    ]
+  },
+  "client": {
+    "current": [
+      {
+        "service": "slots",
+        "symbols": ["slots.inject", "slots.register"],
+        "status": "keep-thin",
+        "inject": true
+      },
+      {
+        "service": "layout",
+        "symbols": ["layout.selectPanel", "layout.panelInfo", "layout.beginNavigation"],
+        "status": "keep-thin"
+      },
+      {
+        "service": "locale",
+        "symbols": ["locale.getLocale", "locale.subscribe"],
+        "status": "keep-thin"
+      },
+      {
+        "service": "personal",
+        "symbols": ["personal.register", "personal.open", "personal.suspend"],
+        "status": "remove-after-core-loop"
+      },
+      {
+        "service": "shortcuts",
+        "symbols": ["shortcuts.catalog.getSnapshot"],
+        "status": "remove-after-core-loop"
+      },
+      {
+        "service": "sessions",
+        "symbols": ["sessions.list.getSnapshot", "sessions.list.subscribe"],
+        "status": "remove-after-core-loop"
+      }
+    ],
+    "targetThinShell": ["slots", "layout", "locale"]
+  },
+  "rc5Adaptations": [
+    {
+      "id": "core-loop-cutover",
+      "note": "Phase 3B-2：dsh-slidestudio 服务端只注入 webServer、connection、llm、attachments（mcpManager 可选）。每个会话由 slides-runtime 的 SlidesAgentRuntime 运行，DshLlmPort 走 ctx.llm.stream 与 ctx.attachments.saveImage。不再创建 DSH Agent、注册工具或预设、监听 agent/* 与 session/event。rc.2 与 rc.5 共用同一路径，原有的 prompt-presentation-no-tools、tools-register-when、model-selection-compat 适配随之退役。"
+    },
+    {
+      "id": "dsh-home-without-profile-context",
+      "note": "DSH 0.2.2-rc.5 只在 profileContext 里给出 home，且不写 process.env.DSH_HOME。插件按 Host 的 resolveDshHome 规则自行解析：DSH_HOME（非空，展开 ~），否则 ~/.dsh，因此不依赖 profileContext。"
+    },
+    {
+      "id": "self-contained-client-bundle",
+      "note": "dsh-slidestudio/tools/client-build.mjs 自行输出 window.__ModuleLoader__.load，INLINE_SAFE 与 0.2.2-rc.5 对齐。构建不再依赖 DSHX_HARNESS。"
+    },
+    {
+      "id": "locale-fallback",
+      "note": "locale.active 为空时用中文。zh 与 zh-CN 用中文。en 以及 rc.5 新增的 ja/es/fr/de/ru/pt 回退英文。非中英文菜单只认 settings.trigger 和 aria-keyshortcuts，找不到则超时并通知 oss:dsh-settings-failed。"
+    },
+    {
+      "id": "engines",
+      "note": "dsh-slidestudio engines.node 为 ^22.19.0 || >=24.9.0：接受 22.19.0 与 22 的后续补丁，拒绝 23.0.0，接受 24.9.0 及以上。engines.dsh 为 >=0.2.0-rc.2 <0.3.0-0，同时覆盖 0.2.0-rc.2 与 0.2.2-rc.5。"
+    }
+  ],
+  "phase": "3B-2"
+}

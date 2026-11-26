@@ -1,3 +1,13 @@
+import { buildToolState, type HandsStateFile } from "./hands-tool-state.js";
+import { withWritePageRevision } from "./write-page-result.js";
+import { writeTodoResult } from "./todo-hand.js";
+import { writeLayoutExecution } from "./layout-hand.js";
+import { requireWholePageWriteArgs } from "./whole-page-args.js";
+import { listReferencesResult, readReferenceResult } from "./reference-hands.js";
+import { recordImageEmitted, recordImagePrepared, recordRaster } from "./run-ledger-raster.js";
+import { appendHandsLog, HANDS_LOG_REL, skillStackEvidence, type SkillStackEvidence } from "./skill-stack-evidence.js";
+import { pageRewriteGate } from "./page-rewrite-gate.js";
+import { pageChromeOnDisk } from "./page-chrome.js";
 /**
  * Domain page tools. DSH Host calls these through PresentationRun.
  * No Pi SDK. Host does not paint leftover pages.
@@ -5,35 +15,24 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { withProjectWriteLock, loadProject } from "@open-slidestudio/pptd-v2";
-import { persistPageKey } from "./page-identity.js";
-import { pageIdMatchesFile } from "./layout-qa.js";
-import {
-  quarantineCorruptFile,
-  writeFileAtomic,
-  writeJsonAtomic,
-} from "./atomic-file.js";
-import { parseCanonicalPagePlan } from "./page-plan.js";
-import { conversationPageCount } from "./conversation-requirements.js";
+import { quarantineCorruptFile, writeFileAtomic, writeJsonAtomic } from "./atomic-file.js";
+import { explicitComposeMutations, slimComposeResult } from "./compose-receipt.js";
+import { writeDeliveryProvenance } from "./delivery-provenance.js";
 import {
   executeGenerateTool,
   executeGenerateToolAsync,
+  orderComposedPagesByPlan,
   persistWrittenPages,
-  type AgentTodo,
   type AgentToolState,
   type ToolExecution,
 } from "./agent-tools.js";
 import { inspectProjectCapabilities } from "../capabilities.js";
-import { createPageRasterPort } from "./page-raster.js";
-import { loadPlaybook } from "./playbook.js";
-import { createImagePort, grokImageConfigFromEnv, imageConfigFromEnv } from "./image-port.js";
-import { createImageSearchPort } from "./image-search-port.js";
-import { createGrokImageSearchPort, grokWebSearch } from "./grok-hosted.js";
-import type { SkillDeckInput, SkillPageInput } from "./skill-pages.js";
+import type { WriteAuthorityRunner } from "../types.js";
+import { runWithWriteAuthority } from "../write-authority.js";
+import type { SkillPageInput } from "./skill-pages.js";
 import { resolveRepoRoot } from "../catalog.js";
 import {
   listOpenKimiSourceRequirements,
-  readOpenKimiSourceChunk,
   resolveOpenKimiPresetDesignSourceId,
   verifyOpenKimiPack,
   type DesignDirection,
@@ -47,26 +46,22 @@ import {
   ledgerHasSuccessfulWebSearch,
   webSearchQueriesFromArgs,
 } from "./hosted-web-search.js";
+import { MaterialPackError } from "./material-pack.js";
+import { MATERIAL_TOOL_NAMES, materialToolResult } from "./material-hands.js";
+import { reviewPageExecution } from "./review-page-hand.js";
+import { withReviewProgress } from "./review-progress.js";
+import { loggedToolExecution } from "./logged-tool-execution.js";
+import { withImagePlanHints } from "./image-placement.js";
 import {
   bytesSha256,
   contextFromToolArgs,
   currentPageRevision,
   ensureRunLedger,
-  inspectRunLedger,
-  pageRewriteGate,
   readRunLedger,
   recordCompose,
-  recordImageEmitted,
-  recordImagePrepared,
-  recordPageRevision,
-  recordRaster,
-  recordReferenceChunk,
   recordStructuralReview,
-  recordTodo,
-  recordVisualReview,
   recordWebSearchExecuted,
   requireComposeReady,
-  requireReferencesComplete,
   requireTodo,
   stableSha256,
   type PageLayoutIssue,
@@ -78,7 +73,13 @@ export const DOMAIN_TOOL_NAMES = [
   "think",
   "list_references",
   "read_reference",
+  "list_materials",
+  "read_material",
+  "view_material",
+  "record_material_notes",
+  "query_material",
   "write_todo",
+  "write_layout",
   "write_page",
   "render_page",
   "review_page",
@@ -92,7 +93,7 @@ export const DOMAIN_TOOL_NAMES = [
 export type DomainToolName = (typeof DOMAIN_TOOL_NAMES)[number];
 
 const OPTIONAL_PORT_TOOLS = ["search_image", "generate_image", "web_search"] as const;
-const INTERNAL_TOOLS = ["_mark_image_emitted"] as const;
+const INTERNAL_TOOLS = ["_mark_image_emitted", "_record_material_overview"] as const;
 
 const HANDS_STATE_REL = path.join("_agent", "hands-state.json");
 const RUNTIME_REL = path.join("_agent", "runtime.json");
@@ -105,15 +106,11 @@ export type DomainRuntime = {
   editorBaseUrl?: string;
   designDirection?: "self-directed" | "user-design" | "preset";
   strictExecution?: boolean;
+  /** Owning browser principal; the internal raster borrows it as a cookie. */
+  principal?: string;
 };
 
-type HandsStateFile = {
-  todos: AgentTodo[];
-  writtenPages: SkillPageInput[];
-  skillDeck?: SkillDeckInput;
-};
-
-export function writeDomainRuntime(root: string, runtime: DomainRuntime): void {
+export function writeDomainRuntime<T extends DomainRuntime>(root: string, runtime: T): void {
   writeJsonAtomic(path.join(root, RUNTIME_REL), runtime);
   if (runtime.strictExecution) initializeRunLedger(root);
 }
@@ -133,8 +130,7 @@ function loadRuntime(root: string): DomainRuntime {
         ? rec.designDirection
         : undefined;
     const categoryId = typeof rec.categoryId === "string" ? rec.categoryId.trim() : "";
-    const designSystemId =
-      typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
+    const designSystemId = typeof rec.designSystemId === "string" ? rec.designSystemId.trim() : "";
     return {
       brief: String(rec.brief ?? "").trim(),
       categoryId: categoryId || undefined,
@@ -142,6 +138,7 @@ function loadRuntime(root: string): DomainRuntime {
       editorBaseUrl: rec.editorBaseUrl,
       designDirection,
       strictExecution: rec.strictExecution === true,
+      principal: typeof rec.principal === "string" && rec.principal.trim() ? rec.principal.trim() : undefined,
     };
   }
   const briefFile = path.join(root, "_agent", "brief.txt");
@@ -160,11 +157,8 @@ export function hasExplicitUserDesign(brief: string): boolean {
   );
 }
 
-function resolveDesignDirection(
-  runtime: DomainRuntime,
-  pack: VerifiedOpenKimiPack,
-): DesignDirection {
-  if (runtime.designDirection === "self-directed") {
+function resolveDesignDirection(runtime: DomainRuntime, pack: VerifiedOpenKimiPack): DesignDirection {
+  if (runtime.designDirection === "self-directed" || runtime.designDirection === "user-design") {
     return { kind: "self-directed" };
   }
   // A color, font, ratio, or layout hint is an override. It is not a complete
@@ -175,10 +169,7 @@ function resolveDesignDirection(
   };
 }
 
-function toLedgerRequirement(
-  pack: VerifiedOpenKimiPack,
-  requirement: SourceRequirement,
-): ReferenceRequirement {
+function toLedgerRequirement(pack: VerifiedOpenKimiPack, requirement: SourceRequirement): ReferenceRequirement {
   const entry = pack.entriesById.get(requirement.sourceId);
   if (!entry) throw new Error(`OpenKimi requirement is missing: ${requirement.sourceId}`);
   return {
@@ -199,8 +190,7 @@ export function initializeRunLedger(root: string): void {
     designDirection,
   }).map((requirement) => toLedgerRequirement(pack, requirement));
   const executionPolicy = {
-    currentRenderedLayoutRequired:
-      runtime.strictExecution === true && Boolean(runtime.editorBaseUrl?.trim()),
+    currentRenderedLayoutRequired: runtime.strictExecution === true && Boolean(runtime.editorBaseUrl?.trim()),
     structuralReviewRequired: runtime.strictExecution === true,
   } as const;
   ensureRunLedger(root, {
@@ -237,100 +227,7 @@ function saveHandsState(root: string, state: HandsStateFile): void {
   writeJsonAtomic(path.join(root, HANDS_STATE_REL), state);
 }
 
-function buildToolState(root: string): AgentToolState {
-  const runtime = loadRuntime(root);
-  const saved = loadHandsState(root);
-  const ledger = readRunLedger(root);
-  let todos = saved.todos;
-  if (ledger) {
-    const todo = ledger.facts.filter((fact) => fact.type === "todo.committed").at(-1);
-    try {
-      todos = parseCanonicalPagePlan(todo?.pagePlan).map((page) => ({ ...page, exhibits: [...page.exhibits] }));
-    } catch { todos = []; }
-    // Structural edit turns grow the manifest beyond the committed plan. Teach
-    // the plan about pages that now exist on disk so gates and prompts see the
-    // real page set. Union, not replace: mid-generation the disk is still a
-    // subset of the plan and committed entries must not drop out. Only a real
-    // committed plan earns this sync — a bare hands-state never gated on plans.
-    if (todos.length) {
-      try {
-        const project = loadProject(root);
-        const known = new Set(
-          todos.map((todo) => persistPageKey(String(todo.pageId ?? ""))).filter((key) => key.length > 0),
-        );
-        const extras = project.pages
-          .map((loaded) => persistPageKey(loaded.path))
-          .filter((id) => id.length > 0 && !known.has(id))
-          .map((id) => ({ pageId: id, title: id }));
-        if (extras.length) todos = [...todos, ...extras];
-      } catch {
-        // The project may not exist yet during early generation.
-      }
-    }
-  }
-  const attach = path.join(root, "_agent", "attachments.md");
-  const caps = inspectProjectCapabilities(root);
-  return {
-    brief: runtime.brief,
-    requestedPageCount: conversationPageCount(root),
-    playbook: loadPlaybook({
-      categoryId: runtime.categoryId,
-      designSystemId: runtime.designSystemId,
-      hostDefaults: false,
-    }),
-    referenceText: fs.existsSync(attach) ? fs.readFileSync(attach, "utf8") : undefined,
-    todos,
-    researchNotes: [],
-    writtenPages: saved.writtenPages,
-    skillDeck: saved.skillDeck,
-    strictLedger: Boolean(ledger),
-    projectRoot: root,
-    userExplicitPack:
-      runtime.designDirection === "preset" || runtime.designDirection === "user-design",
-    // The persisted editorBaseUrl can be stale across sidecar restarts (the
-    // port moves); the kernel's own env carries the live value. Prefer it.
-    raster: createPageRasterPort({ editorBaseUrl: process.env.SLIDESTUDIO_EDITOR_URL?.trim() || runtime.editorBaseUrl }),
-    image: caps.imageGenerate.configured
-      ? createImagePort(
-          caps.imageGenerate.via === "pi-xai-hosted" ? grokImageConfigFromEnv() : imageConfigFromEnv(),
-        )
-      : undefined,
-    imageSearch: caps.imageSearch.configured
-      ? caps.imageSearch.via === "pi-xai-hosted"
-        ? createGrokImageSearchPort()
-        : createImageSearchPort()
-      : undefined,
-    webSearch:
-      caps.research.configured && caps.research.via === "pi-xai-hosted"
-        ? { search: (query: string) => grokWebSearch(query) }
-        : undefined,
-  };
-}
-
-/** Explicit compose payloads may add/revise pages, but unchanged historical
- * hands-state pages are observations, not permission to overwrite editor work. */
-function explicitComposeMutations(
-  state: AgentToolState,
-  result: ToolExecution,
-): SkillPageInput[] {
-  const payload = result.payload as Partial<SkillDeckInput> | undefined;
-  if (!payload || !Array.isArray(payload.pages)) return [];
-  const historical = state.writtenPages ?? [];
-  return payload.pages.filter((page): page is SkillPageInput => {
-    if (!page || typeof page.id !== "string") return false;
-    const prior = historical.find((item) => item.id === page.id);
-    // A compose after write_page is not an implicit edit permission for a
-    // historical page: Native may have changed it after hands-state was read.
-    // Compose may still append pages which this run has never written.
-    return !prior;
-  });
-}
-
-function persistFromState(
-  root: string,
-  state: AgentToolState,
-  pageMutations?: readonly SkillPageInput[],
-): void {
+function persistFromState(root: string, state: AgentToolState, pageMutations?: readonly SkillPageInput[]): void {
   saveHandsState(root, {
     todos: state.todos,
     writtenPages: state.writtenPages ?? [],
@@ -342,6 +239,9 @@ function persistFromState(
   // An explicit compose with no appended pages still owns its deck metadata
   // (notably the title), while ordinary tools must not replay prior pages.
   if (pageMutations) persistWrittenPages(state, pageMutations);
+  // A compose seal also fixes the reading order: pages land on disk in write
+  // order during generation, but the plan order is the deck order.
+  if (pageMutations) orderComposedPagesByPlan(root, state.todos);
 }
 
 function failedTool(name: string, error: unknown): ToolExecution {
@@ -380,24 +280,6 @@ function failedTool(name: string, error: unknown): ToolExecution {
   };
 }
 
-function loggedToolExecution(
-  root: string,
-  name: string,
-  args: Record<string, unknown>,
-  result: ToolExecution,
-): ToolExecution {
-  appendHandsLog(root, {
-    at: new Date().toISOString(),
-    name,
-    ok: result.ok,
-    summary: result.summary,
-    detail: result.ok ? undefined : result.detail,
-    keys: Object.keys(args),
-    args: JSON.stringify(args).slice(0, 1500),
-  });
-  return result;
-}
-
 function safeProjectFile(root: string, relativePath: string): string {
   const absoluteRoot = path.resolve(root);
   const candidate = path.resolve(absoluteRoot, relativePath);
@@ -417,37 +299,6 @@ function issueStrings(value: unknown): string[] {
     const message = typeof rec.message === "string" ? rec.message : JSON.stringify(rec);
     return `${pageId}${message}`;
   });
-}
-
-const MISPLACED_PAGE_STYLE_KEYS = new Set([
-  "align",
-  "bold",
-  "color",
-  "fill",
-  "fontFamily",
-  "fontSize",
-  "fontWeight",
-  "item",
-  "layoutRole",
-  "letterSpacing",
-  "line",
-  "lineHeight",
-  "position",
-  "rect",
-  "text",
-  "value",
-]);
-
-function requireWholePageWriteArgs(args: Record<string, unknown>): void {
-  const misplaced = Object.keys(args)
-    .filter((key) => MISPLACED_PAGE_STYLE_KEYS.has(key))
-    .sort();
-  if (!misplaced.length) return;
-  throw new Error(
-    `write_page received element fields at page level: ${misplaced.join(", ")}. ` +
-      "write_page replaces the entire page; send one complete elements[] array for the page. " +
-      "Put text, style, bounds, fill, line, alignment, and layoutRole inside their owning element.",
-  );
 }
 
 function layoutEvidence(value: unknown): {
@@ -491,87 +342,6 @@ function layoutEvidence(value: unknown): {
   };
 }
 
-function listReferencesResult(root: string, context: RunToolContext): ToolExecution {
-  const ledger = readRunLedger(root);
-  if (!ledger) throw new Error("run ledger is not initialized");
-  const pack = verifyOpenKimiPack(repositoryRoot());
-  const status = inspectRunLedger(root, context.contextEpochId);
-  const missing = new Set(
-    status.missingReferenceChunks.map((item) => `${item.sourceId}#${item.chunkIndex}`),
-  );
-  const sources = ledger.sourcePack.requirements.map((requirement) => {
-    const entry = pack.entriesById.get(requirement.sourceId);
-    if (!entry) throw new Error(`required source is absent: ${requirement.sourceId}`);
-    return {
-      sourceId: requirement.sourceId,
-      relativePath: entry.relativePath,
-      reason: requirement.reason,
-      byteLength: entry.byteLength,
-      fileSha256: entry.sha256,
-      chunks: requirement.chunkIndexes.map((chunkIndex) => ({
-        chunkIndex,
-        readInThisContext: !missing.has(`${requirement.sourceId}#${chunkIndex}`),
-      })),
-    };
-  });
-  const detail = sources
-    .map(
-      (source) =>
-        `${source.sourceId} | ${source.reason} | ${source.byteLength} bytes | chunks ${source.chunks
-          .map((chunk) => `${chunk.chunkIndex}${chunk.readInThisContext ? "✓" : ""}`)
-          .join(",")}`,
-    )
-    .join("\n");
-  return {
-    name: "list_references",
-    ok: true,
-    summary: `${sources.length} required original files`,
-    detail,
-    payload: { referencesComplete: status.referencesComplete, sources },
-  };
-}
-
-function readReferenceResult(
-  root: string,
-  context: RunToolContext,
-  args: Record<string, unknown>,
-): ToolExecution {
-  const sourceId = String(args.sourceId ?? "").trim();
-  const chunkIndex = Number(args.chunkIndex);
-  if (!sourceId || !Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
-    throw new Error("read_reference requires sourceId and a non-negative integer chunkIndex");
-  }
-  const pack = verifyOpenKimiPack(repositoryRoot());
-  const chunk = readOpenKimiSourceChunk(pack, sourceId, chunkIndex);
-  recordReferenceChunk(root, context, {
-    sourceId: chunk.sourceId,
-    fileSha256: chunk.fileSha256,
-    chunkIndex: chunk.index,
-    chunkSha256: chunk.sha256,
-  });
-  return {
-    name: "read_reference",
-    ok: true,
-    summary: `${chunk.relativePath} #${chunk.index}`,
-    detail: [
-      `ORIGINAL SOURCE ${chunk.sourceId}`,
-      `chunk ${chunk.index} bytes ${chunk.byteStart}-${chunk.byteEndExclusive} sha256 ${chunk.sha256}`,
-      "",
-      chunk.text,
-    ].join("\n"),
-    payload: {
-      sourceId: chunk.sourceId,
-      relativePath: chunk.relativePath,
-      chunkIndex: chunk.index,
-      byteStart: chunk.byteStart,
-      byteEndExclusive: chunk.byteEndExclusive,
-      chunkSha256: chunk.sha256,
-      fileSha256: chunk.fileSha256,
-      text: chunk.text,
-    },
-  };
-}
-
 function requireHostedWebSearchBeforeWrite(root: string): void {
   const research = inspectProjectCapabilities(root).research;
   if (!hostedResearchNeedsWebSearchReceipt(research)) return;
@@ -580,16 +350,310 @@ function requireHostedWebSearchBeforeWrite(root: string): void {
   throw new Error(MISSING_HOSTED_WEB_SEARCH_RECEIPT);
 }
 
+const ASYNC_DOMAIN_TOOLS = new Set(["render_page", "search_image", "generate_image", "web_search"]);
+const MUTATING_SYNC_TOOLS = new Set([
+  "_mark_image_emitted",
+  "write_todo",
+  "write_layout",
+  "write_page",
+  "delete_pages",
+  "reorder_pages",
+  "update_deck",
+  "compose_deck",
+  "review_page",
+  "review_pages",
+  "record_material_notes",
+]);
+
+function isLeaseRefusalExecution(result: ToolExecution): boolean {
+  if (result.ok || !result.payload || typeof result.payload !== "object") return false;
+  const outcome = (result.payload as { outcome?: unknown }).outcome;
+  return outcome === "lease-conflict" || outcome === "lease-preempted-by-editor";
+}
+
+function isKnownDomainTool(name: string): boolean {
+  return (
+    DOMAIN_TOOL_NAMES.includes(name as DomainToolName) ||
+    OPTIONAL_PORT_TOOLS.includes(name as (typeof OPTIONAL_PORT_TOOLS)[number]) ||
+    INTERNAL_TOOLS.includes(name as (typeof INTERNAL_TOOLS)[number])
+  );
+}
+
+function runStrictPrecheck(
+  name: string,
+  root: string,
+  context: RunToolContext,
+  cleanArgs: Record<string, unknown>,
+): ToolExecution | undefined {
+  if (name === "list_references")
+    return loggedToolExecution(root, name, cleanArgs, listReferencesResult(root, context));
+  if (name === "read_reference") {
+    return loggedToolExecution(root, name, cleanArgs, readReferenceResult(root, context, cleanArgs));
+  }
+  const material = materialToolResult(root, name, context, cleanArgs);
+  if (material) return loggedToolExecution(root, name, cleanArgs, material);
+  if (name === "_mark_image_emitted") {
+    const deliveryToken = String(cleanArgs.deliveryToken ?? "").trim();
+    if (!deliveryToken) throw new Error("deliveryToken is required");
+    const fact = recordImageEmitted(root, context, deliveryToken);
+    const subject = `${fact.pageId} revision ${fact.revision}`;
+    return loggedToolExecution(root, name, cleanArgs, {
+      name,
+      ok: true,
+      summary: `${subject} image emitted`,
+      detail: `${subject} image content emitted`,
+      payload: fact,
+    });
+  }
+  if (name === "write_todo") return writeTodoResult(root, context, cleanArgs, loadRuntime(root).brief);
+  if (name === "write_layout") {
+    return loggedToolExecution(root, name, cleanArgs, writeLayoutExecution(root, context, cleanArgs));
+  }
+  if (name === "write_page") {
+    requireTodo(root);
+    requireWholePageWriteArgs(cleanArgs);
+    requireHostedWebSearchBeforeWrite(root);
+    const rewrite = pageRewriteGate(root, String(cleanArgs.id ?? "").trim());
+    if (!rewrite.allowed) throw new Error(rewrite.reason);
+  }
+  if (name === "compose_deck") requireComposeReady(root, context.contextEpochId);
+  return undefined;
+}
+
+function recordAsyncLedgerFact(
+  name: string,
+  root: string,
+  context: RunToolContext,
+  result: ToolExecution,
+): ToolExecution {
+  if (name === "web_search") {
+    const payload = (result.payload ?? {}) as Record<string, unknown>;
+    recordWebSearchExecuted(root, context, {
+      queries: webSearchQueriesFromArgs(payload),
+      factCount: Array.isArray(payload.facts) ? payload.facts.length : 0,
+    });
+    return result;
+  }
+  if (name !== "render_page") return result;
+  const payload = (result.payload ?? {}) as Record<string, unknown>;
+  const { dataUrl: _legacyDataUrl, ...transportPayload } = payload;
+  const pageId = String(payload.pageId ?? "").trim();
+  const src = String(payload.src ?? "").trim();
+  const page = currentPageRevision(root, pageId);
+  if (!page || !src) throw new Error("render_page did not return a current page raster");
+  const layout = layoutEvidence(payload.layout);
+  const recorded = recordRaster(root, page, {
+    bytes: fs.readFileSync(safeProjectFile(root, src)),
+    src,
+    width: Number(payload.width ?? 0),
+    height: Number(payload.height ?? 0),
+    layoutStatus: layout.status,
+    layoutIssues: layout.issues,
+    chromeSha256: pageChromeOnDisk(root, pageId),
+  });
+  recordImagePrepared(root, context, recorded.fact, recorded.deliveryToken);
+  const layoutDetail = recorded.fact.layoutIssues.length
+    ? recorded.fact.layoutIssues.map((issue) => `- ${issue.code}: ${issue.detail}`).join("\n")
+    : "- none";
+  return {
+    ...result,
+    detail: [
+      result.detail,
+      `revision: ${page.revision}`,
+      `rasterSha256: ${recorded.fact.rasterSha256}`,
+      `layoutStatus: ${recorded.fact.layoutStatus}`,
+      "layoutIssues:",
+      layoutDetail,
+      `DELIVERY_TOKEN: ${recorded.deliveryToken}`,
+    ].join("\n"),
+    payload: {
+      ...transportPayload,
+      pageRevision: page.revision,
+      pageSha256: page.pageSha256,
+      rasterSha256: recorded.fact.rasterSha256,
+      deliveryToken: recorded.deliveryToken,
+      layoutStatus: recorded.fact.layoutStatus,
+      layoutIssues: recorded.fact.layoutIssues,
+    },
+  };
+}
+
+function recordSyncLedgerFact(
+  name: string,
+  root: string,
+  strict: boolean,
+  context: RunToolContext | undefined,
+  cleanArgs: Record<string, unknown>,
+  result: ToolExecution,
+): ToolExecution {
+  if (strict && context && result.ok) {
+    if (name === "write_page") return withWritePageRevision(root, context, result, cleanArgs);
+    if (name === "review_pages") {
+      recordStructuralReview(root, true, issueStrings(((result.payload ?? {}) as Record<string, unknown>).issues));
+      return result;
+    }
+    if (name === "compose_deck") {
+      const fact = recordCompose(root, context, String(cleanArgs.title ?? "").trim());
+      return slimComposeResult(root, result, fact, writeDeliveryProvenance(root, fact));
+    }
+  } else if (strict && name === "review_pages") {
+    recordStructuralReview(root, false, issueStrings(((result.payload ?? {}) as Record<string, unknown>).issues));
+  }
+  return result;
+}
+
+function logDomainResult(
+  root: string,
+  name: string,
+  cleanArgs: Record<string, unknown>,
+  result: ToolExecution,
+): ToolExecution {
+  const enriched = withReviewProgress(root, name, withImagePlanHints(root, name, result));
+  const payload =
+    name === "write_page"
+      ? {
+          painted: Boolean((enriched.payload as { painted?: boolean } | undefined)?.painted),
+          restamped: Boolean((enriched.payload as { restamped?: boolean } | undefined)?.restamped),
+        }
+      : name === "review_pages"
+        ? {
+            ok: enriched.ok,
+            issues: (enriched.payload as { issues?: unknown } | undefined)?.issues ?? [],
+          }
+        : undefined;
+  appendHandsLog(root, {
+    at: new Date().toISOString(),
+    name,
+    ok: enriched.ok,
+    summary: enriched.summary,
+    detail: enriched.ok ? undefined : enriched.detail,
+    keys: Object.keys(cleanArgs),
+    args: JSON.stringify(cleanArgs).slice(0, 1500),
+    payload,
+  });
+  return enriched;
+}
+
+function requiresStrictLedger(name: string): boolean {
+  return (
+    name === "list_references" ||
+    name === "read_reference" ||
+    MATERIAL_TOOL_NAMES.has(name) ||
+    name === "review_page" ||
+    name === "write_layout" ||
+    name === "_mark_image_emitted"
+  );
+}
+
+function prepareHandCall(
+  name: string,
+  args: Record<string, unknown>,
+  root: string,
+):
+  | { readonly done: true; readonly result: ToolExecution }
+  | {
+      readonly done: false;
+      readonly strict: boolean;
+      readonly context?: RunToolContext;
+      readonly cleanArgs: Record<string, unknown>;
+    } {
+  const strict = Boolean(readRunLedger(root));
+  // strictExecution is declared by runtime.json; a missing/corrupt ledger must
+  // not silently downgrade the run to the permissive path — fail closed.
+  if (!strict && loadRuntime(root).strictExecution === true) {
+    return {
+      done: true,
+      result: loggedToolExecution(
+        root,
+        name,
+        args,
+        failedTool(name, "strict execution requires an initialized run ledger"),
+      ),
+    };
+  }
+  if (!strict) {
+    if (requiresStrictLedger(name)) {
+      return {
+        done: true,
+        result: loggedToolExecution(root, name, args, failedTool(name, "run ledger is not initialized")),
+      };
+    }
+    return { done: false, strict: false, cleanArgs: args };
+  }
+  try {
+    const extracted = contextFromToolArgs(args);
+    const early = runStrictPrecheck(name, root, extracted.context, extracted.args);
+    if (early) return { done: true, result: early };
+    return { done: false, strict: true, context: extracted.context, cleanArgs: extracted.args };
+  } catch (error) {
+    return { done: true, result: loggedToolExecution(root, name, args, failedTool(name, error)) };
+  }
+}
+
+function runSyncDomainHand(name: string, args: Record<string, unknown>, root: string): ToolExecution {
+  const prep = prepareHandCall(name, args, root);
+  if (prep.done) return prep.result;
+  const { strict, context, cleanArgs } = prep;
+  const state = buildToolState(root, loadRuntime(root), loadHandsState(root), context?.contextEpochId);
+  let result: ToolExecution;
+  try {
+    const executionArgs =
+      strict && name === "compose_deck" ? { title: String(cleanArgs.title ?? "").trim() } : cleanArgs;
+    result =
+      name === "review_page" && context
+        ? reviewPageExecution(root, context, cleanArgs, state)
+        : executeGenerateTool(name, executionArgs, state);
+    const pageMutations = name === "compose_deck" && result.ok ? explicitComposeMutations(state, result) : [];
+    persistFromState(root, state, name === "compose_deck" && result.ok ? pageMutations : undefined);
+    result = recordSyncLedgerFact(name, root, strict, context, cleanArgs, result);
+  } catch (error) {
+    result = failedTool(name, error);
+  }
+  return logDomainResult(root, name, cleanArgs, result);
+}
+
+async function runAsyncDomainHand(
+  name: string,
+  args: Record<string, unknown>,
+  root: string,
+  runAuthorizedWrite?: WriteAuthorityRunner,
+): Promise<ToolExecution> {
+  const prep = prepareHandCall(name, args, root);
+  if (prep.done) return prep.result;
+  const { strict, context, cleanArgs } = prep;
+  const state = buildToolState(root, loadRuntime(root), loadHandsState(root), context?.contextEpochId);
+  if (runAuthorizedWrite) state.runAuthorizedWrite = runAuthorizedWrite;
+  let result: ToolExecution;
+  try {
+    result = await executeGenerateToolAsync(name, cleanArgs, state);
+  } catch (error) {
+    result = failedTool(name, error);
+  } finally {
+    await state.raster?.close?.();
+  }
+  if (isLeaseRefusalExecution(result)) return result;
+  const commitAsync = (): ToolExecution => {
+    try {
+      persistFromState(root, state);
+      if (strict && context && result.ok) result = recordAsyncLedgerFact(name, root, context, result);
+    } catch (error) {
+      result = failedTool(name, error);
+    }
+    return logDomainResult(root, name, cleanArgs, result);
+  };
+  const gated = runWithWriteAuthority(root, runAuthorizedWrite, commitAsync);
+  return gated.ok
+    ? gated.value
+    : { name, ok: false, summary: gated.summary, detail: gated.detail, payload: gated.payload };
+}
+
 export async function runDomainHand(
   name: string,
   args: Record<string, unknown>,
   root: string,
+  opts?: { readonly runAuthorizedWrite?: WriteAuthorityRunner },
 ): Promise<ToolExecution> {
-  if (
-    !DOMAIN_TOOL_NAMES.includes(name as DomainToolName) &&
-    !OPTIONAL_PORT_TOOLS.includes(name as (typeof OPTIONAL_PORT_TOOLS)[number]) &&
-    !INTERNAL_TOOLS.includes(name as (typeof INTERNAL_TOOLS)[number])
-  ) {
+  if (!isKnownDomainTool(name)) {
     return {
       name,
       ok: false,
@@ -598,251 +662,17 @@ export async function runDomainHand(
       payload: { error: `unknown tool: ${name}` },
     };
   }
-  const strict = Boolean(readRunLedger(root));
-  // strictExecution is declared by runtime.json; a missing/corrupt ledger must
-  // not silently downgrade the run to the permissive path — fail closed.
-  if (!strict && loadRuntime(root).strictExecution === true) {
-    return loggedToolExecution(
-      root,
-      name,
-      args,
-      failedTool(name, "strict execution requires an initialized run ledger"),
-    );
+  if (ASYNC_DOMAIN_TOOLS.has(name)) {
+    return runAsyncDomainHand(name, args, root, opts?.runAuthorizedWrite);
   }
-  let context: RunToolContext | undefined;
-  let cleanArgs = args;
-  if (strict) {
-    try {
-      const extracted = contextFromToolArgs(args);
-      context = extracted.context;
-      cleanArgs = extracted.args;
-      if (name === "list_references") {
-        return loggedToolExecution(root, name, cleanArgs, listReferencesResult(root, context));
-      }
-      if (name === "read_reference") {
-        return loggedToolExecution(root, name, cleanArgs, readReferenceResult(root, context, cleanArgs));
-      }
-      if (name === "_mark_image_emitted") {
-        const deliveryToken = String(cleanArgs.deliveryToken ?? "").trim();
-        if (!deliveryToken) throw new Error("deliveryToken is required");
-        const fact = recordImageEmitted(root, context, deliveryToken);
-        const subject = `${fact.pageId} revision ${fact.revision}`;
-        return loggedToolExecution(root, name, cleanArgs, {
-          name,
-          ok: true,
-          summary: `${subject} image emitted`,
-          detail: `${subject} image content emitted`,
-          payload: fact,
-        });
-      }
-      if (name === "review_page") {
-        const pageId = String(cleanArgs.pageId ?? "").trim();
-        const revision = Number(cleanArgs.revision);
-        const deliveryToken = String(cleanArgs.deliveryToken ?? "").trim();
-        const verdict = cleanArgs.verdict;
-        const issues = Array.isArray(cleanArgs.issues)
-          ? cleanArgs.issues.filter((issue): issue is string => typeof issue === "string")
-          : [];
-        if (!pageId || !Number.isSafeInteger(revision) || revision < 1 || !deliveryToken) {
-          throw new Error("review_page requires pageId, revision, and deliveryToken");
-        }
-        if (verdict !== "pass" && verdict !== "revise") {
-          throw new Error("review_page verdict must be pass or revise");
-        }
-        const fact = recordVisualReview(root, context, {
-          pageId,
-          revision,
-          deliveryToken,
-          verdict,
-          issues,
-        });
-        return loggedToolExecution(root, name, cleanArgs, {
-          name,
-          ok: true,
-          summary: `${pageId} ${verdict}`,
-          detail:
-            verdict === "pass"
-              ? `${pageId} revision ${revision} visual review passed`
-              : `${pageId} revision ${revision} must be rewritten: ${issues.join("; ")}`,
-          payload: fact,
-        });
-      }
-      if (name === "write_todo") {
-        const planContext = context;
-        return withProjectWriteLock(root, () => {
-          requireReferencesComplete(root, planContext.contextEpochId);
-          const items = parseCanonicalPagePlan(cleanArgs.items);
-          const committed = recordTodo(root, planContext, items);
-          return loggedToolExecution(root, name, cleanArgs, {
-            name, ok: true, summary: `${committed.length} pages planned`,
-            detail: committed.map((page) => `${page.pageId}: ${page.title}`).join("\n"),
-            payload: { items: committed, plannedPageIds: committed.map((page) => page.pageId) },
-          });
-        });
-      }
-      if (name === "write_page") {
-        requireTodo(root);
-        requireWholePageWriteArgs(cleanArgs);
-        requireHostedWebSearchBeforeWrite(root);
-        const pageId = String(cleanArgs.id ?? "").trim();
-        const rewrite = pageRewriteGate(root, pageId);
-        if (!rewrite.allowed) throw new Error(rewrite.reason);
-      }
-      if (name === "compose_deck") requireComposeReady(root, context.contextEpochId);
-    } catch (error) {
-      return loggedToolExecution(root, name, cleanArgs, failedTool(name, error));
-    }
-  } else if (
-    name === "list_references" ||
-    name === "read_reference" ||
-    name === "review_page" ||
-    name === "_mark_image_emitted"
-  ) {
-    return loggedToolExecution(
-      root,
-      name,
-      cleanArgs,
-      failedTool(name, "run ledger is not initialized"),
-    );
+  if (opts?.runAuthorizedWrite && MUTATING_SYNC_TOOLS.has(name)) {
+    const gated = runWithWriteAuthority(root, opts.runAuthorizedWrite, () => runSyncDomainHand(name, args, root));
+    return gated.ok
+      ? gated.value
+      : { name, ok: false, summary: gated.summary, detail: gated.detail, payload: gated.payload };
   }
-
-  const state = buildToolState(root);
-  let result: ToolExecution;
-  try {
-    const executionArgs = strict && name === "compose_deck"
-      ? { title: String(cleanArgs.title ?? "").trim() }
-      : cleanArgs;
-    result =
-      name === "render_page" || name === "search_image" || name === "generate_image" || name === "web_search"
-        ? await executeGenerateToolAsync(name, executionArgs, state)
-        : executeGenerateTool(name, executionArgs, state);
-    const pageMutations =
-      name === "compose_deck" && result.ok
-        ? explicitComposeMutations(state, result)
-        : [];
-    persistFromState(root, state, name === "compose_deck" && result.ok ? pageMutations : undefined);
-    if (strict && context && result.ok) {
-      if (name === "web_search") {
-        const payload = (result.payload ?? {}) as Record<string, unknown>;
-        const queries = webSearchQueriesFromArgs(payload);
-        recordWebSearchExecuted(root, context, {
-          queries,
-          factCount: Array.isArray(payload.facts) ? payload.facts.length : 0,
-        });
-      } else if (name === "write_page") {
-        const page = (result.payload as { page?: SkillPageInput } | undefined)?.page;
-        if (!page?.id) throw new Error("write_page succeeded without a page payload");
-        // Bind the revision fact to the persisted file, not the tool payload:
-        // reload the page that was just written and hash the on-disk revision.
-        const persisted = loadProject(root).pages.find((entry) =>
-          pageIdMatchesFile(page.id, entry.path),
-        );
-        if (!persisted) {
-          throw new Error(`write_page persisted no page file for ${page.id}`);
-        }
-        const canonicalId = persistPageKey(persisted.path);
-        recordPageRevision(root, context, canonicalId, {
-          ...persisted.page,
-          id: canonicalId,
-        });
-      } else if (name === "render_page") {
-        const payload = (result.payload ?? {}) as Record<string, unknown>;
-        const { dataUrl: _legacyDataUrl, ...transportPayload } = payload;
-        const pageId = String(payload.pageId ?? "").trim();
-        const src = String(payload.src ?? "").trim();
-        const page = currentPageRevision(root, pageId);
-        if (!page || !src) throw new Error("render_page did not return a current page raster");
-        const abs = safeProjectFile(root, src);
-        const bytes = fs.readFileSync(abs);
-        const layout = layoutEvidence(payload.layout);
-        const recorded = recordRaster(root, page, {
-          bytes,
-          src,
-          width: Number(payload.width ?? 0),
-          height: Number(payload.height ?? 0),
-          layoutStatus: layout.status,
-          layoutIssues: layout.issues,
-        });
-        recordImagePrepared(root, context, recorded.fact, recorded.deliveryToken);
-        const layoutDetail = recorded.fact.layoutIssues.length
-          ? recorded.fact.layoutIssues
-              .map((issue) => `- ${issue.code}: ${issue.detail}`)
-              .join("\n")
-          : "- none";
-        result = {
-          ...result,
-          detail: [
-            result.detail,
-            `revision: ${page.revision}`,
-            `rasterSha256: ${recorded.fact.rasterSha256}`,
-            `layoutStatus: ${recorded.fact.layoutStatus}`,
-            "layoutIssues:",
-            layoutDetail,
-            `DELIVERY_TOKEN: ${recorded.deliveryToken}`,
-          ].join("\n"),
-          payload: {
-            ...transportPayload,
-            pageRevision: page.revision,
-            pageSha256: page.pageSha256,
-            rasterSha256: recorded.fact.rasterSha256,
-            deliveryToken: recorded.deliveryToken,
-            layoutStatus: recorded.fact.layoutStatus,
-            layoutIssues: recorded.fact.layoutIssues,
-          },
-        };
-      } else if (name === "review_pages") {
-        const payload = (result.payload ?? {}) as Record<string, unknown>;
-        recordStructuralReview(root, true, issueStrings(payload.issues));
-      } else if (name === "compose_deck") {
-        recordCompose(root, context, String(cleanArgs.title ?? "").trim());
-      }
-    } else if (strict && name === "review_pages") {
-      const payload = (result.payload ?? {}) as Record<string, unknown>;
-      recordStructuralReview(root, false, issueStrings(payload.issues));
-    }
-  } catch (error) {
-    result = failedTool(name, error);
-  } finally {
-    await state.raster?.close?.();
-  }
-  appendHandsLog(root, {
-    at: new Date().toISOString(),
-    name,
-    ok: result.ok,
-    summary: result.summary,
-    detail: result.ok ? undefined : result.detail,
-    keys: Object.keys(cleanArgs),
-    args: JSON.stringify(cleanArgs).slice(0, 1500),
-    payload:
-      name === "write_page"
-        ? {
-            painted: Boolean((result.payload as { painted?: boolean } | undefined)?.painted),
-            restamped: Boolean((result.payload as { restamped?: boolean } | undefined)?.restamped),
-          }
-        : name === "review_pages"
-          ? {
-              ok: result.ok,
-              issues: (result.payload as { issues?: unknown } | undefined)?.issues ?? [],
-            }
-          : undefined,
-  });
-  return result;
+  return runSyncDomainHand(name, args, root);
 }
-
-export type SkillStackEvidence = {
-  ok: boolean;
-  outline: boolean;
-  pageWrites: number;
-  renderPages: number;
-  renderCoverage: boolean;
-  visualOrReview: boolean;
-  review: boolean;
-  compose: boolean;
-  oneShotDump: boolean;
-  reason: string;
-};
-
-export const HANDS_LOG_REL = path.join("_agent", "hands-log.jsonl");
 
 export function skillStackFromHandsLog(root: string): SkillStackEvidence {
   const file = path.join(root, HANDS_LOG_REL);
@@ -881,33 +711,20 @@ export function mergeSkillStackEvidence(
 ): SkillStackEvidence {
   const fromEvents = skillStackEvidence(timed);
   const fromHands = root ? skillStackFromHandsLog(root) : skillStackEvidence([]);
-  const pageWrites = Math.max(
-    fromEvents.pageWrites,
-    fromHands.pageWrites,
-    root ? diskPageCount(root) : 0,
-  );
-  const renderPages = Math.max(
-    fromEvents.renderPages,
-    fromHands.renderPages,
-    root ? diskRasterCount(root) : 0,
-  );
+  const pageWrites = Math.max(fromEvents.pageWrites, fromHands.pageWrites, root ? diskPageCount(root) : 0);
+  const renderPages = Math.max(fromEvents.renderPages, fromHands.renderPages, root ? diskRasterCount(root) : 0);
   const outline =
     fromEvents.outline ||
     fromHands.outline ||
     Boolean(root && fs.existsSync(path.join(root, "_agent", "outline.json")));
   const visualOrReview =
-    fromEvents.visualOrReview ||
-    fromHands.visualOrReview ||
-    Boolean(root && diskRasterCount(root) > 0);
+    fromEvents.visualOrReview || fromHands.visualOrReview || Boolean(root && diskRasterCount(root) > 0);
   const review = fromEvents.review || fromHands.review;
   const compose = fromEvents.compose || fromHands.compose || Boolean(extra?.compose);
   const oneShotDump = fromEvents.oneShotDump && fromHands.pageWrites === 0;
   const uniquePages = root ? diskPageCount(root) : 0;
   const uniqueRasters = root ? diskRasterCount(root) : 0;
-  const renderCoverage =
-    uniquePages >= 2
-      ? uniqueRasters >= uniquePages
-      : pageWrites >= 2 && renderPages >= pageWrites;
+  const renderCoverage = uniquePages >= 2 ? uniqueRasters >= uniquePages : pageWrites >= 2 && renderPages >= pageWrites;
   const ok = outline && pageWrites >= 2 && visualOrReview && review && compose && !oneShotDump;
   return {
     ok,
@@ -924,71 +741,5 @@ export function mergeSkillStackEvidence(
         ? "OpenKimi stack ran as agent tools; host composed after agent_end"
         : "OpenKimi stack ran as agent tools"
       : skillStackEvidence(timed).reason,
-  };
-}
-
-function appendHandsLog(root: string, row: Record<string, unknown>): void {
-  fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-  fs.appendFileSync(path.join(root, HANDS_LOG_REL), `${JSON.stringify(row)}\n`, "utf8");
-}
-
-/** `--skill` flags vs produce tools that actually executed. */
-export function skillsExecutionMode(
-  timed: Array<{ event: string }>,
-): "agent-tools" | "flags-only" {
-  const ran = timed.some((e) =>
-    /^(tool:think|tool:list_references|tool:read_reference|tool:write_todo|tool:write_page|tool:render_page|tool:review_page|tool:review_pages|tool:compose_deck)/.test(
-      e.event,
-    ),
-  );
-  return ran ? "agent-tools" : "flags-only";
-}
-
-export function skillStackEvidence(timed: Array<{ event: string }>): SkillStackEvidence {
-  const names = timed.map((e) => e.event);
-  const outline = names.some((e) => e === "tool:write_todo" || e.startsWith("tool:write_todo:"));
-  const pageWrites = names.filter(
-    (e) => e === "tool:write_page" || e.startsWith("tool:write_page:"),
-  ).length;
-  const renderPages = names.filter(
-    (e) => e === "tool:render_page" || e.startsWith("tool:render_page:"),
-  ).length;
-  const renderCoverage = pageWrites >= 2 && renderPages >= pageWrites;
-  const visualOrReview = names.some(
-    (e) =>
-      e === "tool:render_page" ||
-      e.startsWith("tool:render_page:") ||
-      e === "tool:review_pages" ||
-      e.startsWith("tool:review_pages:"),
-  );
-  const review = names.some(
-    (e) => e === "tool:review_pages" || e.startsWith("tool:review_pages:"),
-  );
-  const compose = names.some(
-    (e) => e === "tool:compose_deck" || e.startsWith("tool:compose_deck:"),
-  );
-  const oneShotDump =
-    names.some((e) => e === "tool:write:skill-deck.json") && pageWrites === 0 && !outline;
-  const ok = outline && pageWrites >= 2 && visualOrReview && review && compose && !oneShotDump;
-  const missing: string[] = [];
-  if (!outline) missing.push("write_todo");
-  if (pageWrites < 2) missing.push(`write_page×${pageWrites} (need ≥2)`);
-  if (!visualOrReview) missing.push("render_page|review_pages");
-  if (!review) missing.push("review_pages");
-  if (!compose) missing.push("compose_deck");
-  if (oneShotDump) missing.push("one-shot skill-deck.json dump");
-  return {
-    ok,
-    outline,
-    pageWrites,
-    renderPages,
-    renderCoverage,
-    visualOrReview,
-    review,
-    compose,
-    oneShotDump,
-    reason: ok
-      ? "OpenKimi stack ran as agent tools"
-      : `skills did not run as agent tools: ${missing.join(", ")}`,
   };
 }

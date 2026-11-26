@@ -1,29 +1,13 @@
-import type { ChartElement } from "./types.js";
+import type { ChartElement, ChartGrouping } from "./types.js";
+import { columnIndex, finiteNumber } from "./chart-columns.js";
 import { niceScale, type ChartScale } from "./chart-layout.js";
+export type { WaterfallBar, WaterfallChartModel } from "./chart-waterfall.js";
+export { waterfallChartModel } from "./chart-waterfall.js";
 
-export type SupportedChartKind =
-  | "bar"
-  | "line"
-  | "pie"
-  | "area"
-  | "waterfall"
-  | "scatter";
+export type SupportedChartKind = "bar" | "line" | "pie" | "area" | "waterfall" | "scatter" | "radar" | "doughnut";
 
-export type WaterfallBar = {
-  label: string;
-  value: number;
-  start: number;
-  end: number;
-  kind: "total" | "subtotal" | "increase" | "decrease";
-};
-
-export type WaterfallChartModel = {
-  bars: WaterfallBar[];
-  valueMin: number;
-  valueMax: number;
-  /** Shared nice axis (does not force zero). */
-  scale: ChartScale;
-};
+/** Chart kinds that share the categorical data contract (categories plus value series). */
+export type CategoricalKind = "bar" | "line" | "area" | "pie" | "radar" | "doughnut";
 
 export type ScatterPoint = {
   label: string;
@@ -46,12 +30,14 @@ export type ScatterChartModel = {
 export type CategoricalChartSeries = {
   name: string;
   values: number[];
-  kind: "bar" | "line" | "area" | "pie";
+  kind: CategoricalKind;
   axis: "primary" | "secondary";
 };
 
 export type CategoricalChartModel = {
-  kind: "bar" | "line" | "area" | "pie";
+  kind: CategoricalKind;
+  /** Bar grouping; always `clustered` unless the kind is `bar`. */
+  grouping: ChartGrouping;
   orientation: "vertical" | "horizontal";
   categories: string[];
   series: CategoricalChartSeries[];
@@ -77,57 +63,80 @@ export type ScatterLabelPlacement = Readonly<{
   box: Readonly<{ left: number; top: number; right: number; bottom: number }>;
 }>;
 
-type ChartSemanticInput = Pick<ChartElement, "data" | "series">;
+type ChartSemanticInput = Pick<ChartElement, "data" | "series" | "grouping">;
 
-function categoricalKind(raw: unknown): "bar" | "line" | "area" | "pie" {
-  const type = String(raw ?? "bar").trim().toLowerCase();
-  if (type === "line" || type === "area" || type === "pie") return type;
+function categoricalKind(raw: unknown): CategoricalKind {
+  const type = String(raw ?? "bar")
+    .trim()
+    .toLowerCase();
+  if (type === "line" || type === "area" || type === "pie" || type === "radar" || type === "doughnut") {
+    return type;
+  }
   return "bar";
 }
 
 export function chartKind(input: ChartSemanticInput): SupportedChartKind {
-  const raw = String(input.series[0]?.type ?? "bar").trim().toLowerCase();
+  const raw = String(input.series[0]?.type ?? "bar")
+    .trim()
+    .toLowerCase();
   if (
     raw === "line" ||
     raw === "pie" ||
     raw === "area" ||
     raw === "waterfall" ||
-    raw === "scatter"
+    raw === "scatter" ||
+    raw === "radar" ||
+    raw === "doughnut"
   ) {
     return raw;
   }
   return "bar";
 }
 
-function columnIndex(
-  input: ChartSemanticInput,
-  encodedName: string | undefined,
-  fallback: number,
-): number {
-  const encoded = encodedName ? input.data.cols.indexOf(encodedName) : -1;
-  if (encoded >= 0) return encoded;
-  return Math.min(Math.max(0, fallback), Math.max(0, input.data.cols.length - 1));
+/** Bar grouping from the chart element. Anything other than stacked or percentStacked is clustered. */
+export function chartGrouping(input: Pick<ChartElement, "grouping">): ChartGrouping {
+  return input.grouping === "stacked" || input.grouping === "percentStacked" ? input.grouping : "clustered";
 }
 
-function finiteNumber(value: unknown): number {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
+/**
+ * Value axis for the series. Stacked bars must cover each category's stacked total (negative
+ * values stack below zero); line series in a combo keep their own values. Percent-stacked bars
+ * read each segment's signed share of the category's absolute total: 0 to 100 percent, or -100 to
+ * 100 percent when a bar holds a negative value, so the scale is 0 to 1 or -1 to 1.
+ */
+function groupedScale(series: CategoricalChartSeries[], grouping: ChartGrouping): ChartScale {
+  if (grouping === "percentStacked") {
+    const negative = series.some((item) => item.kind === "bar" && item.values.some((value) => value < 0));
+    return niceScale(negative ? [-1, 1] : [0, 1], { includeZero: true });
+  }
+  if (grouping === "clustered") {
+    return niceScale(
+      series.flatMap((item) => item.values),
+      { includeZero: true },
+    );
+  }
+  const bars = series.filter((item) => item.kind === "bar");
+  const others = series.filter((item) => item.kind !== "bar");
+  const categoryCount = Math.max(0, ...bars.map((item) => item.values.length));
+  const totals: number[] = [];
+  for (let index = 0; index < categoryCount; index += 1) {
+    const cell = (item: CategoricalChartSeries) => item.values[index] ?? 0;
+    totals.push(
+      bars.reduce((sum, item) => sum + Math.max(0, cell(item)), 0),
+      bars.reduce((sum, item) => sum + Math.min(0, cell(item)), 0),
+    );
+  }
+  return niceScale([...totals, ...others.flatMap((item) => item.values)], { includeZero: true });
 }
 
 function isNumericColumn(input: ChartSemanticInput, index: number): boolean {
   const populated = input.data.rows
     .map((row) => row[index])
     .filter((value) => value != null && String(value).trim() !== "");
-  return (
-    populated.length > 0 &&
-    populated.every((value) => Number.isFinite(Number(value)))
-  );
+  return populated.length > 0 && populated.every((value) => Number.isFinite(Number(value)));
 }
 
-function encodedColumnIndex(
-  input: ChartSemanticInput,
-  encodedName: string | undefined,
-): number {
+function encodedColumnIndex(input: ChartSemanticInput, encodedName: string | undefined): number {
   if (!encodedName) return -1;
   return input.data.cols.indexOf(encodedName);
 }
@@ -138,19 +147,15 @@ function encodedColumnIndex(
  * the category axis and Y as the value axis. This is the shared data contract
  * for the editor and native PPTX writer.
  */
-export function categoricalChartModel(
-  input: ChartSemanticInput,
-): CategoricalChartModel {
-  const rawKind = chartKind(input);
-  const kind =
-    rawKind === "line" || rawKind === "area" || rawKind === "pie"
-      ? rawKind
-      : "bar";
+export function categoricalChartModel(input: ChartSemanticInput): CategoricalChartModel {
+  const kind = categoricalKind(chartKind(input));
+  const grouping: ChartGrouping = kind === "bar" ? chartGrouping(input) : "clustered";
   const first = input.series[0];
   const cols = input.data.cols;
   const rows = input.data.rows;
 
-  if (kind === "pie") {
+  // A doughnut reads its single series exactly like a pie: one value per category.
+  if (kind === "pie" || kind === "doughnut") {
     const declaredCategory =
       encodedColumnIndex(input, first?.encode?.category) >= 0
         ? encodedColumnIndex(input, first?.encode?.category)
@@ -168,13 +173,14 @@ export function categoricalChartModel(
     const values = rows.map((row) => finiteNumber(row[safeValueIndex]));
     return {
       kind,
+      grouping: "clustered",
       orientation: "vertical",
       categories: rows.map((row) => String(row[categoryIndex] ?? "")),
       series: [
         {
           name: first?.name ?? cols[safeValueIndex] ?? "值",
           values,
-          kind: "pie",
+          kind,
           axis: first?.axis ?? "primary",
         },
       ],
@@ -191,9 +197,7 @@ export function categoricalChartModel(
   const fallbackY = cols.findIndex((_, index) => index !== xIndex && isNumericColumn(input, index));
   const yIndex = declaredY >= 0 ? declaredY : fallbackY >= 0 ? fallbackY : Math.min(1, Math.max(0, cols.length - 1));
   const orientation =
-    kind === "bar" && isNumericColumn(input, xIndex) && !isNumericColumn(input, yIndex)
-      ? "horizontal"
-      : "vertical";
+    kind === "bar" && isNumericColumn(input, xIndex) && !isNumericColumn(input, yIndex) ? "horizontal" : "vertical";
   const categoryIndex = orientation === "horizontal" ? yIndex : xIndex;
   const valueKey = orientation === "horizontal" ? "x" : "y";
   const numericCandidates = cols
@@ -212,9 +216,7 @@ export function categoricalChartModel(
       : input.series.map((series, seriesIndex) => {
           const declared = encodedColumnIndex(input, series.encode?.[valueKey]);
           const valueIndex =
-            declared >= 0
-              ? declared
-              : numericCandidates[seriesIndex] ?? numericCandidates[0] ?? yIndex;
+            declared >= 0 ? declared : (numericCandidates[seriesIndex] ?? numericCandidates[0] ?? yIndex);
           return {
             name: series.name ?? cols[valueIndex] ?? `系列${seriesIndex + 1}`,
             valueIndex,
@@ -236,10 +238,10 @@ export function categoricalChartModel(
     kind: definition.kind,
     axis: definition.axis,
   }));
-  const allValues = series.flatMap((item) => item.values);
-  const scale = niceScale(allValues, { includeZero: true });
+  const scale = groupedScale(series, grouping);
   return {
     kind,
+    grouping,
     orientation,
     categories: rows.map((row) => String(row[categoryIndex] ?? "")),
     series,
@@ -248,113 +250,6 @@ export function categoricalChartModel(
   };
 }
 
-function isTruthyTotal(value: unknown): boolean {
-  if (value === true || value === 1) return true;
-  if (typeof value !== "string") return false;
-  return /^(1|true|yes|y|total|subtotal|合计|小计)$/i.test(value.trim());
-}
-
-function nearlyEqual(left: number, right: number): boolean {
-  const scale = Math.max(1, Math.abs(left), Math.abs(right));
-  return Math.abs(left - right) <= scale * 0.000_001;
-}
-
-function looksLikeSubtotal(label: string): boolean {
-  return /净额|净增|净减|小计|subtotal/i.test(label);
-}
-
-/**
- * Build one deterministic waterfall interpretation for both the editor and
- * PPTX writer. First/last rows are totals. Explicit `encode.isTotal` rows are
- * totals. A labelled subtotal whose value equals the preceding signed deltas
- * is displayed from the block base without changing the running balance.
- */
-export function waterfallChartModel(input: ChartSemanticInput): WaterfallChartModel {
-  const series = input.series[0];
-  const categoryIndex = columnIndex(input, series?.encode?.x, 0);
-  const valueIndex = columnIndex(input, series?.encode?.y, categoryIndex === 0 ? 1 : 0);
-  const totalName = series?.encode?.isTotal;
-  const totalIndex = totalName ? input.data.cols.indexOf(totalName) : -1;
-  const rows = input.data.rows;
-  const bars: WaterfallBar[] = [];
-  let running = 0;
-  let blockBase = 0;
-  let blockDelta = 0;
-
-  rows.forEach((row, index) => {
-    const label = String(row[categoryIndex] ?? "");
-    const value = finiteNumber(row[valueIndex]);
-    const first = index === 0;
-    const last = index === rows.length - 1;
-    const explicitTotal = totalIndex >= 0 && isTruthyTotal(row[totalIndex]);
-    const derivedSubtotal =
-      !first &&
-      !last &&
-      looksLikeSubtotal(label) &&
-      nearlyEqual(value, blockDelta);
-
-    if (first) {
-      bars.push({ label, value, start: 0, end: value, kind: "total" });
-      running = value;
-      blockBase = running;
-      blockDelta = 0;
-      return;
-    }
-
-    if (last) {
-      bars.push({ label, value, start: 0, end: value, kind: "total" });
-      running = value;
-      return;
-    }
-
-    if (derivedSubtotal) {
-      bars.push({
-        label,
-        value,
-        start: blockBase,
-        end: blockBase + value,
-        kind: "subtotal",
-      });
-      return;
-    }
-
-    if (explicitTotal) {
-      bars.push({ label, value, start: 0, end: value, kind: "total" });
-      running = value;
-      blockBase = running;
-      blockDelta = 0;
-      return;
-    }
-
-    const start = running;
-    running += value;
-    blockDelta += value;
-    bars.push({
-      label,
-      value,
-      start,
-      end: running,
-      kind: value >= 0 ? "increase" : "decrease",
-    });
-  });
-
-  // A waterfall's readable domain spans the floating deltas plus the total
-  // endpoints — never the totals' internal zero-start anchors. A margin
-  // bridge from 37.5 to 37.8 on a 0-based axis turns its ±1 steps into
-  // unreadable slivers pinned at the top of the plot area. Total columns are
-  // allowed to clip at the axis floor; they stay readable as anchors.
-  const floats = bars
-    .filter((bar) => bar.kind !== "total")
-    .flatMap((bar) => [bar.start, bar.end]);
-  const ends = bars.filter((bar) => bar.kind === "total").map((bar) => bar.end);
-  if (!floats.length && !ends.length) {
-    return { bars, valueMin: 0, valueMax: 1, scale: niceScale([0, 1]) };
-  }
-  const scale = niceScale([...floats, ...ends]);
-  return { bars, valueMin: scale.min, valueMax: scale.max, scale };
-}
-
-/** Build an XY model from `series[0].encode.x/y`, never from column order alone. */
 export function scatterChartModel(input: ChartSemanticInput): ScatterChartModel {
   const series = input.series[0];
   const xIndex = columnIndex(input, series?.encode?.x, 1);
@@ -385,6 +280,76 @@ export function scatterChartModel(input: ChartSemanticInput): ScatterChartModel 
   };
 }
 
+/** `[x, y, w, h]` in slide px, the shape of `el.bounds`. */
+export type ChartSurfaceBounds = readonly [number, number, number, number];
+
+/** What the chart surface rule reads from one element painted under a chart. */
+export type ChartSurfaceCandidate = Readonly<{
+  bounds: ChartSurfaceBounds;
+  /** A plain preset rectangle (pptd-v2 `isPlainRectShape`). Only these can supply a surface. */
+  plainRect?: boolean;
+  hidden?: boolean;
+  /**
+   * The panel's one opaque solid colour from `opaqueSolidHex` (`#RRGGBB` or `#RGB`). Unset for a
+   * picture, a gradient of two or more stops, and a translucent fill.
+   */
+  solidCss?: string;
+}>;
+
+export type ChartSurfaceInput = Readonly<{
+  bounds: ChartSurfaceBounds;
+  /** Elements painted under the chart, in paint order (bottom first). */
+  below: readonly ChartSurfaceCandidate[];
+  /** The chart's own background, as CSS or hex. */
+  chartCss?: string;
+  /** The page surface: the page background, or a full-page plain rectangle. */
+  pageCss?: string;
+}>;
+
+const OPAQUE_SOLID = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+/** The first colour of a CSS paint: a hex, or the channels of `rgb()` / `rgba()`. */
+const FIRST_COLOUR =
+  /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![0-9a-z])|rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i;
+
+/**
+ * The colour a chart's ink reads against (ruling 121, M5-SCR-010), shared by the editor and the
+ * exporter. The chart's own background wins. Otherwise the topmost visible plain rectangle that
+ * covers the chart and whose `solidCss` (the shared `opaqueSolidHex`) is set. Otherwise the page
+ * surface. A custom path, another preset, a picture, a gradient of two or more stops or a
+ * translucent panel never sets the surface.
+ */
+export function chartSurfaceColor(input: ChartSurfaceInput): string {
+  if (input.chartCss) return input.chartCss;
+  const [x, y, w, h] = input.bounds;
+  let surface: string | undefined;
+  for (const panel of input.below) {
+    const [px, py, pw, ph] = panel.bounds;
+    if (panel.hidden || panel.plainRect !== true || !panel.solidCss) continue;
+    if (!OPAQUE_SOLID.test(panel.solidCss.trim())) continue;
+    if (px <= x && py <= y && px + pw >= x + w && py + ph >= y + h) surface = panel.solidCss;
+  }
+  return surface ?? input.pageCss ?? "";
+}
+
+function channelsOf(match: RegExpExecArray): [number, number, number] {
+  const hex = match[1];
+  if (!hex) return [Number(match[2]), Number(match[3]), Number(match[4])];
+  const full = hex.length <= 4 ? [...hex].map((digit) => digit + digit).join("") : hex;
+  return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+}
+
+/**
+ * Whether a surface is dark: YIQ brightness below 140. It reads the first colour of its CSS paint.
+ * A solid surface is its colour. A page or chart background gradient reads its first stop, the
+ * colour the exporter takes for it.
+ */
+export function isDarkChartSurface(css: string): boolean {
+  const match = FIRST_COLOUR.exec(css);
+  if (!match) return false;
+  const [r, g, b] = channelsOf(match);
+  return (r * 299 + g * 587 + b * 114) / 1000 < 140;
+}
+
 /** Greedy deterministic label placement shared by the DOM and PPTX renderers. */
 export function placeScatterLabels(
   points: readonly ScatterLabelPoint[],
@@ -408,9 +373,7 @@ export function placeScatterLabels(
     const vertical = nearTop
       ? [fontSize * 1.9, -fontSize, fontSize * 3.2, -fontSize * 2.3]
       : [-fontSize, fontSize * 1.9, -fontSize * 2.3, fontSize * 3.2];
-    const candidates = horizontal.flatMap((hPos) =>
-      vertical.map((dy) => ({ ...hPos, dy })),
-    );
+    const candidates = horizontal.flatMap((hPos) => vertical.map((dy) => ({ ...hPos, dy })));
     const scored = candidates.map((candidate) => {
       const textX = point.x + candidate.dx;
       const baseline = point.y + candidate.dy;
@@ -422,24 +385,13 @@ export function placeScatterLabels(
         bottom: baseline + fontSize * 0.25,
       };
       const outside =
-        box.left < bounds.left ||
-        box.right > bounds.right ||
-        box.top < bounds.top ||
-        box.bottom > bounds.bottom
+        box.left < bounds.left || box.right > bounds.right || box.top < bounds.top || box.bottom > bounds.bottom
           ? 10_000
           : 0;
       const overlap = occupied.reduce((sum, other) => {
         const inset = fontSize / 3;
-        const width = Math.max(
-          0,
-          Math.min(box.right, other.right + inset) -
-            Math.max(box.left, other.left - inset),
-        );
-        const height = Math.max(
-          0,
-          Math.min(box.bottom, other.bottom + inset) -
-            Math.max(box.top, other.top - inset),
-        );
+        const width = Math.max(0, Math.min(box.right, other.right + inset) - Math.max(box.left, other.left - inset));
+        const height = Math.max(0, Math.min(box.bottom, other.bottom + inset) - Math.max(box.top, other.top - inset));
         return sum + width * height;
       }, 0);
       const pointHits = points.reduce((sum, other) => {

@@ -9,11 +9,13 @@ vi.mock('./editor-sidecar.js', () => ({
 vi.mock('./sidecar-ready.js', () => ({
   waitForEditor: vi.fn(async () => true),
 }))
-vi.mock('@open-slidestudio/dsh-slides-host', () => ({ apply: vi.fn() }))
+vi.mock('@open-slidestudio/dsh-slides-host', () => ({
+  apply: vi.fn(),
+  resolveUserDshHome: vi.fn(() => '/tmp/dsh-home'),
+}))
 vi.mock('./logger.js', () => ({
   logger: { log: vi.fn(), error: vi.fn(), observe: vi.fn(), snapshot: () => ({ app: 'slidestudio-plugin' }) },
 }))
-vi.mock('./slides-preset.js', () => ({ registerSlidesPreset: vi.fn() }))
 vi.mock('./data-directory.js', () => ({ resolveDataDirectory: () => '/tmp/data' }))
 
 import { createEditorSupervisor } from './dsh-slidestudio.js'

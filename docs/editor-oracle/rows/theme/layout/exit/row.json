@@ -1,0 +1,49 @@
+{
+  "id": "theme.layout.exit",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "完成（退出版式编辑）",
+  "description": "Layout banner: 完成 leaves the layout surface and returns the editor to page mode, where the page rail is back.",
+  "kimiUi": {
+    "controlLabel": "完成",
+    "location": "画布顶部版式编辑横幅",
+    "appearsWhen": "on a layout or master surface"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Entered first with 编辑版式 on page 5 (正文)."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["点击横幅「正在编辑版式『正文』· 22 页使用」右侧的「完成」"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "leaving a layout changes the editor surface only; the PPTD document stays unchanged"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "layoutExit"
+  },
+  "test": {
+    "id": "EO-LAYOUT-003",
+    "automated": true,
+    "selfTestChecklist": ["完成 leaves the layout and returns to page mode"]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

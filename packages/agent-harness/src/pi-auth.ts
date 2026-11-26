@@ -81,9 +81,7 @@ function envHasProviderKey(env: NodeJS.ProcessEnv, provider: string): boolean {
  * Explicit env wins. Else Hub /login store (OAuth first). Else a native Pi env key.
  * Do not infer from the host LLM chat URL — that is not Pi.
  */
-export function inferPiProvider(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
+export function inferPiProvider(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const explicit = env.SLIDESTUDIO_PI_PROVIDER?.trim();
   if (explicit) return explicit;
   const stored = listPiStoredAuth(env);
@@ -101,9 +99,7 @@ export function inferPiProvider(
 export function resolvePiAuth(env: NodeJS.ProcessEnv = process.env): PiAuthStatus {
   const stored = listPiStoredAuth(env);
   const provider = inferPiProvider(env);
-  const storedHit = provider
-    ? stored.find((row) => row.providerId === provider)
-    : stored[0];
+  const storedHit = provider ? stored.find((row) => row.providerId === provider) : stored[0];
   if (storedHit) {
     return {
       ready: true,
@@ -150,9 +146,7 @@ export function resolvePiAuthForProvider(
       source: "auth.json",
       provider: stored.providerId,
       note:
-        stored.type === "oauth"
-          ? `Pi /login OAuth (${stored.providerId})`
-          : `Pi /login API key (${stored.providerId})`,
+        stored.type === "oauth" ? `Pi /login OAuth (${stored.providerId})` : `Pi /login API key (${stored.providerId})`,
     };
   }
   if (env.SLIDESTUDIO_PI_ALLOW_ENV === "1" && envHasProviderKey(env, id)) {
@@ -190,9 +184,7 @@ export function productPiAuth(auth: PiAuthStatus): PiAuthStatus {
  * Native GEMINI_* stay only when a developer opts in (`SLIDESTUDIO_PI_ALLOW_ENV=1`).
  * Product generate reads Hub auth.json.
  */
-export function piAuthEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+export function piAuthEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = { ...env };
   delete next.SLIDESTUDIO_LLM_API_KEY;
   if (env.SLIDESTUDIO_PI_ALLOW_ENV !== "1") {
@@ -203,19 +195,13 @@ export function piAuthEnv(
 }
 
 /** Product generate: Hub wrote auth.json. Env is opt-in for developers. */
-export function piProductLoginReady(
-  auth: PiAuthStatus,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function piProductLoginReady(auth: PiAuthStatus, env: NodeJS.ProcessEnv = process.env): boolean {
   if (auth.source === "auth.json" && auth.ready) return true;
   return env.SLIDESTUDIO_PI_ALLOW_ENV === "1" && auth.source === "env" && auth.ready;
 }
 
 /** Product generate must authenticate the selected provider, not merely any provider. */
-export function piProviderLoginReady(
-  providerId: string | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function piProviderLoginReady(providerId: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
   return piProductLoginReady(resolvePiAuthForProvider(providerId, env), env);
 }
 

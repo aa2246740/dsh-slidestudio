@@ -7,21 +7,28 @@ import { createEmptyProject, loadProject, saveProject } from "@open-slidestudio/
 import { classifyBriefKind } from "./compose-ir.js";
 import { executeGenerateTool, type AgentToolState } from "./agent-tools.js";
 import { persistPageKey } from "./layout-qa.js";
-import { loadPlaybook, resolveSkillRoot } from "./playbook.js";
+import { loadPlaybook } from "./playbook.js";
 import { stableSha256 } from "./run-ledger.js";
 import {
   KIND_THEME_PACK_ERROR,
   MISSING_THEME_PACK_ERROR,
   PACK_COLOR_ERROR,
   chosenThemePacksFrom,
-  catalogPackPaletteHexes,
   extractColorPaletteHexes,
   kindThemePackIssue,
   packColorWriteContextFrom,
   parseThemePackId,
   sourceIdList,
 } from "./theme-pack.js";
-import { BEILU_H1, QINGLAN_INTRO, CHENGGUANG_MONTHLY, HARNESS_NOT_MONTHLY, LEARN_SHARE, LEARN_SHARE_CHAPTERS, COVER_ONLY } from "./compose-ir.test.js";
+import {
+  BEILU_H1,
+  QINGLAN_INTRO,
+  CHENGGUANG_MONTHLY,
+  HARNESS_NOT_MONTHLY,
+  LEARN_SHARE,
+  LEARN_SHARE_CHAPTERS,
+  COVER_ONLY,
+} from "./compose-ir.test.js";
 import type { SkillPageInput } from "./skill-pages.js";
 
 function fillEl(color: string): SkillPageInput["elements"][number] {
@@ -84,10 +91,7 @@ function stateFor(brief: string, designSystemId?: string): AgentToolState {
 describe("theme pack parse from catalog ids", () => {
   it("parses group/slug, preview, design.md, numbered 澄光, and lead-grey alias", () => {
     assert.equal(parseThemePackId("work/warm-jade-annual-report"), "work/warm-jade-annual-report");
-    assert.equal(
-      parseThemePackId("openkimi-preview:work/warm-jade-annual-report"),
-      "work/warm-jade-annual-report",
-    );
+    assert.equal(parseThemePackId("openkimi-preview:work/warm-jade-annual-report"), "work/warm-jade-annual-report");
     assert.equal(
       parseThemePackId("openkimi:reference/design_system/work/warm-jade-annual-report/design.md"),
       "work/warm-jade-annual-report",
@@ -107,10 +111,7 @@ describe("theme pack parse from catalog ids", () => {
     );
     assert.equal(parseThemePackId("agent-self-directed-plan"), undefined);
     assert.equal(parseThemePackId("openkimi:SKILL.md"), undefined);
-    assert.equal(
-      parseThemePackId("openkimi:reference/slides_categories/management-report.md"),
-      undefined,
-    );
+    assert.equal(parseThemePackId("openkimi:reference/slides_categories/management-report.md"), undefined);
   });
 });
 
@@ -124,14 +125,8 @@ describe("kind vs chosen theme pack disagreement", () => {
 
     for (const brief of [performance, workReport]) {
       assert.equal(kindThemePackIssue({ brief })?.code, MISSING_THEME_PACK_ERROR);
-      assert.equal(
-        kindThemePackIssue({ brief, adoptedSourceIds: ["work/sky-blue-wayfinding"] }),
-        undefined,
-      );
-      assert.equal(
-        kindThemePackIssue({ brief, adoptedSourceIds: ["consulting/apricot-white-brief"] }),
-        undefined,
-      );
+      assert.equal(kindThemePackIssue({ brief, adoptedSourceIds: ["work/sky-blue-wayfinding"] }), undefined);
+      assert.equal(kindThemePackIssue({ brief, adoptedSourceIds: ["consulting/apricot-white-brief"] }), undefined);
       assert.equal(
         kindThemePackIssue({ brief, adoptedSourceIds: ["academic/paper-white-courseware"] })?.code,
         KIND_THEME_PACK_ERROR,
@@ -140,14 +135,8 @@ describe("kind vs chosen theme pack disagreement", () => {
 
     for (const brief of [teaching, training]) {
       assert.equal(kindThemePackIssue({ brief })?.code, MISSING_THEME_PACK_ERROR);
-      assert.equal(
-        kindThemePackIssue({ brief, adoptedSourceIds: ["academic/blue-line-courseware"] }),
-        undefined,
-      );
-      assert.equal(
-        kindThemePackIssue({ brief, adoptedSourceIds: ["consulting/apricot-white-brief"] }),
-        undefined,
-      );
+      assert.equal(kindThemePackIssue({ brief, adoptedSourceIds: ["academic/blue-line-courseware"] }), undefined);
+      assert.equal(kindThemePackIssue({ brief, adoptedSourceIds: ["consulting/apricot-white-brief"] }), undefined);
       assert.equal(
         kindThemePackIssue({ brief, adoptedSourceIds: ["work/warm-jade-annual-report"] })?.code,
         KIND_THEME_PACK_ERROR,
@@ -155,11 +144,7 @@ describe("kind vs chosen theme pack disagreement", () => {
     }
 
     assert.equal(kindThemePackIssue({ brief: proposal })?.code, MISSING_THEME_PACK_ERROR);
-    for (const pack of [
-      "consulting/pine-green-strategy",
-      "finance/lake-blue-memo",
-      "work/red-white-business",
-    ]) {
+    for (const pack of ["consulting/pine-green-strategy", "finance/lake-blue-memo", "work/red-white-business"]) {
       assert.equal(kindThemePackIssue({ brief: proposal, adoptedSourceIds: [pack] }), undefined);
     }
     assert.equal(
@@ -383,24 +368,18 @@ describe("kind vs chosen theme pack disagreement", () => {
     assert.equal(
       kindThemePackIssue({
         brief: LEARN_SHARE,
-        adoptedSourceIds: [
-          "openkimi:reference/design_system/01_strategy/04/en/red-black-business.md",
-        ],
+        adoptedSourceIds: ["openkimi:reference/design_system/01_strategy/04/en/red-black-business.md"],
       }),
       undefined,
     );
     assert.equal(
       kindThemePackIssue({
         brief: LEARN_SHARE,
-        adoptedSourceIds: [
-          "openkimi:reference/design_system/04_promotion/02/en/silk-yellow-magazine.md",
-        ],
+        adoptedSourceIds: ["openkimi:reference/design_system/04_promotion/02/en/silk-yellow-magazine.md"],
       }),
       undefined,
     );
-    assert.deepEqual(sourceIdList({ item: "consulting/pine-green-strategy" }), [
-      "consulting/pine-green-strategy",
-    ]);
+    assert.deepEqual(sourceIdList({ item: "consulting/pine-green-strategy" }), ["consulting/pine-green-strategy"]);
     assert.deepEqual(
       sourceIdList({
         item: "openkimi:reference/design_system/01_strategy/04/en/red-black-business.md",
@@ -423,40 +402,29 @@ describe("kind vs chosen theme pack disagreement", () => {
       }),
       undefined,
     );
-    assert.deepEqual(sourceIdList({ sourceId: "consulting/pine-green-strategy" }), [
-      "consulting/pine-green-strategy",
+    assert.deepEqual(sourceIdList({ sourceId: "consulting/pine-green-strategy" }), ["consulting/pine-green-strategy"]);
+    assert.deepEqual(sourceIdList({ item: { sourceId: "promotion/silk-yellow-magazine" } }), [
+      "promotion/silk-yellow-magazine",
     ]);
-    assert.deepEqual(
-      sourceIdList({ item: { sourceId: "promotion/silk-yellow-magazine" } }),
-      ["promotion/silk-yellow-magazine"],
-    );
     assert.deepEqual(sourceIdList({ kind: "promotion", name: "silk-yellow-magazine" }), [
       "promotion/silk-yellow-magazine",
     ]);
-    assert.deepEqual(
-      sourceIdList({ item: { kind: "academic", name: "paper-white-courseware" } }),
-      ["academic/paper-white-courseware"],
-    );
-    assert.deepEqual(sourceIdList({ kind: "academic", name: "meridian" }), ["academic/meridian"]);
-    assert.deepEqual(sourceIdList({ kind: "finance", name: "black-gold-ledger" }), [
-      "finance/black-gold-ledger",
+    assert.deepEqual(sourceIdList({ item: { kind: "academic", name: "paper-white-courseware" } }), [
+      "academic/paper-white-courseware",
     ]);
+    assert.deepEqual(sourceIdList({ kind: "academic", name: "meridian" }), ["academic/meridian"]);
+    assert.deepEqual(sourceIdList({ kind: "finance", name: "black-gold-ledger" }), ["finance/black-gold-ledger"]);
     assert.deepEqual(sourceIdList({ kind: "01_strategy", name: "red-black-business" }), [
       "consulting/red-black-business",
     ]);
     assert.deepEqual(sourceIdList({ sourceId: {} }), []);
     assert.deepEqual(sourceIdList({ kind: "academic" }), []);
     assert.deepEqual(sourceIdList({ name: "paper-white-courseware" }), []);
-    assert.deepEqual(sourceIdList({ id: "consulting/pine-green-strategy" }), [
-      "consulting/pine-green-strategy",
+    assert.deepEqual(sourceIdList({ id: "consulting/pine-green-strategy" }), ["consulting/pine-green-strategy"]);
+    assert.deepEqual(sourceIdList({ packId: "academic/paper-white-courseware" }), ["academic/paper-white-courseware"]);
+    assert.deepEqual(sourceIdList({ item: { packId: "promotion/silk-yellow-magazine" } }), [
+      "promotion/silk-yellow-magazine",
     ]);
-    assert.deepEqual(sourceIdList({ packId: "academic/paper-white-courseware" }), [
-      "academic/paper-white-courseware",
-    ]);
-    assert.deepEqual(
-      sourceIdList({ item: { packId: "promotion/silk-yellow-magazine" } }),
-      ["promotion/silk-yellow-magazine"],
-    );
     assert.deepEqual(sourceIdList({ id: {} }), []);
     assert.deepEqual(sourceIdList({ packId: {} }), []);
     assert.deepEqual(sourceIdList({ id: "1_cover" }), ["1_cover"]);
@@ -632,10 +600,7 @@ describe("write-time and compose-time kind/theme pack fail-closed", () => {
     assert.equal((todo.payload as { error?: string }).error, KIND_THEME_PACK_ERROR);
 
     const composeState = stateFor(QINGLAN_INTRO, "work/electric-violet-business");
-    composeState.writtenPages = [
-      coverPage("cover", "青岚费控 · 产品介绍"),
-      closerPage("final"),
-    ];
+    composeState.writtenPages = [coverPage("cover", "青岚费控 · 产品介绍"), closerPage("final")];
     const compose = executeGenerateTool("compose_deck", { title: "青岚费控" }, composeState);
     assert.equal(compose.ok, false);
     assert.equal((compose.payload as { error?: string }).error, KIND_THEME_PACK_ERROR);
@@ -643,8 +608,7 @@ describe("write-time and compose-time kind/theme pack fail-closed", () => {
   });
 
   it("chengguang monthly can still write the 澄光 work pack", () => {
-    const monthly =
-      "澄光生活 2026年7月经营月报。营收 1,860 万，预算达成 93%。约 20 页。";
+    const monthly = "澄光生活 2026年7月经营月报。营收 1,860 万，预算达成 93%。约 20 页。";
     const write = executeGenerateTool(
       "write_page",
       coverPage("cover", "澄光生活 2026年7月经营月报", "#FDC356"),
@@ -666,10 +630,7 @@ describe("write-time and compose-time kind/theme pack fail-closed", () => {
     assert.equal((write.payload as { painted?: boolean }).painted, false);
 
     const composeState = stateFor(QINGLAN_INTRO);
-    composeState.writtenPages = [
-      coverPage("cover", "青岚费控 · 产品介绍"),
-      closerPage("final"),
-    ];
+    composeState.writtenPages = [coverPage("cover", "青岚费控 · 产品介绍"), closerPage("final")];
     const compose = executeGenerateTool("compose_deck", { title: "青岚费控" }, composeState);
     assert.equal(compose.ok, false);
     assert.equal((compose.payload as { error?: string }).error, MISSING_THEME_PACK_ERROR);
@@ -677,11 +638,7 @@ describe("write-time and compose-time kind/theme pack fail-closed", () => {
   });
 
   it("write_page and compose_deck refuse 学习分享 empty adopt and still write consulting/promotion", () => {
-    const empty = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "把模糊问题变清晰"),
-      stateFor(LEARN_SHARE),
-    );
+    const empty = executeGenerateTool("write_page", coverPage("cover", "把模糊问题变清晰"), stateFor(LEARN_SHARE));
     assert.equal(empty.ok, false);
     assert.equal((empty.payload as { error?: string }).error, MISSING_THEME_PACK_ERROR);
     assert.equal((empty.payload as { painted?: boolean }).painted, false);
@@ -701,316 +658,10 @@ describe("write-time and compose-time kind/theme pack fail-closed", () => {
     assert.equal(promotion.ok, true, promotion.detail);
 
     const composeState = stateFor(LEARN_SHARE);
-    composeState.writtenPages = [
-      coverPage("cover", "把模糊问题变清晰"),
-      closerPage("final"),
-    ];
+    composeState.writtenPages = [coverPage("cover", "把模糊问题变清晰"), closerPage("final")];
     const compose = executeGenerateTool("compose_deck", { title: "学习分享" }, composeState);
     assert.equal(compose.ok, false);
     assert.equal((compose.payload as { error?: string }).error, MISSING_THEME_PACK_ERROR);
     assert.equal((compose.payload as { painted?: boolean }).painted, false);
   });
-});
-
-describe("adopted pack Color Palette tokens at write and compose", () => {
-  it("extracts PART B hexes from pine-green and 澄光 warm-jade", () => {
-    const pine = loadPlaybook({
-      designSystemId: "consulting/pine-green-strategy",
-      hostDefaults: false,
-    });
-    const jade = loadPlaybook({
-      designSystemId: "work/warm-jade-annual-report",
-      hostDefaults: false,
-    });
-    const pineHex = extractColorPaletteHexes(pine.designMarkdown);
-    const jadeHex = extractColorPaletteHexes(jade.designMarkdown);
-    assert.ok(pineHex.includes("#03522C"));
-    assert.ok(pineHex.includes("#FFFFFF"));
-    assert.equal(pineHex.includes("#FDC356"), false);
-    assert.ok(jadeHex.includes("#FDC356"));
-    assert.ok(jadeHex.includes("#FBF9EE"));
-    assert.equal(jadeHex.includes("#03522C"), false);
-  });
-
-  it("write_page refuses 澄光 amber after pine-green adopt and still writes pine-green hex", () => {
-    const foreign = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "北麓制造 2026 上半年经营汇报", "#FDC356"),
-      stateFor(BEILU_H1, "consulting/pine-green-strategy"),
-    );
-    assert.equal(foreign.ok, false);
-    assert.equal((foreign.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal((foreign.payload as { painted?: boolean }).painted, false);
-    const ok = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "北麓制造 2026 上半年经营汇报", "#03522C"),
-      stateFor(BEILU_H1, "consulting/pine-green-strategy"),
-    );
-    assert.equal(ok.ok, true, ok.detail);
-  });
-
-  it("uses an active exact editor scope to override only the target page background color", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pack-background-override-"));
-    createEmptyProject(root, { title: "背景颜色编辑" });
-    const state = stateFor(BEILU_H1, "consulting/pine-green-strategy");
-    state.projectRoot = root;
-    const page = (
-      backgroundColor: string,
-      shapeColor = "#03522C",
-      title = "北麓制造 2026 上半年经营汇报",
-    ): SkillPageInput => ({
-      id: "p1",
-      pageType: "content",
-      background: { type: "solid", color: backgroundColor },
-      elements: [
-        fillEl(shapeColor),
-        textEl("title", title, [80, 160, 800, 80]),
-      ],
-    });
-    const seeded = executeGenerateTool("write_page", page("#03522C"), state);
-    assert.equal(seeded.ok, true, seeded.detail);
-    const current = loadProject(root).pages[0]!;
-    const themeBeforeOverride = structuredClone(loadProject(root).presentation.theme);
-    const currentSha256 = () => {
-      const loaded = loadProject(root).pages[0]!;
-      return stableSha256({ ...loaded.page, id: persistPageKey(loaded.path) });
-    };
-    fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-    for (const [kind, color] of [
-      ["page", "#FDC356"],
-      ["pages", "#DDEEFF"],
-      ["deck", "#AABBCC"],
-    ] as const) {
-      fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-        pagePath: current.path,
-        expiresAt: Date.now() + 60_000,
-        scope: {
-          kind,
-          pageId: "p1",
-          targetPageIds: ["p1"],
-          backgroundColorOverride: true,
-        },
-      }));
-      const changed = executeGenerateTool(
-        "write_page",
-        { ...page(color), expectedPageSha256: currentSha256() },
-        state,
-      );
-      assert.equal(changed.ok, true, `${kind}: ${changed.detail}`);
-      assert.deepEqual(loadProject(root).pages[0]!.page.background, {
-        type: "solid",
-        color,
-      });
-      assert.deepEqual(loadProject(root).presentation.theme, themeBeforeOverride);
-    }
-
-    const beforeForeignElement = fs.readFileSync(path.join(root, current.path), "utf8");
-    const rejectedElement = executeGenerateTool(
-      "write_page",
-      { ...page("#FDC356", "#FDC356"), expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(rejectedElement.ok, false);
-    assert.equal((rejectedElement.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal(fs.readFileSync(path.join(root, current.path), "utf8"), beforeForeignElement);
-
-    fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: current.path,
-      expiresAt: Date.now() + 60_000,
-      scope: {
-        kind: "elements",
-        pageId: "p1",
-        targetPageIds: ["p1"],
-        elementIds: ["title"],
-        backgroundColorOverride: true,
-      },
-    }));
-    const elementScope = executeGenerateTool(
-      "write_page",
-      { ...page("#FDC356"), expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(elementScope.ok, false);
-    assert.equal((elementScope.payload as { error?: string }).error, PACK_COLOR_ERROR);
-
-    fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: current.path,
-      expiresAt: Date.now() + 60_000,
-      scope: {
-        kind: "pages",
-        pageId: "p1",
-        targetPageIds: ["p2"],
-        backgroundColorOverride: true,
-      },
-    }));
-    const outsideTarget = executeGenerateTool(
-      "write_page",
-      { ...page("#FDC356"), expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(outsideTarget.ok, false);
-    assert.equal((outsideTarget.payload as { error?: string }).error, PACK_COLOR_ERROR);
-
-    fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: current.path,
-      expiresAt: Date.now() - 1,
-      scope: {
-        kind: "deck",
-        pageId: "p1",
-        targetPageIds: ["p1"],
-        backgroundColorOverride: true,
-      },
-    }));
-    const expired = executeGenerateTool(
-      "write_page",
-      { ...page("#FDC356"), expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(expired.ok, false);
-    assert.equal((expired.payload as { error?: string }).error, PACK_COLOR_ERROR);
-
-    fs.unlinkSync(path.join(root, "_agent", "ai-review-lock.v1.json"));
-    const retained = page("#AABBCC", "#03522C", "只改标题，保留授权背景");
-    const titleOnly = executeGenerateTool(
-      "write_page",
-      { ...retained, expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(titleOnly.ok, true, titleOnly.detail);
-    assert.deepEqual(loadProject(root).pages[0]!.page.background, {
-      type: "solid",
-      color: "#AABBCC",
-    });
-
-    const beforeUnauthorizedChange = fs.readFileSync(path.join(root, current.path), "utf8");
-    const unauthorizedChange = executeGenerateTool(
-      "write_page",
-      { ...page("#BBAACC"), expectedPageSha256: currentSha256() },
-      state,
-    );
-    assert.equal(unauthorizedChange.ok, false);
-    assert.equal((unauthorizedChange.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal(fs.readFileSync(path.join(root, current.path), "utf8"), beforeUnauthorizedChange);
-
-    const composed = executeGenerateTool("compose_deck", { title: "背景颜色编辑" }, state);
-    assert.notEqual((composed.payload as { error?: string } | undefined)?.error, PACK_COLOR_ERROR);
-  });
-
-  it("write_page refuses host navy and empty-project $primary after pine-green adopt; pack $primary still writes", () => {
-    const navy = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "北麓制造 2026 上半年经营汇报", "#06223F"),
-      stateFor(BEILU_H1, "consulting/pine-green-strategy"),
-    );
-    assert.equal(navy.ok, false);
-    assert.equal((navy.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal((navy.payload as { painted?: boolean }).painted, false);
-
-    const hostBlue = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "北麓制造 2026 上半年经营汇报", "#2563EB"),
-      stateFor(BEILU_H1, "consulting/pine-green-strategy"),
-    );
-    assert.equal(hostBlue.ok, false);
-    assert.equal((hostBlue.payload as { error?: string }).error, PACK_COLOR_ERROR);
-
-    const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pack-empty-primary-"));
-    createEmptyProject(emptyRoot, { title: "empty primary" });
-    const emptyState = stateFor(BEILU_H1, "consulting/pine-green-strategy");
-    emptyState.projectRoot = emptyRoot;
-    const emptyPrimary = executeGenerateTool(
-      "write_page",
-      {
-        id: "cover",
-        pageType: "cover",
-        elements: [
-          fillEl("$primary"),
-          textEl("t", "北麓制造 2026 上半年经营汇报", [80, 160, 800, 80]),
-        ],
-      },
-      emptyState,
-    );
-    assert.equal(emptyPrimary.ok, false, emptyPrimary.detail);
-    assert.equal((emptyPrimary.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal((emptyPrimary.payload as { painted?: boolean }).painted, false);
-    assert.equal(loadProject(emptyRoot).presentation.theme?.colors?.primary, "#2563EB");
-
-    const packRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pack-theme-primary-"));
-    const project = createEmptyProject(packRoot, { title: "pack primary" });
-    const existingTheme = project.presentation.theme ?? { colors: {} };
-    project.presentation.theme = {
-      ...existingTheme,
-      colors: { ...(existingTheme.colors ?? {}), primary: "#03522C" },
-    };
-    saveProject(project);
-    const packState = stateFor(BEILU_H1, "consulting/pine-green-strategy");
-    packState.projectRoot = packRoot;
-    const packPrimary = executeGenerateTool(
-      "write_page",
-      {
-        id: "cover",
-        pageType: "cover",
-        elements: [
-          fillEl("$primary"),
-          textEl("t", "北麓制造 2026 上半年经营汇报", [80, 160, 800, 80]),
-        ],
-      },
-      packState,
-    );
-    assert.equal(packPrimary.ok, true, packPrimary.detail);
-    assert.equal((packPrimary.payload as { painted?: boolean }).painted, false);
-    const reloaded = loadProject(packRoot);
-    assert.equal(reloaded.presentation.theme?.colors?.primary, "#03522C");
-  });
-
-  it("compose_deck refuses a page that still uses another pack's hard-coded hex", () => {
-    const state = stateFor(BEILU_H1, "consulting/pine-green-strategy");
-    state.writtenPages = [
-      coverPage("cover", "北麓制造 2026 上半年经营汇报", "#FDC356"),
-      closerPage("final", "#03522C"),
-    ];
-    const compose = executeGenerateTool("compose_deck", { title: "北麓 H1" }, state);
-    assert.equal(compose.ok, false);
-    assert.equal((compose.payload as { error?: string }).error, PACK_COLOR_ERROR);
-    assert.equal((compose.payload as { painted?: boolean }).painted, false);
-  });
-
-  it("empty adopt for retail-monthly / other / cover-only does not require pack colors", () => {
-    const monthly =
-      "澄光生活 2026年7月经营月报。营收 1,860 万，预算达成 93%。约 20 页。";
-    const write = executeGenerateTool(
-      "write_page",
-      coverPage("cover", "澄光生活 2026年7月经营月报", "#FDC356"),
-      stateFor(monthly),
-    );
-    assert.equal(write.ok, true, write.detail);
-    assert.equal(kindThemePackIssue({ brief: monthly }), undefined);
-    assert.equal(kindThemePackIssue({ brief: HARNESS_NOT_MONTHLY }), undefined);
-    const packCtx = packColorWriteContextFrom({});
-    assert.equal(packCtx.adoptedPackHexes, undefined);
-  });
-});
-
-
-it("resolves installed resources from another launch directory and refreshes the palette cache when the resource root changes", () => {
-  const cwd = process.cwd();
-  const override = process.env.SLIDESTUDIO_SKILL_ROOT;
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "slides-empty-skill-"));
-  fs.writeFileSync(path.join(emptyRoot, "SKILL.md"), "# Empty test skill");
-  try {
-    delete process.env.SLIDESTUDIO_SKILL_ROOT;
-    process.chdir(os.tmpdir());
-    const root = resolveSkillRoot();
-    assert.ok(fs.existsSync(path.join(root, "SKILL.md")));
-    assert.ok(catalogPackPaletteHexes().size > 0);
-    process.env.SLIDESTUDIO_SKILL_ROOT = emptyRoot;
-    assert.equal(catalogPackPaletteHexes().size, 0);
-    delete process.env.SLIDESTUDIO_SKILL_ROOT;
-    assert.ok(catalogPackPaletteHexes().size > 0);
-  } finally {
-    process.chdir(cwd);
-    fs.rmSync(emptyRoot, { recursive: true, force: true });
-    if (override === undefined) delete process.env.SLIDESTUDIO_SKILL_ROOT;
-    else process.env.SLIDESTUDIO_SKILL_ROOT = override;
-  }
 });

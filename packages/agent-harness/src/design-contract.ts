@@ -123,10 +123,7 @@ const FORBIDDEN_KEYS = new Set([
   "src",
 ]);
 
-export function commitDesignContract(
-  root: string,
-  input: CommitDesignContractInput,
-): CommittedDesignContract {
+export function commitDesignContract(root: string, input: CommitDesignContractInput): CommittedDesignContract {
   const brief = requireText(input.brief, "brief");
   const categoryId = requireId(input.categoryId, "categoryId");
   const designSystemId = requireDesignId(input.designSystemId);
@@ -188,7 +185,10 @@ export function parseDesignContractDraft(raw: unknown, brief: string): DesignCon
       focalPoint: requireText(slide.focalPoint, `slidePlan[${index}].focalPoint`),
     };
   });
-  assertUnique(slidePlan.map((slide) => slide.pageId), "slide page ids");
+  assertUnique(
+    slidePlan.map((slide) => slide.pageId),
+    "slide page ids",
+  );
   assertLayoutVariety(slidePlan.map((slide) => slide.layoutFamily));
 
   const userOverrides = optionalArray(rec.userOverrides, "userOverrides").map((item, index) => {
@@ -211,10 +211,7 @@ export function parseDesignContractDraft(raw: unknown, brief: string): DesignCon
     necessaryJudgment: {
       removeOrDemote: requireTextArray(necessary.removeOrDemote, "removeOrDemote"),
       mustRemain: requireTextArray(necessary.mustRemain, "mustRemain"),
-      inevitableRelationships: requireTextArray(
-        necessary.inevitableRelationships,
-        "inevitableRelationships",
-      ),
+      inevitableRelationships: requireTextArray(necessary.inevitableRelationships, "inevitableRelationships"),
     },
     tasteDials: {
       visualVariance: requireDial(dials.visualVariance, "visualVariance"),
@@ -257,10 +254,7 @@ export function parseDesignContractDraft(raw: unknown, brief: string): DesignCon
   };
 }
 
-export function assertTodoMatchesDesignContract(
-  contract: CommittedDesignContract,
-  items: readonly unknown[],
-): void {
+export function assertTodoMatchesDesignContract(contract: CommittedDesignContract, items: readonly unknown[]): void {
   if (items.length !== contract.draft.slidePlan.length) {
     throw new DesignContractError(
       `todo has ${items.length} items but design contract plans ${contract.draft.slidePlan.length}`,
@@ -273,9 +267,7 @@ export function assertTodoMatchesDesignContract(
       throw new DesignContractError(`todo[${index}].pageId must be ${planned.pageId}`);
     }
     if (rec.layoutFamily !== planned.layoutFamily) {
-      throw new DesignContractError(
-        `todo[${index}].layoutFamily must be ${planned.layoutFamily}`,
-      );
+      throw new DesignContractError(`todo[${index}].layoutFamily must be ${planned.layoutFamily}`);
     }
     if (requireText(rec.title, `todo[${index}].title`) !== planned.title) {
       throw new DesignContractError(`todo[${index}].title must match the committed slide plan`);
@@ -311,10 +303,7 @@ export function requirePlannedSlide(
  * demanding a redundant echo models cannot reliably produce. A supplied value
  * that disagrees with the plan still fails: that is real drift.
  */
-export function requirePlannedLayoutFamily(
-  contract: CommittedDesignContract,
-  pageId: string,
-): string {
+export function requirePlannedLayoutFamily(contract: CommittedDesignContract, pageId: string): string {
   return requirePlannedSlide(contract, pageId).layoutFamily;
 }
 
@@ -331,7 +320,14 @@ function parseCommittedDesignContract(raw: unknown): CommittedDesignContract {
   const references = parseReferences(requireArray(rec.references, "references"), designSystemId);
   assertNoRenderablePayload(rec.draft);
   const draft = parseDesignContractDraft(rec.draft, reconstructOverrideBrief(rec.draft));
-  const unsigned = { schemaVersion: 1 as const, briefSha256, categoryId, designSystemId, references, draft };
+  const unsigned = {
+    schemaVersion: 1 as const,
+    briefSha256,
+    categoryId,
+    designSystemId,
+    references,
+    draft,
+  };
   const contractSha256 = requireSha(rec.contractSha256, "contractSha256");
   if (stableSha256(unsigned) !== contractSha256) {
     throw new DesignContractError("design contract hash mismatch");
@@ -364,7 +360,10 @@ function parseReferences(raw: readonly unknown[], designSystemId: string): Desig
     };
     return binding;
   });
-  assertUnique(references.map((reference) => reference.role), "reference roles");
+  assertUnique(
+    references.map((reference) => reference.role),
+    "reference roles",
+  );
   if (references.length !== 2) {
     throw new DesignContractError("design contract requires selected-design and selected-preview references");
   }
@@ -425,9 +424,7 @@ function requireText(raw: unknown, label: string): string {
 }
 
 function requireTextArray(raw: unknown, label: string): string[] {
-  const values = requireArray(raw, label).map((item, index) =>
-    requireText(item, `${label}[${index}]`),
-  );
+  const values = requireArray(raw, label).map((item, index) => requireText(item, `${label}[${index}]`));
   if (!values.length) throw new DesignContractError(`${label} must be non-empty`);
   return values;
 }
@@ -485,7 +482,11 @@ function stableValue(raw: unknown): unknown {
   if (Array.isArray(raw)) return raw.map(stableValue);
   if (!raw || typeof raw !== "object") return raw;
   const rec = raw as Record<string, unknown>;
-  return Object.fromEntries(Object.keys(rec).sort().map((key) => [key, stableValue(rec[key])]));
+  return Object.fromEntries(
+    Object.keys(rec)
+      .sort()
+      .map((key) => [key, stableValue(rec[key])]),
+  );
 }
 
 function atomicWrite(file: string, content: string): void {

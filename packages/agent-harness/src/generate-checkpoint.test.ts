@@ -58,7 +58,7 @@ describe("generate recovery checkpoint", () => {
     assert.equal(recovered?.brief, "澄光生活 2026年7月经营月报");
     assert.equal(recovered?.kind, "transient");
     assert.deepEqual(recovered?.messages, []);
-    assert.match(recovered?.reason ?? "", /durable DSH SlideStudio run ledger/);
+    assert.match(recovered?.reason ?? "", /durable Open SlideStudio run ledger/);
   });
 
   it("does not invent recovery for a non-strict or incomplete project", () => {

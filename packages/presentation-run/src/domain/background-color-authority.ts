@@ -15,19 +15,13 @@ export type BackgroundColorWriteAuthorityInput = {
   readonly now?: number;
 };
 
-function activeBackgroundColorOverride(
-  projectRoot: string,
-  pageId: string,
-  now: number,
-): boolean {
+function activeBackgroundColorOverride(projectRoot: string, pageId: string, now: number): boolean {
   try {
     const value = JSON.parse(
       fs.readFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), "utf8"),
     ) as Record<string, unknown>;
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const expiresAt = typeof value.expiresAt === "number"
-      ? value.expiresAt
-      : Date.parse(String(value.expiresAt ?? ""));
+    const expiresAt = typeof value.expiresAt === "number" ? value.expiresAt : Date.parse(String(value.expiresAt ?? ""));
     if (!Number.isFinite(expiresAt) || expiresAt <= now) return false;
     const scope = value.scope;
     if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
@@ -74,11 +68,7 @@ export function backgroundColorWriteAuthority({
       ? { persistedBackgroundColor }
       : {}),
   };
-  if (
-    includeActiveOverride &&
-    projectRoot &&
-    activeBackgroundColorOverride(projectRoot, pageId, now)
-  ) {
+  if (includeActiveOverride && projectRoot && activeBackgroundColorOverride(projectRoot, pageId, now)) {
     return { ...authority, backgroundColorOverride: true };
   }
   return authority;

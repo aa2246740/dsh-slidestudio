@@ -1,0 +1,109 @@
+pageType: content
+background:
+  type: solid
+  color: "#FFFFFF"
+elements:
+  - elementId: h1
+    elementType: text
+    bounds:
+      - 48
+      - 28
+      - 400
+      - 40
+    content:
+      text: 经营数据
+      bold: true
+      fontSize: 28
+      color: $text
+  - elementId: card
+    elementType: shape
+    bounds:
+      - 48
+      - 90
+      - 280
+      - 120
+    shapeName: roundRect
+    fill:
+      type: solid
+      color: "#EFF6FF"
+    border:
+      width: 1
+      color: "#93C5FD"
+  - elementId: kpi
+    elementType: text
+    bounds:
+      - 64
+      - 110
+      - 240
+      - 80
+    content:
+      text: KPI 12.4%
+      bold: true
+      fontSize: 24
+      color: $primary
+  - elementId: divider
+    elementType: line
+    bounds:
+      - 48
+      - 230
+      - 280
+      - 2
+    viewBox:
+      - 280
+      - 2
+    points: M0 1 L280 1
+    border:
+      width: 1
+      color: "#CBD5E1"
+  - elementId: tbl
+    elementType: table
+    bounds:
+      - 360
+      - 90
+      - 540
+      - 160
+    columnWidths:
+      - 0.35
+      - 0.35
+      - 0.3
+    rows:
+      - - text: 区域
+          bold: true
+        - text: 收入
+          bold: true
+        - text: 增速
+          bold: true
+      - - text: 华北
+        - text: "120"
+        - text: 8%
+      - - text: 华东
+        - text: "210"
+        - text: 12%
+  - elementId: chart1
+    elementType: chart
+    bounds:
+      - 48
+      - 280
+      - 860
+      - 220
+    data:
+      cols:
+        - 月
+        - 收入
+      rows:
+        - - 1月
+          - 10
+        - - 2月
+          - 18
+        - - 3月
+          - 15
+        - - 4月
+          - 22
+    series:
+      - type: bar
+        name: 收入
+        encode:
+          x: 月
+          y: 收入
+    title: 月度收入
+    legend: true

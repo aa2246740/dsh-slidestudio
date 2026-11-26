@@ -40,6 +40,61 @@ rows:
     status: verified
     testId: EO-HUB-002
     surface: chrome.global
+  - id: chrome.createhub.attach.open
+    path: rows/chrome/createhub/attach/open
+    status: verified
+    testId: EO-HUB-ATT-001
+    surface: chrome.global
+  - id: chrome.createhub.attach.close
+    path: rows/chrome/createhub/attach/close
+    status: verified
+    testId: EO-HUB-ATT-002
+    surface: chrome.global
+  - id: chrome.createhub.attach.pick.files
+    path: rows/chrome/createhub/attach/pick/files
+    status: verified
+    testId: EO-HUB-ATT-003
+    surface: chrome.global
+  - id: chrome.createhub.attach.demo
+    path: rows/chrome/createhub/attach/demo
+    status: verified
+    testId: EO-HUB-ATT-004
+    surface: chrome.global
+  - id: chrome.createhub.attach.drop
+    path: rows/chrome/createhub/attach/drop
+    status: verified
+    testId: EO-HUB-ATT-005
+    surface: chrome.global
+  - id: chrome.createhub.attach.chip.expand
+    path: rows/chrome/createhub/attach/chip/expand
+    status: verified
+    testId: EO-HUB-ATT-006
+    surface: chrome.global
+  - id: chrome.createhub.attach.chip.retry
+    path: rows/chrome/createhub/attach/chip/retry
+    status: verified
+    testId: EO-HUB-ATT-007
+    surface: chrome.global
+  - id: chrome.createhub.attach.chip.remove
+    path: rows/chrome/createhub/attach/chip/remove
+    status: verified
+    testId: EO-HUB-ATT-008
+    surface: chrome.global
+  - id: chrome.createhub.attach.close.cancel
+    path: rows/chrome/createhub/attach/close/cancel
+    status: verified
+    testId: EO-HUB-ATT-009
+    surface: chrome.global
+  - id: chrome.createhub.attach.close.confirm
+    path: rows/chrome/createhub/attach/close/confirm
+    status: verified
+    testId: EO-HUB-ATT-010
+    surface: chrome.global
+  - id: chrome.createhub.attach.vision.models
+    path: rows/chrome/createhub/attach/vision/models
+    status: verified
+    testId: EO-HUB-ATT-011
+    surface: chrome.global
   - id: chrome.neodeck.connect
     path: rows/chrome/neodeck/connect
     status: wont-port
@@ -320,6 +375,46 @@ rows:
     status: verified
     testId: EO-THEME-BACKGROUND-SET
     surface: theme.background
+  - id: theme.layout.apply
+    path: rows/theme/layout/apply
+    status: verified
+    testId: EO-LAYOUT-001
+    surface: theme.layout
+  - id: theme.layout.enter
+    path: rows/theme/layout/enter
+    status: verified
+    testId: EO-LAYOUT-002
+    surface: theme.layout
+  - id: theme.layout.exit
+    path: rows/theme/layout/exit
+    status: verified
+    testId: EO-LAYOUT-003
+    surface: theme.layout
+  - id: theme.layout.select
+    path: rows/theme/layout/select
+    status: verified
+    testId: EO-LAYOUT-004
+    surface: theme.layout
+  - id: theme.layout.create
+    path: rows/theme/layout/create
+    status: verified
+    testId: EO-LAYOUT-005
+    surface: theme.layout
+  - id: theme.layout.rename
+    path: rows/theme/layout/rename
+    status: verified
+    testId: EO-LAYOUT-006
+    surface: theme.layout
+  - id: theme.layout.delete
+    path: rows/theme/layout/delete
+    status: verified
+    testId: EO-LAYOUT-007
+    surface: theme.layout
+  - id: insert.pagenumber
+    path: rows/insert/pagenumber
+    status: verified
+    testId: EO-PAGENUMBER-001
+    surface: theme.layout
   - id: notes.content.set
     path: rows/notes/content/set
     status: verified
@@ -621,4 +716,29 @@ rows:
     path: rows/chrome/workspace/assistant/question
     status: verified
     testId: EO-ASSISTANT-005
+    surface: chrome.global
+  - id: chrome.workspace.assistant.attach.open
+    path: rows/chrome/workspace/assistant/attach/open
+    status: verified
+    testId: EO-ASSISTANT-ATT-001
+    surface: chrome.global
+  - id: chrome.workspace.assistant.attach.chip.expand
+    path: rows/chrome/workspace/assistant/attach/chip/expand
+    status: verified
+    testId: EO-ASSISTANT-ATT-002
+    surface: chrome.global
+  - id: chrome.workspace.assistant.attach.chip.retry
+    path: rows/chrome/workspace/assistant/attach/chip/retry
+    status: verified
+    testId: EO-ASSISTANT-ATT-003
+    surface: chrome.global
+  - id: chrome.workspace.assistant.attach.chip.remove
+    path: rows/chrome/workspace/assistant/attach/chip/remove
+    status: verified
+    testId: EO-ASSISTANT-ATT-004
+    surface: chrome.global
+  - id: chrome.workspace.assistant.attach.vision.models
+    path: rows/chrome/workspace/assistant/attach/vision/models
+    status: verified
+    testId: EO-ASSISTANT-ATT-005
     surface: chrome.global

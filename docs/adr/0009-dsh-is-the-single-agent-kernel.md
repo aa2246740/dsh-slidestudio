@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-26
 supersedes: 0004-pi-is-the-single-agent-kernel
+superseded-by: 0012-slides-runtime-core-agent-loop
 ---
+
+> Superseded by [ADR-0012](0012-slides-runtime-core-agent-loop.md): the single-loop rule stays, but the loop is now the host-neutral `@open-slidestudio/slides-runtime`; DSH becomes a thin service channel in Phase 3B. Kept as the DSH-kernel record.
 
 # DSH is the single production Agent Kernel
 

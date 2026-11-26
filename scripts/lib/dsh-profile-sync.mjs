@@ -32,6 +32,8 @@ const BUILD_PACKAGES = [
   "project-store",
   "exporter-native",
   "presentation-run",
+  "slides-tools",
+  "slides-runtime",
   "dsh-slides-host",
   "dsh-slides-client",
   "dsh-slides-bundle",
@@ -99,13 +101,23 @@ export function profilePackageMetadataStale(root, home, packages = BUILD_PACKAGE
   }
   for (const [srcRel, installedName] of VENDOR_PROFILE_PACKAGES) {
     const workspace = path.join(root, srcRel, "package.json");
-    const profile = path.join(
-      home, "profiles", "slides", "node_modules", ...installedName.split("/"), "package.json",
-    );
+    const profile = path.join(home, "profiles", "slides", "node_modules", ...installedName.split("/"), "package.json");
     if (!fs.existsSync(workspace) || !fs.existsSync(profile)) return true;
     if (hashFile(workspace) !== hashFile(profile)) return true;
   }
   return false;
+}
+
+function profileThemeGateStale(home) {
+  const themeJs = workspaceToProfile(home, "packages/pptd-v2/dist/theme.js");
+  const officialColorJs = workspaceToProfile(home, "packages/pptd-v2/dist/official-color.js");
+  if (!fs.existsSync(themeJs)) return true;
+  const themeBody = fs.readFileSync(themeJs, "utf8");
+  const colorBody = fs.existsSync(officialColorJs) ? fs.readFileSync(officialColorJs, "utf8") : themeBody;
+  if (!themeBody.includes("elementFillPaint")) return true;
+  if (/if\s*\(\s*!v\.startsWith\(\s*["']#["']\s*\)\s*\)\s*return fallback/.test(colorBody)) return true;
+  if (!themeBody.includes("officialPptdColorKind") || !themeBody.includes("InvalidPptdColorError")) return true;
+  return !/kind === ["']theme["']/.test(colorBody);
 }
 
 export function profileGateFilesStale(root, home) {
@@ -118,7 +130,12 @@ export function profileGateFilesStale(root, home) {
   }
   const qa = workspaceToProfile(home, "packages/presentation-run/dist/domain/layout-qa.js");
   const body = fs.readFileSync(qa, "utf8");
-  if (!body.includes("pageHasVisibleContent") || !body.includes("isWritePageCloser") || !body.includes("composedPageLeftoverIssues")) return true;
+  if (
+    !body.includes("pageHasVisibleContent") ||
+    !body.includes("isWritePageCloser") ||
+    !body.includes("composedPageLeftoverIssues")
+  )
+    return true;
   const parseJs = workspaceToProfile(home, "packages/pptd-v2/dist/parse.js");
   const parseBody = fs.readFileSync(parseJs, "utf8");
   if (/pages:\s*\[\s*["']pages\/1_cover\.page["']/.test(parseBody)) return true;
@@ -127,13 +144,7 @@ export function profileGateFilesStale(root, home) {
   const exportBody = fs.readFileSync(exportJs, "utf8");
   if (/if\s*\(\s*!fill\s*\)\s*return\s*\{\s*color:\s*["']FFFFFF["']\s*\}/.test(exportBody)) return true;
   if (!exportBody.includes("elementFillPaint")) return true;
-  const themeJs = workspaceToProfile(home, "packages/pptd-v2/dist/theme.js");
-  if (!fs.existsSync(themeJs)) return true;
-  const themeBody = fs.readFileSync(themeJs, "utf8");
-  if (!themeBody.includes("elementFillPaint")) return true;
-  if (/if\s*\(\s*!v\.startsWith\(\s*["']#["']\s*\)\s*\)\s*return fallback/.test(themeBody)) return true;
-  if (!themeBody.includes("officialPptdColorKind") || !themeBody.includes("InvalidPptdColorError")) return true;
-  if (!/kind === ["']theme["']/.test(themeBody)) return true;
+  if (profileThemeGateStale(home)) return true;
   if (/hex\(\s*st\.color\b/.test(exportBody)) return true;
   if (!exportBody.includes("colorHex")) return true;
   return false;

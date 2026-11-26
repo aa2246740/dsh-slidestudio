@@ -1,0 +1,100 @@
+import { canonicalShapeName } from "@open-slidestudio/pptd-v2";
+
+/**
+ * Catalogue preset name to DrawingML `prst`, where the names differ or need an
+ * explicit mapping. Shapes and picture clips resolve through `presetPrst`, so a
+ * preset exports the same geometry in both places.
+ */
+export const PPTX_PRESET_NAMES: Readonly<Record<string, string>> = {
+  rect: "rect",
+  roundRect: "roundRect",
+  ellipse: "ellipse",
+  triangle: "triangle",
+  rtTriangle: "rtTriangle",
+  diamond: "diamond",
+  parallelogram: "parallelogram",
+  trapezoid: "trapezoid",
+  pentagon: "pentagon",
+  hexagon: "hexagon",
+  heptagon: "heptagon",
+  octagon: "octagon",
+  plus: "plus",
+  chevron: "chevron",
+  rightArrow: "rightArrow",
+  leftArrow: "leftArrow",
+  upArrow: "upArrow",
+  downArrow: "downArrow",
+  bentArrow: "bentArrow",
+  homePlate: "homePlate",
+  pie: "pie",
+  donut: "donut",
+  can: "can",
+  cube: "cube",
+  bevel: "bevel",
+  folderCorner: "folderCorner",
+  heart: "heart",
+  lightningBolt: "lightningBolt",
+  sun: "sun",
+  moon: "moon",
+  smileyFace: "smileyFace",
+  cloud: "cloud",
+  arc: "arc",
+  teardrop: "teardrop",
+  frame: "frame",
+  halfFrame: "halfFrame",
+  corner: "corner",
+  diagStripe: "diagStripe",
+  chord: "chord",
+  star4: "star4",
+  star5: "star5",
+  star6: "star6",
+  star7: "star7",
+  star8: "star8",
+  star10: "star10",
+  star12: "star12",
+  star16: "star16",
+  star24: "star24",
+  star32: "star32",
+  ribbon: "ribbon",
+  ribbon2: "ribbon2",
+  ellipseRibbon: "ellipseRibbon",
+  ellipseRibbon2: "ellipseRibbon2",
+  verticalScroll: "verticalScroll",
+  horizontalScroll: "horizontalScroll",
+  wave: "wave",
+  doubleWave: "doubleWave",
+  leftRightArrow: "leftRightArrow",
+  upDownArrow: "upDownArrow",
+  quadArrow: "quadArrow",
+  leftRightUpArrow: "leftRightUpArrow",
+  bentUpArrow: "bentUpArrow",
+  leftUpArrow: "leftUpArrow",
+  circularArrow: "circularArrow",
+  notchedRightArrow: "notchedRightArrow",
+  stripedRightArrow: "stripedRightArrow",
+  callout1: "wedgeRectCallout",
+  callout2: "wedgeRectCallout",
+  wedgeRectCallout: "wedgeRectCallout",
+  wedgeRoundRectCallout: "wedgeRoundRectCallout",
+  wedgeEllipseCallout: "wedgeEllipseCallout",
+  cloudCallout: "cloudCallout",
+  borderCallout1: "borderCallout1",
+  borderCallout2: "borderCallout2",
+  accentCallout1: "accentCallout1",
+  accentBorderCallout1: "accentBorderCallout1",
+  actionButtonBlank: "actionButtonBlank",
+  flowChartProcess: "flowChartProcess",
+  flowChartDecision: "flowChartDecision",
+  flowChartTerminator: "flowChartTerminator",
+  flowChartDocument: "flowChartDocument",
+};
+
+/**
+ * The DrawingML preset for a catalogue name (aliases resolved), or undefined when
+ * neither the explicit table nor pptxgenjs knows it. `nativeShapeTypes` is pptxgenjs's
+ * own `ShapeType` map, which covers the catalogue names the table does not list.
+ */
+export function presetPrst(name: string, nativeShapeTypes: Readonly<Record<string, string>>): string | undefined {
+  const canonical = canonicalShapeName(name);
+  return PPTX_PRESET_NAMES[canonical] ?? nativeShapeTypes[canonical];
+}

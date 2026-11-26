@@ -1,0 +1,49 @@
+{
+  "id": "theme.layout.delete",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "删除版式",
+  "description": "Rail tools for the layout being edited: 删除版式 deletes an unused layout at once. A layout that pages still use asks first, and the confirmation says how many pages lose the layout's content. Page-owned content is kept.",
+  "kimiUi": {
+    "controlLabel": "删除版式",
+    "location": "左侧「母版与版式」列表，当前版式下方",
+    "appearsWhen": "on a layout surface (not the master)"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "The committed layouts-project layout 正文 is in use (22 pages), so this row exercises the confirmation. An unused layout deletes at once."
+  },
+  "action": {
+    "type": "dialog",
+    "steps": ["点击「删除版式」", "版式仍有页面使用时，在确认框点击「删除」；未使用时直接删除"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "layoutDelete removes the layout definition; pages lose only the inherited copies"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": true,
+    "commandHint": "layoutDelete"
+  },
+  "test": {
+    "id": "EO-LAYOUT-007",
+    "automated": true,
+    "selfTestChecklist": ["deleting an unused layout is immediate; a layout in use asks first"]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

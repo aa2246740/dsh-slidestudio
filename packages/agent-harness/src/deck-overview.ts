@@ -23,10 +23,12 @@ export type DeckOverviewResult = Readonly<{
   rendererVersion: typeof DECK_OVERVIEW_RENDERER_VERSION;
 }>;
 
-export type DeckOverviewRenderer = (input: Readonly<{
-  html: string;
-  selector: "#deck-overview";
-}>) => Promise<Readonly<{ bytes: Buffer; width: number; height: number }>>;
+export type DeckOverviewRenderer = (
+  input: Readonly<{
+    html: string;
+    selector: "#deck-overview";
+  }>,
+) => Promise<Readonly<{ bytes: Buffer; width: number; height: number }>>;
 
 export type RenderDeckOverviewInput = Readonly<{
   projectRoot: string;
@@ -36,9 +38,7 @@ export type RenderDeckOverviewInput = Readonly<{
   pinnedRuntimePath?: string;
 }>;
 
-export async function renderDeckOverview(
-  input: RenderDeckOverviewInput,
-): Promise<DeckOverviewResult> {
+export async function renderDeckOverview(input: RenderDeckOverviewInput): Promise<DeckOverviewResult> {
   if (!/^[a-f0-9]{64}$/.test(input.deckSnapshotSha256)) {
     throw new Error("deck overview requires a valid snapshot hash");
   }
@@ -72,8 +72,7 @@ export async function renderDeckOverview(
     };
   }
   const html = overviewHtml(pages);
-  const renderer =
-    input.renderer ?? createPinnedRenderer(input.pinnedRuntimePath ?? pinnedPlaywrightRuntimePath());
+  const renderer = input.renderer ?? createPinnedRenderer(input.pinnedRuntimePath ?? pinnedPlaywrightRuntimePath());
   const shot = await renderer({ html, selector: "#deck-overview" });
   assertPng(shot.bytes, "deck overview");
   if (!Number.isFinite(shot.width) || !Number.isFinite(shot.height) || shot.width < 640 || shot.height < 240) {
@@ -132,9 +131,7 @@ function readPage(projectRoot: string, page: DeckOverviewPage, index: number) {
   return { ...page, bytes };
 }
 
-function overviewHtml(
-  pages: readonly (DeckOverviewPage & Readonly<{ bytes: Buffer }>)[],
-): string {
+function overviewHtml(pages: readonly (DeckOverviewPage & Readonly<{ bytes: Buffer }>)[]): string {
   const cards = pages
     .map(
       (page, index) => `
@@ -162,10 +159,7 @@ function createPinnedRenderer(runtimeFile: string): DeckOverviewRenderer {
       verifyPinnedRuntime?: () => unknown;
       launchPinnedChromium?: (opts?: { headless?: boolean }) => Promise<unknown>;
     };
-    if (
-      typeof runtime.verifyPinnedRuntime !== "function" ||
-      typeof runtime.launchPinnedChromium !== "function"
-    ) {
+    if (typeof runtime.verifyPinnedRuntime !== "function" || typeof runtime.launchPinnedChromium !== "function") {
       throw new Error(`Pinned Playwright runtime API mismatch: ${runtimeFile}`);
     }
     runtime.verifyPinnedRuntime();
@@ -219,13 +213,7 @@ type OverviewPage = {
 };
 
 function assertPng(bytes: Buffer, label: string): void {
-  if (
-    bytes.length < 64 ||
-    bytes[0] !== 0x89 ||
-    bytes[1] !== 0x50 ||
-    bytes[2] !== 0x4e ||
-    bytes[3] !== 0x47
-  ) {
+  if (bytes.length < 64 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
     throw new Error(`${label} is not a complete PNG`);
   }
 }

@@ -415,9 +415,7 @@ function parseRequirements(raw: unknown): ReferenceRequirement[] {
   });
 }
 
-function parseTasteGate(
-  raw: unknown,
-): RunLedgerV1["sourcePack"]["tasteGate"] | undefined {
+function parseTasteGate(raw: unknown): RunLedgerV1["sourcePack"]["tasteGate"] | undefined {
   if (raw === undefined) return undefined;
   const rec = asRecord(raw);
   if (!rec || rec.version !== TASTE_EXECUTION_GATE_VERSION) {
@@ -592,10 +590,7 @@ export function ensureRunLedgerExecutionPolicy(
   });
 }
 
-export function ensureRunLedger(
-  root: string,
-  sourcePack: RunLedgerV1["sourcePack"],
-): RunLedgerV1 {
+export function ensureRunLedger(root: string, sourcePack: RunLedgerV1["sourcePack"]): RunLedgerV1 {
   const existing = readRunLedger(root);
   if (existing) {
     const merged = mergeCompatibleSourcePack(existing, sourcePack);
@@ -648,7 +643,9 @@ export function recordReferenceChunk(
   });
 }
 
-function requireTasteGate(ledger: RunLedgerV1): NonNullable<RunLedgerV1["sourcePack"]["tasteGate"]> {
+function requireTasteGate(
+  ledger: RunLedgerV1,
+): NonNullable<RunLedgerV1["sourcePack"]["tasteGate"]> {
   const gate = ledger.sourcePack.tasteGate;
   if (!gate) throw new Error("taste execution gate is not enabled for this run");
   return gate;
@@ -698,12 +695,14 @@ export function recordDesignReferenceEmitted(
 ): DesignReferenceEmittedFact {
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
-  const prepared = [...ledger.facts].reverse().find(
-    (fact): fact is DesignReferencePreparedFact =>
-      fact.type === "design.reference-image-prepared" &&
-      fact.deliveryToken === deliveryToken &&
-      fact.contextEpochId === context.contextEpochId,
-  );
+  const prepared = [...ledger.facts]
+    .reverse()
+    .find(
+      (fact): fact is DesignReferencePreparedFact =>
+        fact.type === "design.reference-image-prepared" &&
+        fact.deliveryToken === deliveryToken &&
+        fact.contextEpochId === context.contextEpochId,
+    );
   if (!prepared) throw new Error("design reference token is not prepared for this Pi context");
   const payload = {
     contextEpochId: context.contextEpochId,
@@ -773,11 +772,7 @@ export function recordDesignContractReturned(
   return fact;
 }
 
-export function recordTodo(
-  root: string,
-  context: RunToolContext,
-  items: readonly unknown[],
-): void {
+export function recordTodo(root: string, context: RunToolContext, items: readonly unknown[]): void {
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
   const contract = ledger.sourcePack.tasteGate ? readDesignContract(root) : undefined;
@@ -792,10 +787,12 @@ export function recordTodo(
         };
       })
     : undefined;
-  const pageIds = items.map((item) => {
-    const rec = asRecord(item);
-    return typeof rec?.pageId === "string" ? rec.pageId.trim() : "";
-  }).filter((pageId) => pageId.length > 0);
+  const pageIds = items
+    .map((item) => {
+      const rec = asRecord(item);
+      return typeof rec?.pageId === "string" ? rec.pageId.trim() : "";
+    })
+    .filter((pageId) => pageId.length > 0);
   const payload = {
     contextEpochId: context.contextEpochId,
     todoSha256: stableSha256(items),
@@ -934,26 +931,26 @@ function classifyPageRewrite(root: string, pageId: string): PageRewriteLifecycle
     return { state: "visual-revise", revision: current.revision };
   }
 
-  const deckReview = [...ledger.facts]
-    .reverse()
-    .find((fact): fact is DeckTasteReviewFact => {
-      if (fact.type !== "deck.taste-review-recorded" || fact.verdict !== "revise") return false;
-      if (!fact.revisionActions.some((action) => action.pageId === current.pageId)) return false;
-      const overview = [...ledger.facts].reverse().find(
+  const deckReview = [...ledger.facts].reverse().find((fact): fact is DeckTasteReviewFact => {
+    if (fact.type !== "deck.taste-review-recorded" || fact.verdict !== "revise") return false;
+    if (!fact.revisionActions.some((action) => action.pageId === current.pageId)) return false;
+    const overview = [...ledger.facts]
+      .reverse()
+      .find(
         (candidate): candidate is DeckOverviewPreparedFact =>
           candidate.type === "deck.overview-prepared" &&
           candidate.deckSnapshotSha256 === fact.deckSnapshotSha256,
       );
-      return Boolean(
-        overview?.pageSnapshot.some(
-          (page) =>
-            page.pageId === current.pageId &&
-            page.revision === current.revision &&
-            page.pageSha256 === current.pageSha256 &&
-            page.rasterSha256 === raster.rasterSha256,
-        ),
-      );
-    });
+    return Boolean(
+      overview?.pageSnapshot.some(
+        (page) =>
+          page.pageId === current.pageId &&
+          page.revision === current.revision &&
+          page.pageSha256 === current.pageSha256 &&
+          page.rasterSha256 === raster.rasterSha256,
+      ),
+    );
+  });
   if (deckReview) {
     return { state: "deck-taste-revise", revision: current.revision };
   }
@@ -1179,9 +1176,7 @@ export function recordVisualReview(
     );
   if (!raster) throw new Error("page review has no matching raster evidence");
   if (input.verdict === "pass" && raster.layoutStatus !== "pass") {
-    const issues = raster.layoutIssues
-      .map((issue) => `${issue.code}: ${issue.detail}`)
-      .join("; ");
+    const issues = raster.layoutIssues.map((issue) => `${issue.code}: ${issue.detail}`).join("; ");
     throw new Error(
       `review_page cannot pass while rendered layout is ${raster.layoutStatus}: ${issues || "no trustworthy layout result"}. ` +
         "Record verdict=revise with these issues, rewrite the page, render it again, and review the new revision.",
@@ -1250,12 +1245,14 @@ function currentContractReceipt(
   contextEpochId: string,
   contractSha256: string,
 ): DesignContractCommittedFact | DesignContractReturnedFact | undefined {
-  return [...ledger.facts].reverse().find(
-    (fact): fact is DesignContractCommittedFact | DesignContractReturnedFact =>
-      (fact.type === "design.contract-committed" || fact.type === "design.contract-returned") &&
-      fact.contextEpochId === contextEpochId &&
-      fact.contractSha256 === contractSha256,
-  );
+  return [...ledger.facts]
+    .reverse()
+    .find(
+      (fact): fact is DesignContractCommittedFact | DesignContractReturnedFact =>
+        (fact.type === "design.contract-committed" || fact.type === "design.contract-returned") &&
+        fact.contextEpochId === contextEpochId &&
+        fact.contractSha256 === contractSha256,
+    );
 }
 
 function deriveCurrentDeckSnapshot(
@@ -1270,12 +1267,14 @@ function deriveCurrentDeckSnapshot(
   if (!currentContractReceipt(ledger, contextEpochId, contract.contractSha256)) {
     blockers.push("design contract not returned in this Pi context");
   }
-  const todo = [...ledger.facts].reverse().find(
-    (fact): fact is TodoFact =>
-      fact.type === "todo.committed" &&
-      fact.contractSha256 === contract.contractSha256 &&
-      Array.isArray(fact.pagePlan),
-  );
+  const todo = [...ledger.facts]
+    .reverse()
+    .find(
+      (fact): fact is TodoFact =>
+        fact.type === "todo.committed" &&
+        fact.contractSha256 === contract.contractSha256 &&
+        Array.isArray(fact.pagePlan),
+    );
   if (!todo?.pagePlan) return { blockers: [...blockers, "contract-bound write_todo missing"] };
   const pagesById = latestPageFacts(ledger);
   const pageSnapshot: DeckSnapshotPage[] = [];
@@ -1285,42 +1284,48 @@ function deriveCurrentDeckSnapshot(
       blockers.push(`${planned.pageId}: current page revision missing`);
       continue;
     }
-    const raster = [...ledger.facts].reverse().find(
-      (fact): fact is RasterFact =>
-        fact.type === "page.raster-committed" &&
-        fact.pageId === page.pageId &&
-        fact.revision === page.revision &&
-        fact.pageSha256 === page.pageSha256 &&
-        fact.layoutGateVersion === RENDERED_LAYOUT_GATE_VERSION &&
-        fact.layoutStatus === "pass",
-    );
+    const raster = [...ledger.facts]
+      .reverse()
+      .find(
+        (fact): fact is RasterFact =>
+          fact.type === "page.raster-committed" &&
+          fact.pageId === page.pageId &&
+          fact.revision === page.revision &&
+          fact.pageSha256 === page.pageSha256 &&
+          fact.layoutGateVersion === RENDERED_LAYOUT_GATE_VERSION &&
+          fact.layoutStatus === "pass",
+      );
     if (!raster) {
       blockers.push(`${planned.pageId}: passing current raster missing`);
       continue;
     }
-    const emitted = [...ledger.facts].reverse().find(
-      (fact): fact is ImageEmittedFact =>
-        fact.type === "page.image-content-emitted" &&
-        fact.contextEpochId === contextEpochId &&
-        fact.pageId === page.pageId &&
-        fact.revision === page.revision &&
-        fact.pageSha256 === page.pageSha256 &&
-        fact.rasterSha256 === raster.rasterSha256,
-    );
+    const emitted = [...ledger.facts]
+      .reverse()
+      .find(
+        (fact): fact is ImageEmittedFact =>
+          fact.type === "page.image-content-emitted" &&
+          fact.contextEpochId === contextEpochId &&
+          fact.pageId === page.pageId &&
+          fact.revision === page.revision &&
+          fact.pageSha256 === page.pageSha256 &&
+          fact.rasterSha256 === raster.rasterSha256,
+      );
     if (!emitted) {
       blockers.push(`${planned.pageId}: image content not emitted in this Pi context`);
       continue;
     }
-    const review = [...ledger.facts].reverse().find(
-      (fact): fact is VisualReviewFact =>
-        fact.type === "page.visual-review-recorded" &&
-        fact.contextEpochId === contextEpochId &&
-        fact.pageId === page.pageId &&
-        fact.revision === page.revision &&
-        fact.pageSha256 === page.pageSha256 &&
-        fact.rasterSha256 === raster.rasterSha256 &&
-        fact.verdict === "pass",
-    );
+    const review = [...ledger.facts]
+      .reverse()
+      .find(
+        (fact): fact is VisualReviewFact =>
+          fact.type === "page.visual-review-recorded" &&
+          fact.contextEpochId === contextEpochId &&
+          fact.pageId === page.pageId &&
+          fact.revision === page.revision &&
+          fact.pageSha256 === page.pageSha256 &&
+          fact.rasterSha256 === raster.rasterSha256 &&
+          fact.verdict === "pass",
+      );
     if (!review) {
       blockers.push(`${planned.pageId}: passing visual review missing in this Pi context`);
       continue;
@@ -1335,13 +1340,15 @@ function deriveCurrentDeckSnapshot(
     });
   }
   const revisions = currentRevisionSnapshot(ledger);
-  const structural = [...ledger.facts].reverse().find(
-    (fact): fact is StructuralReviewFact =>
-      fact.type === "deck.structural-review-recorded" &&
-      fact.reviewGateVersion === STRUCTURAL_REVIEW_GATE_VERSION &&
-      fact.ok &&
-      sameRevisionSnapshot(fact.pageRevisions, revisions),
-  );
+  const structural = [...ledger.facts]
+    .reverse()
+    .find(
+      (fact): fact is StructuralReviewFact =>
+        fact.type === "deck.structural-review-recorded" &&
+        fact.reviewGateVersion === STRUCTURAL_REVIEW_GATE_VERSION &&
+        fact.ok &&
+        sameRevisionSnapshot(fact.pageRevisions, revisions),
+    );
   if (!structural) blockers.push("passing current structural review missing");
   if (pageSnapshot.length !== todo.pagePlan.length) {
     blockers.push("deck overview page snapshot is incomplete");
@@ -1366,10 +1373,7 @@ function deriveCurrentDeckSnapshot(
   };
 }
 
-export function currentDeckSnapshot(
-  root: string,
-  contextEpochId: string,
-): CurrentDeckSnapshot {
+export function currentDeckSnapshot(root: string, contextEpochId: string): CurrentDeckSnapshot {
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
   const derived = deriveCurrentDeckSnapshot(root, ledger, contextEpochId);
@@ -1400,11 +1404,13 @@ export function recordDeckOverviewPrepared(
   }
   const ledger = readRunLedger(root);
   const lastTaste = ledger
-    ? [...ledger.facts].reverse().find(
-        (fact): fact is DeckTasteReviewFact =>
-          fact.type === "deck.taste-review-recorded" &&
-          fact.deckSnapshotSha256 === current.deckSnapshotSha256,
-      )
+    ? [...ledger.facts]
+        .reverse()
+        .find(
+          (fact): fact is DeckTasteReviewFact =>
+            fact.type === "deck.taste-review-recorded" &&
+            fact.deckSnapshotSha256 === current.deckSnapshotSha256,
+        )
     : undefined;
   if (lastTaste?.verdict === "revise") {
     throw new Error("deck snapshot must change after a revise taste review");
@@ -1440,12 +1446,14 @@ export function recordDeckOverviewEmitted(
 ): DeckOverviewEmittedFact {
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
-  const prepared = [...ledger.facts].reverse().find(
-    (fact): fact is DeckOverviewPreparedFact =>
-      fact.type === "deck.overview-prepared" &&
-      fact.deliveryToken === deliveryToken &&
-      fact.contextEpochId === context.contextEpochId,
-  );
+  const prepared = [...ledger.facts]
+    .reverse()
+    .find(
+      (fact): fact is DeckOverviewPreparedFact =>
+        fact.type === "deck.overview-prepared" &&
+        fact.deliveryToken === deliveryToken &&
+        fact.contextEpochId === context.contextEpochId,
+    );
   if (!prepared) throw new Error("deck overview token is not prepared for this Pi context");
   const current = currentDeckSnapshot(root, context.contextEpochId);
   if (current.deckSnapshotSha256 !== prepared.deckSnapshotSha256) {
@@ -1476,14 +1484,16 @@ export function recordPreparedImageEmitted(
 ): ImageEmittedFact | DesignReferenceEmittedFact | DeckOverviewEmittedFact {
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
-  const prepared = [...ledger.facts].reverse().find(
-    (fact) =>
-      (fact.type === "page.image-result-prepared" ||
-        fact.type === "design.reference-image-prepared" ||
-        fact.type === "deck.overview-prepared") &&
-      fact.deliveryToken === deliveryToken &&
-      fact.contextEpochId === context.contextEpochId,
-  );
+  const prepared = [...ledger.facts]
+    .reverse()
+    .find(
+      (fact) =>
+        (fact.type === "page.image-result-prepared" ||
+          fact.type === "design.reference-image-prepared" ||
+          fact.type === "deck.overview-prepared") &&
+        fact.deliveryToken === deliveryToken &&
+        fact.contextEpochId === context.contextEpochId,
+    );
   if (!prepared) throw new Error("image delivery token is not prepared for this Pi context");
   if (prepared.type === "design.reference-image-prepared") {
     return recordDesignReferenceEmitted(root, context, deliveryToken);
@@ -1529,10 +1539,7 @@ function sameRevisionSnapshot(
   return stableSha256(expected) === stableSha256(actual);
 }
 
-export function inspectRunLedger(
-  root: string,
-  contextEpochId?: string,
-): RunLedgerInspection {
+export function inspectRunLedger(root: string, contextEpochId?: string): RunLedgerInspection {
   const ledger = readRunLedger(root);
   if (!ledger) {
     return {
@@ -1646,12 +1653,14 @@ export function inspectRunLedger(
         sameRevisionSnapshot(fact.pageRevisions, revisionSnapshot),
     );
   const blockers: string[] = [];
-  if (missingReferenceChunks.length) blockers.push(`${missingReferenceChunks.length} required source chunks unread`);
+  if (missingReferenceChunks.length)
+    blockers.push(`${missingReferenceChunks.length} required source chunks unread`);
   if (!todo) blockers.push("write_todo missing");
   if (todo) {
-    const planned = Array.isArray(todo.pageIds) && todo.pageIds.length
-      ? todo.pageIds.map((pageId) => persistPageKey(pageId)).filter((key) => key.length > 0)
-      : undefined;
+    const planned =
+      Array.isArray(todo.pageIds) && todo.pageIds.length
+        ? todo.pageIds.map((pageId) => persistPageKey(pageId)).filter((key) => key.length > 0)
+        : undefined;
     if (planned) {
       const current = pages.map((page) => persistPageKey(page.pageId));
       const missing = planned.filter((key) => !current.includes(key));
@@ -1659,13 +1668,16 @@ export function inspectRunLedger(
       if (missing.length) blockers.push(`todo missing pages: ${missing.join(",")}`);
       if (extra.length) blockers.push(`pages not in todo: ${extra.join(",")}`);
     } else if (pages.length !== todo.itemCount) {
-      blockers.push(`todo has ${todo.itemCount} pages but ${pages.length} current page revisions exist`);
+      blockers.push(
+        `todo has ${todo.itemCount} pages but ${pages.length} current page revisions exist`,
+      );
     }
   }
   for (const page of pages) {
     if (!page.raster) blockers.push(`${page.pageId}: current raster missing`);
     if (!page.imageEmitted) blockers.push(`${page.pageId}: image content not emitted to Pi`);
-    if (page.visualReview !== "pass") blockers.push(`${page.pageId}: visual review ${page.visualReview}`);
+    if (page.visualReview !== "pass")
+      blockers.push(`${page.pageId}: visual review ${page.visualReview}`);
     if (page.layout !== "pass") blockers.push(`${page.pageId}: rendered layout ${page.layout}`);
   }
   if (!structural) blockers.push("current structural review missing");
@@ -1677,26 +1689,32 @@ export function inspectRunLedger(
   let deckTasteReview: RunLedgerInspection["deckTasteReview"] = "missing";
   let deckSnapshotSha256: string | undefined;
   if (tasteGate) {
-    const previewEmitted = [...ledger.facts].reverse().find(
-      (fact): fact is DesignReferenceEmittedFact =>
-        fact.type === "design.reference-image-emitted" &&
-        fact.contextEpochId === epoch &&
-        fact.sourceId === tasteGate.selectedPreviewSourceId &&
-        fact.imageSha256 === tasteGate.selectedPreviewSha256,
-    );
+    const previewEmitted = [...ledger.facts]
+      .reverse()
+      .find(
+        (fact): fact is DesignReferenceEmittedFact =>
+          fact.type === "design.reference-image-emitted" &&
+          fact.contextEpochId === epoch &&
+          fact.sourceId === tasteGate.selectedPreviewSourceId &&
+          fact.imageSha256 === tasteGate.selectedPreviewSha256,
+      );
     if (previewEmitted) designReference = "emitted";
     else blockers.push("selected design preview not emitted in this Pi context");
 
     const contract = readDesignContract(root);
-    const selectedDesign = contract?.references.find((reference) => reference.role === "selected-design");
-    const selectedPreview = contract?.references.find((reference) => reference.role === "selected-preview");
+    const selectedDesign = contract?.references.find(
+      (reference) => reference.role === "selected-design",
+    );
+    const selectedPreview = contract?.references.find(
+      (reference) => reference.role === "selected-preview",
+    );
     const contractMatches = Boolean(
       contract &&
-        contract.designSystemId === tasteGate.designSystemId &&
-        selectedDesign?.sourceId === tasteGate.selectedDesignSourceId &&
-        selectedDesign.sha256 === tasteGate.selectedDesignSha256 &&
-        selectedPreview?.sourceId === tasteGate.selectedPreviewSourceId &&
-        selectedPreview.sha256 === tasteGate.selectedPreviewSha256,
+      contract.designSystemId === tasteGate.designSystemId &&
+      selectedDesign?.sourceId === tasteGate.selectedDesignSourceId &&
+      selectedDesign.sha256 === tasteGate.selectedDesignSha256 &&
+      selectedPreview?.sourceId === tasteGate.selectedPreviewSourceId &&
+      selectedPreview.sha256 === tasteGate.selectedPreviewSha256,
     );
     if (!contractMatches || !contract) {
       blockers.push("valid selected-reference-bound design contract missing");
@@ -1707,40 +1725,47 @@ export function inspectRunLedger(
     }
 
     const boundTodo = contract
-      ? [...ledger.facts].reverse().find(
-          (fact): fact is TodoFact =>
-            fact.type === "todo.committed" &&
-            fact.contractSha256 === contract.contractSha256 &&
-            Array.isArray(fact.pagePlan),
-        )
+      ? [...ledger.facts]
+          .reverse()
+          .find(
+            (fact): fact is TodoFact =>
+              fact.type === "todo.committed" &&
+              fact.contractSha256 === contract.contractSha256 &&
+              Array.isArray(fact.pagePlan),
+          )
       : undefined;
     if (!boundTodo) blockers.push("contract-bound write_todo missing");
 
     const derived = deriveCurrentDeckSnapshot(root, ledger, epoch);
     if (derived.snapshot) {
       deckSnapshotSha256 = derived.snapshot.deckSnapshotSha256;
-      const overviewEmitted = [...ledger.facts].reverse().find(
-        (fact): fact is DeckOverviewEmittedFact =>
-          fact.type === "deck.overview-emitted" &&
-          fact.contextEpochId === epoch &&
-          fact.contractSha256 === derived.snapshot?.contractSha256 &&
-          fact.deckSnapshotSha256 === derived.snapshot?.deckSnapshotSha256,
-      );
+      const overviewEmitted = [...ledger.facts]
+        .reverse()
+        .find(
+          (fact): fact is DeckOverviewEmittedFact =>
+            fact.type === "deck.overview-emitted" &&
+            fact.contextEpochId === epoch &&
+            fact.contractSha256 === derived.snapshot?.contractSha256 &&
+            fact.deckSnapshotSha256 === derived.snapshot?.deckSnapshotSha256,
+        );
       if (overviewEmitted) {
         deckOverview = "emitted";
-        const taste = [...ledger.facts].reverse().find(
-          (fact): fact is DeckTasteReviewFact =>
-            fact.type === "deck.taste-review-recorded" &&
-            fact.contextEpochId === epoch &&
-            fact.reviewGateVersion === DECK_TASTE_REVIEW_GATE_VERSION &&
-            fact.contractSha256 === derived.snapshot?.contractSha256 &&
-            fact.deckSnapshotSha256 === derived.snapshot?.deckSnapshotSha256 &&
-            fact.overviewSha256 === overviewEmitted.overviewSha256 &&
-            fact.deliveryToken === overviewEmitted.deliveryToken,
-        );
+        const taste = [...ledger.facts]
+          .reverse()
+          .find(
+            (fact): fact is DeckTasteReviewFact =>
+              fact.type === "deck.taste-review-recorded" &&
+              fact.contextEpochId === epoch &&
+              fact.reviewGateVersion === DECK_TASTE_REVIEW_GATE_VERSION &&
+              fact.contractSha256 === derived.snapshot?.contractSha256 &&
+              fact.deckSnapshotSha256 === derived.snapshot?.deckSnapshotSha256 &&
+              fact.overviewSha256 === overviewEmitted.overviewSha256 &&
+              fact.deliveryToken === overviewEmitted.deliveryToken,
+          );
         deckTasteReview = taste?.verdict ?? "missing";
         if (!taste) blockers.push("current grounded deck taste review missing");
-        else if (taste.verdict !== "pass") blockers.push("current deck taste review requires revision");
+        else if (taste.verdict !== "pass")
+          blockers.push("current deck taste review requires revision");
       } else {
         blockers.push("current deck overview not emitted in this Pi context");
       }
@@ -1824,7 +1849,8 @@ export function requireTodo(root: string): void {
 
 export function requireComposeReady(root: string, contextEpochId: string): RunLedgerInspection {
   const status = inspectRunLedger(root, contextEpochId);
-  if (!status.composeReady) throw new Error(`compose gate failed: ${status.composeBlockers.join("; ")}`);
+  if (!status.composeReady)
+    throw new Error(`compose gate failed: ${status.composeBlockers.join("; ")}`);
   return status;
 }
 
@@ -1866,8 +1892,7 @@ export function contextFromToolArgs(args: Record<string, unknown>): {
 } {
   const meta = asRecord(args.__openSlideStudio);
   const commandId = typeof meta?.commandId === "string" ? meta.commandId.trim() : "";
-  const contextEpochId =
-    typeof meta?.contextEpochId === "string" ? meta.contextEpochId.trim() : "";
+  const contextEpochId = typeof meta?.contextEpochId === "string" ? meta.contextEpochId.trim() : "";
   if (!commandId || !contextEpochId) {
     throw new Error("Pi extension execution context is missing");
   }

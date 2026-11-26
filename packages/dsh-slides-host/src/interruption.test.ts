@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { acquireProjectLease, readProjectLease } from "@open-slidestudio/slides-tools";
 import { appendAgentTrace, type AgentTraceRow } from "./agent-trace.js";
 import { readAgentError, recordAgentError, writeRateLimitWait } from "./agent-fault.js";
-import { markInterruptedTurn, HOST_INTERRUPTED_CODE } from "./interruption.js";
+import {
+  markInterruptedTurn,
+  recoverSessionOnActivation,
+  releaseHubWriterLease,
+  releaseHubWriterLeaseNonBlocking,
+  HOST_INTERRUPTED_CODE,
+} from "./interruption.js";
 
 function tempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "slides-interruption-"));
@@ -14,7 +21,8 @@ function tempRoot(): string {
 function readTrace(root: string): AgentTraceRow[] {
   const file = path.join(root, "_agent", "agent-trace.jsonl");
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8")
+  return fs
+    .readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as AgentTraceRow);
@@ -157,5 +165,52 @@ describe("markInterruptedTurn", () => {
     const root = tempRoot();
     assert.equal(markInterruptedTurn(root), false);
     assert.equal(readAgentError(root), undefined);
+  });
+
+  it("releases a session's hub writer lease during activation recovery without disturbing another owner", () => {
+    const root = tempRoot();
+    assert.equal(acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-stale", label: "Hub run" }).ok, true);
+    assert.equal(recoverSessionOnActivation(root, "s-stale"), false);
+    assert.equal(readProjectLease(root).active, false);
+
+    assert.equal(acquireProjectLease(root, { kind: "mcp", ownerId: "mcp:external", label: "External" }).ok, true);
+    assert.equal(releaseHubWriterLease(root, "s-stale"), false);
+    assert.equal(readProjectLease(root).holder?.ownerId, "mcp:external");
+  });
+
+  it("refuses live non-blocking release when a successor PID or another hostname holds the same ownerId", () => {
+    const root = tempRoot();
+    const otherPid = process.pid === 1 ? 2 : 1;
+    assert.equal(
+      acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-takeover", pid: otherPid, ttlMs: 60_000 }).ok,
+      true,
+    );
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), false);
+    assert.equal(readProjectLease(root).holder?.pid, otherPid);
+
+    const leasePath = path.join(root, "_agent", "writer-lease.v1.json");
+    const foreign = JSON.parse(fs.readFileSync(leasePath, "utf8")) as { holder: { pid: number; hostname: string } };
+    foreign.holder.pid = process.pid;
+    foreign.holder.hostname = `${os.hostname()}-other`;
+    fs.writeFileSync(leasePath, JSON.stringify(foreign, null, 2));
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), false);
+    assert.equal(readProjectLease(root).holder?.hostname, `${os.hostname()}-other`);
+
+    foreign.holder.hostname = os.hostname();
+    fs.writeFileSync(leasePath, JSON.stringify(foreign, null, 2));
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), true);
+    assert.equal(readProjectLease(root).holder, undefined);
+  });
+
+  it("refuses activation release atomically when another live PID holds the hub writer lease", () => {
+    const root = tempRoot();
+    const otherPid = process.pid === 1 ? 2 : 1;
+    assert.equal(
+      acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-live-other", pid: otherPid, ttlMs: 60_000 }).ok,
+      true,
+    );
+    assert.equal(releaseHubWriterLease(root, "s-live-other"), false);
+    assert.equal(readProjectLease(root).active, true);
+    assert.equal(readProjectLease(root).holder?.pid, otherPid);
   });
 });

@@ -1,0 +1,381 @@
+.reference-chip .chip-scope {
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.reference-chip .chip-detail .chip-scope-detail {
+  color: var(--text-muted);
+}
+
+.reference-chip .chip-detail .chip-style-hint {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Page-image state of a PDF: pending is muted, a missing image is named plainly. */
+.reference-chip .chip-render-note {
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.reference-chip .chip-render-note.is-failed {
+  color: var(--d-600);
+}
+
+.style-source-notice {
+  margin: 6px 2px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.style-source-notice[hidden] {
+  display: none;
+}
+
+.agent-attachments .reference-chip .chip-scope {
+  font-size: 9px;
+}
+
+#work-form .style-source-notice {
+  margin: 1px 0 5px;
+  font-size: 10px;
+}
+
+.attach-modal .attach-capability-note {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ---- Attachment chip anatomy (shared by the Hub row/modal and the editor composer) ----
+ * expand toggle (icon + name + status + notes) · actions · detail. Loaded after hub.css /
+ * styles.css so it supersedes the older single-span chip rules. */
+.reference-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  min-width: 185px;
+  max-width: 250px;
+  background: var(--n-50);
+  border: 1px solid var(--n-100);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.reference-chip .chip-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reference-chip .chip-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--n-500);
+}
+
+.reference-chip .chip-icon svg {
+  display: block;
+}
+
+.reference-chip .chip-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.reference-chip .chip-main b {
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.reference-chip .chip-main small {
+  margin-top: 2px;
+  color: var(--subtle, var(--text-muted));
+  font-size: 10px;
+}
+
+.reference-chip .chip-actions {
+  display: flex;
+  flex: none;
+  order: 2;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.reference-chip .chip-retry {
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--a-400);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.reference-chip .chip-remove {
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--n-400);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reference-chip .chip-remove:hover {
+  color: var(--d-500);
+}
+
+.reference-chip .chip-toggle:focus-visible,
+.reference-chip .chip-retry:focus-visible,
+.reference-chip .chip-remove:focus-visible,
+.vision-notice button:focus-visible {
+  outline: 2px solid var(--a-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.reference-chip .chip-detail {
+  flex-basis: 100%;
+  order: 3;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--n-100);
+  color: var(--n-600);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reference-chip .chip-detail[hidden] {
+  display: none;
+}
+
+.reference-chip .chip-detail p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.reference-chip .chip-detail p + p {
+  margin-top: 3px;
+}
+
+.reference-chip .chip-progress {
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--n-100);
+}
+
+.reference-chip .chip-progress-bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--a-400);
+  transition: width 160ms linear;
+}
+
+.reference-chip.is-failed {
+  border-color: var(--d-200);
+  background: var(--d-50);
+}
+
+.reference-chip.is-unsupported {
+  border-color: var(--w-100);
+  background: var(--w-50);
+}
+
+.reference-chip.is-queued .chip-status,
+.reference-chip.is-uploading .chip-status,
+.reference-chip.is-parsing .chip-status {
+  color: var(--a-400);
+}
+
+.reference-chip.is-parsed .chip-status {
+  color: var(--s-600);
+}
+
+.reference-chip.is-failed .chip-status,
+.reference-chip.is-unsupported .chip-status {
+  color: var(--n-600);
+}
+
+.reference-chip .chip-vision-note {
+  color: var(--w-600);
+}
+
+/* Composer variant: compact for the narrow assistant column. */
+.agent-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-attachments[hidden] {
+  display: none;
+}
+
+.agent-attachments .reference-chip {
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 7px;
+  border-radius: 8px;
+  color: var(--n-700);
+}
+
+.agent-attachments .reference-chip .chip-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.agent-attachments .reference-chip .chip-main b {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.agent-attachments .reference-chip .chip-detail {
+  margin-top: 5px;
+  padding-top: 5px;
+  font-size: 10px;
+}
+
+/* ---- Vision notice under the chip row, and its mirror in the model panel ---- */
+.vision-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 2px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--w-100);
+  border-radius: 10px;
+  background: var(--w-50);
+  color: var(--n-700);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vision-notice[hidden] {
+  display: none;
+}
+
+.vision-notice button {
+  flex: none;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--a-400);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vision-notice button:hover {
+  background: var(--a-25);
+}
+
+.vision-notice.is-mirror {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+#work-form .vision-notice {
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+/* ---- Hub: confirm before closing the modal with uploads in flight ---- */
+.attach-confirm-backdrop {
+  z-index: 110;
+}
+
+.attach-confirm {
+  width: min(400px, 90vw);
+  padding: 22px 22px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+}
+
+.attach-confirm p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.attach-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.attach-confirm-actions button {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+#btn-attach-cancel {
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+#btn-attach-cancel:hover {
+  background: var(--bg-hover);
+}
+
+#btn-attach-confirm {
+  background: var(--a-400);
+  color: var(--n-0);
+}
+
+#btn-attach-confirm:hover {
+  background: var(--accent-hover);
+}
+
+#drop-zone:focus-visible {
+  outline: 2px solid var(--a-400);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reference-chip .chip-progress-bar {
+    transition: none;
+  }
+}

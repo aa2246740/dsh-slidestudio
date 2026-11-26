@@ -1,5 +1,9 @@
 import { SHAPE_GROUP_LABELS, ELEMENT_TYPE_LABELS } from "./element-labels.js";
-import { t } from "./i18n.js";
+import { onLangChange, t } from "./i18n.js";
+import { createEditorLeaseClient, editorApiErrorMessage } from "./editor-lease.js";
+import * as resilience from "./client-resilience.js";
+import { aiLockLostStatus, createAiLockLifecycle } from "./ai-lock-lifecycle.js";
+import { exportDegradationHtml } from "./export-degradation-labels.js";
 import {
   clearWaitingRow,
   createStepPainter,
@@ -51,27 +55,55 @@ import {
   selectedModelFromRoster,
 } from "./generation-composer.js";
 import {
-  categoricalChartModel,
-  chartKind,
-  placeScatterLabels,
-  scatterChartModel,
-  waterfallChartModel,
-} from "/runtime/chart-semantics.js";
+  canvasChartSwatch,
+  chartContextOf,
+  configureChartRuntime,
+  paintChartSvg as chartPaintMarkup,
+} from "./chart-paint.js";
 import {
-  CHART_GRID,
-  CHART_INK,
-  CHART_PALETTE,
-  CHART_TEXT_PX,
-  alignedSecondaryScale,
-  chartLayout,
-  chartSwatch,
-  formatChartValue,
-  measureChartText,
-  resolveChartLegend,
-  seriesDecimals,
-} from "/runtime/chart-layout.js";
+  applyTextStyleToNode as applyTextDisplay,
+  createCanvasElement,
+  elementTransform,
+  iconKey,
+  paintCanvasShape,
+  paintCanvasText as paintTextDisplay,
+  paintCropChromeStyles,
+  paintFaIcon,
+  shapeSvgMarkup,
+} from "./canvas-element-paint.js";
+import { paintCanvasImage } from "./canvas-image-paint.js";
+import { linePaintMarkup } from "./line-paint.js";
+import {
+  editingSelectionOffsets,
+  escapeHtmlText,
+  fillNodeFromRuns,
+  serializeEditNode,
+  setSelectionByPlainOffsets,
+} from "./rich-text-editor.js";
+import { rangeHasStyle, selectNodeText, isEditTypeKey, placeCaretAtPoint } from "./editor-text-input.js";
+import {
+  INTERNAL_CLIPBOARD_TYPE,
+  decodeClipboardContent,
+  nativeClipboardTarget,
+  clipboardPlainText,
+  clipboardHtml,
+  clipboardTokenFromHtml,
+} from "./editor-clipboard.js";
+import { mountEditorAttachments } from "./editor-attachments.js";
+import * as chartSemanticsRuntime from "/runtime/chart-semantics.js";
+import * as chartLayoutRuntime from "/runtime/chart-layout.js";
 
 import { conversationEvents, settledAssistantActivity, commentIsDraft, acceptedReviewSubmissions } from "./assistant-conversation.js";
+import {
+  createLayoutMode,
+  layoutSurface,
+  pageLayoutOpen,
+  undoneLayoutMark,
+} from "./layout-mode.js";
+
+// The chart painters read the shared pptd-v2 chart runtime the server exposes under /runtime/.
+configureChartRuntime({ ...chartSemanticsRuntime, ...chartLayoutRuntime });
+const { CHART_PALETTE, resolveChartLegend } = chartLayoutRuntime;
 
 installTooltips();
 
@@ -114,6 +146,7 @@ let notesCommitState = null;
 let drag = null;
 let shapeCatalog = [];
 let faIcons = [];
+/** @type {Record<string, string>} */
 let faUnicode = {};
 let timelineOpen = false;
 let versions = [];
@@ -221,9 +254,21 @@ let generationResumeUncertainSessionId = "";
 let generationRoster = null;
 let generationStopPending = false;
 let lastGenerationState = null;
+/** @type {import("./editor-attachments.js").AgentAttachment[]} */
 let pendingAgentAttachments = [];
-let agentAttachmentUploadActive = false;
 let workAgentSubmitPending = false;
+// A lost response must not leave the composer disabled forever.
+const submitLock = resilience.createSubmitLockWatchdog({
+  onTimeout: () => {
+    workAgentSubmitPending = false;
+    resilience.safePaint(paintEditorGeneration, generationActivity);
+  },
+});
+/** @param {boolean} next */
+function setSubmitPending(next) {
+  workAgentSubmitPending = next;
+  submitLock.set(next);
+}
 let assistantTurnPending = false;
 let contextMenuReturnFocus = null;
 let insertPopoverReturnFocus = null;
@@ -246,7 +291,6 @@ const FONT_PRESETS = [
 ];
 const DEFAULT_FONT_LATIN = "Arial";
 const DEFAULT_FONT_EA = "微软雅黑";
-const SLIDE_FONT_STACK = 'Arial, "微软雅黑", "Microsoft YaHei", "PingFang SC", sans-serif';
 
 const SHAPE_KINDS = [
   ["rect", t("矩形")],
@@ -370,370 +414,25 @@ function paintWorkAgentTarget(text = $("work-brief")?.value || "") {
 }
 
 
+/** @param {string | null | undefined} id @returns {HTMLElement | null} */
 function slideElNode(id) {
   if (!id) return null;
   return document.querySelector(`#slide .el[data-id="${id}"]`);
 }
 
+/** @param {string | undefined} id the element whose rich text is open for editing keeps its live run styles */
+function isLiveRichText(id) {
+  return Boolean(editingRich && editingId && id === editingId);
+}
+
+/** @param {HTMLElement | null} node @param {import("@open-slidestudio/canvas-session").RenderElement | null} el */
 function applyTextStyleToNode(node, el) {
-  if (!node || !el) return;
-  const [ha] = el.align || ["left", "top"];
-  const liveRich = Boolean(editingRich && editingId && el.id === editingId);
-  node.style.color = el.href ? (el.color || "#2563EB") : (el.color || "#111");
-  node.style.fontSize = `${el.fontSize || 18}px`;
-  if (!liveRich) {
-    node.style.fontWeight = el.bold ? "700" : "400";
-    node.style.fontStyle = el.italic ? "italic" : "normal";
-    node.style.textDecoration = el.underline || el.href ? "underline" : "none";
-  }
-  node.style.fontFamily = el.fontFamily || SLIDE_FONT_STACK;
-  node.style.lineHeight = el.lineHeight != null ? String(el.lineHeight) : "1.2";
-  node.style.letterSpacing = el.letterSpacing != null ? `${el.letterSpacing}px` : "";
-  node.style.textAlign = ha;
-  if (el.backgroundColor) node.style.backgroundColor = el.backgroundColor;
-}
-
-function applyRunStyleToSpan(span, run) {
-  if (!span || !run) return;
-  if (run.fontSize) span.style.fontSize = `${run.fontSize}px`;
-  if (run.color) span.style.color = run.color;
-  if (run.bold) span.style.fontWeight = "700";
-  if (run.italic) span.style.fontStyle = "italic";
-  if (run.underline) span.style.textDecoration = "underline";
-}
-
-function appendTextRuns(node, runs) {
-  for (const run of runs) {
-    const span = document.createElement("span");
-    const text = String(run.text ?? "");
-    span.textContent = text;
-    applyRunStyleToSpan(span, run);
-    node.append(span);
-  }
-}
-
-function escapeHtmlText(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function rgbToHexColor(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const hex6 = /^#([0-9a-fA-F]{6})$/.exec(raw);
-  if (hex6) return `#${hex6[1].toLowerCase()}`;
-  const hex3 = /^#([0-9a-fA-F]{3})$/.exec(raw);
-  if (hex3) {
-    const [r, g, b] = hex3[1].split("");
-    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
-  }
-  const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(raw);
-  if (!m) return raw;
-  const hex = (n) => Number(n).toString(16).padStart(2, "0");
-  return `#${hex(m[1])}${hex(m[2])}${hex(m[3])}`;
-}
-
-function styleToCss(style) {
-  const parts = [];
-  if (style.fontSize != null) parts.push(`font-size:${style.fontSize}px`);
-  if (style.color) parts.push(`color:${style.color}`);
-  if (style.bold) parts.push("font-weight:700");
-  if (style.italic) parts.push("font-style:italic");
-  if (style.underline) parts.push("text-decoration:underline");
-  return parts.join(";");
-}
-
-function runStyleKey(style) {
-  return JSON.stringify({
-    fontSize: style.fontSize ?? null,
-    color: style.color ?? null,
-    bold: Boolean(style.bold),
-    italic: Boolean(style.italic),
-    underline: Boolean(style.underline),
-  });
-}
-
-function isRichBlock(node) {
-  return Boolean(node && node.nodeType === 1 && /^(DIV|P|LI|H[1-6])$/.test(node.tagName));
-}
-
-function readInlineStyle(el) {
-  const out = {};
-  if (!el || el.nodeType !== 1) return out;
-  const style = el.style;
-  const fs = parseFloat(style.fontSize);
-  if (fs) out.fontSize = fs;
-  if (style.color) out.color = rgbToHexColor(style.color);
-  const fw = style.fontWeight;
-  if (fw === "bold" || fw === "bolder" || Number(fw) >= 600) out.bold = true;
-  if (style.fontStyle === "italic" || style.fontStyle === "oblique") out.italic = true;
-  if ((style.textDecorationLine || style.textDecoration || "").includes("underline")) {
-    out.underline = true;
-  }
-  const tag = el.tagName;
-  if (tag === "B" || tag === "STRONG") out.bold = true;
-  if (tag === "I" || tag === "EM") out.italic = true;
-  if (tag === "U") out.underline = true;
-  return out;
-}
-
-function splitRunsToParas(runs) {
-  const paras = [[]];
-  for (const run of runs || []) {
-    const parts = String(run.text ?? "").split("\n");
-    for (let i = 0; i < parts.length; i++) {
-      if (i > 0) paras.push([]);
-      if (parts[i].length) paras[paras.length - 1].push({ ...run, text: parts[i] });
-    }
-  }
-  return paras;
-}
-
-function fillNodeFromRuns(node, runs) {
-  node.replaceChildren();
-  for (const para of splitRunsToParas(runs)) {
-    const div = document.createElement("div");
-    if (!para.length) {
-      div.append(document.createElement("br"));
-    } else {
-      appendTextRuns(div, para);
-    }
-    node.append(div);
-  }
-}
-
-function isIgnorableRootWs(node, root) {
-  if (node.nodeType !== Node.TEXT_NODE || node.parentNode !== root) return false;
-  const t = node.nodeValue || "";
-  return Boolean(t) && !t.trim();
-}
-
-function isPlaceholderBr(node, root) {
-  if (!node || node.tagName !== "BR") return false;
-  const parent = node.parentNode;
-  if (!parent || parent === root || !isRichBlock(parent)) return false;
-  for (const child of parent.childNodes) {
-    if (child === node) continue;
-    if (child.nodeType === Node.TEXT_NODE && child.nodeValue) return false;
-    if (child.nodeType === Node.ELEMENT_NODE && child.tagName !== "BR") return false;
-  }
-  return true;
-}
-
-function serializeEditNode(root) {
-  const paras = [[]];
-  const pushText = (text, style) => {
-    if (!text) return;
-    const cur = paras[paras.length - 1];
-    const last = cur[cur.length - 1];
-    if (last && runStyleKey(last.style) === runStyleKey(style)) last.text += text;
-    else cur.push({ text, style: { ...style } });
-  };
-  const walk = (node, style) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (isIgnorableRootWs(node, root)) return;
-      pushText(node.nodeValue || "", style);
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.tagName === "BR") {
-      if (isPlaceholderBr(node, root)) return;
-      paras.push([]);
-      return;
-    }
-    const next = { ...style, ...readInlineStyle(node) };
-    if (isRichBlock(node)) {
-      if (paras[paras.length - 1].length) paras.push([]);
-      for (const child of node.childNodes) walk(child, next);
-      return;
-    }
-    for (const child of node.childNodes) walk(child, next);
-  };
-  for (const child of root.childNodes) walk(child, {});
-  while (paras.length > 1 && paras[paras.length - 1].length === 0) paras.pop();
-  const joined = paras.map((p) => p.map((r) => r.text).join("")).join("\n");
-  const hasStyle = paras.some((p) =>
-    p.some((r) => r.style.bold || r.style.italic || r.style.underline || r.style.color || r.style.fontSize),
-  );
-  if (!hasStyle && !joined.includes("\n")) return escapeHtmlText(joined);
-  return paras
-    .map((para) => {
-      const inner = para
-        .map(({ text, style }) => {
-          const css = styleToCss(style);
-          const escaped = escapeHtmlText(text);
-          return css ? `<span style="${css}">${escaped}</span>` : escaped;
-        })
-        .join("");
-      return `<p>${inner}</p>`;
-    })
-    .join("");
-}
-
-function pointToPlainOffset(root, container, offset) {
-  let count = 0;
-  let found = false;
-  let seenContent = false;
-  let pendingBreak = false;
-  const flushBreak = () => {
-    if (!pendingBreak) return;
-    count += 1;
-    pendingBreak = false;
-  };
-  const walk = (node) => {
-    if (found) return;
-    if (node === container && node.nodeType === Node.TEXT_NODE) {
-      flushBreak();
-      count += offset;
-      if (offset) seenContent = true;
-      found = true;
-      return;
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (isIgnorableRootWs(node, root)) return;
-      const t = node.nodeValue || "";
-      if (!t) return;
-      flushBreak();
-      count += t.length;
-      seenContent = true;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node === container) {
-      if (isRichBlock(node) && node !== root && seenContent) pendingBreak = true;
-      flushBreak();
-      const kids = node.childNodes;
-      for (let i = 0; i < offset && i < kids.length; i++) walk(kids[i]);
-      found = true;
-      return;
-    }
-    if (node.tagName === "BR") {
-      if (isPlaceholderBr(node, root)) return;
-      flushBreak();
-      count += 1;
-      seenContent = true;
-      return;
-    }
-    if (isRichBlock(node) && node !== root) {
-      if (seenContent) pendingBreak = true;
-      for (const child of node.childNodes) walk(child);
-      return;
-    }
-    for (const child of node.childNodes) walk(child);
-  };
-  walk(root);
-  return count;
-}
-
-function plainOffsetToPoint(root, target) {
-  let count = 0;
-  let result = null;
-  let last = { node: root, offset: 0 };
-  let seenContent = false;
-  let pendingBreak = false;
-  const flushBreak = () => {
-    if (!pendingBreak) return false;
-    if (count >= target) return true;
-    count += 1;
-    pendingBreak = false;
-    return count >= target;
-  };
-  const walk = (node) => {
-    if (result) return;
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (isIgnorableRootWs(node, root)) return;
-      const t = node.nodeValue || "";
-      if (!t) return;
-      if (flushBreak()) {
-        result = { node, offset: 0 };
-        return;
-      }
-      if (count + t.length >= target) {
-        result = { node, offset: target - count };
-        return;
-      }
-      count += t.length;
-      seenContent = true;
-      last = { node, offset: t.length };
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.tagName === "BR") {
-      if (isPlaceholderBr(node, root)) return;
-      if (flushBreak()) {
-        result = last;
-        return;
-      }
-      if (count >= target) {
-        result = last;
-        return;
-      }
-      count += 1;
-      seenContent = true;
-      last = { node, offset: 0 };
-      return;
-    }
-    if (isRichBlock(node) && node !== root && seenContent) pendingBreak = true;
-    for (const child of node.childNodes) walk(child);
-  };
-  walk(root);
-  return result || last;
-}
-
-function editingSelectionOffsets(node) {
-  if (!node) return null;
-  const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return null;
-  const range = sel.getRangeAt(0);
-  const inside =
-    node === range.commonAncestorContainer || node.contains(range.commonAncestorContainer);
-  if (!inside) return null;
-  if (range.collapsed) return null;
-  const start = pointToPlainOffset(node, range.startContainer, range.startOffset);
-  const end = pointToPlainOffset(node, range.endContainer, range.endOffset);
-  if (start === end) return null;
-  return { start: Math.min(start, end), end: Math.max(start, end) };
-}
-
-function setSelectionByPlainOffsets(node, start, end) {
-  const a = plainOffsetToPoint(node, start);
-  const b = plainOffsetToPoint(node, end);
-  if (!a || !b) return false;
-  const range = document.createRange();
-  try {
-    range.setStart(a.node, a.offset);
-    range.setEnd(b.node, b.offset);
-  } catch {
-    return false;
-  }
-  const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-  return true;
+  applyTextDisplay(node, el, isLiveRichText(el?.id));
 }
 
 function activeEditRange() {
   if (!editingId) return null;
   return editingSelectionOffsets(slideElNode(editingId)) || pendingToolbarRange;
-}
-
-function rangeHasStyle(runs, start, end, key) {
-  let cursor = 0;
-  let saw = false;
-  for (const run of runs || []) {
-    const rs = cursor;
-    const re = cursor + String(run.text || "").length;
-    cursor = re;
-    const lo = Math.max(start, rs);
-    const hi = Math.min(end, re);
-    if (lo >= hi) continue;
-    saw = true;
-    if (!run[key]) return false;
-  }
-  return saw;
 }
 
 function refreshRichEdit(range) {
@@ -806,49 +505,6 @@ function styleTextFromToolbar(controlId, patch, toggleKey) {
     return command("setBold", { bold: !selectedEl()?.bold }).then(() => syncRichToolbarState());
   }
   return command("setTextStyle", { controlId, patch }).then(() => syncRichToolbarState());
-}
-
-function selectNodeText(node) {
-  node.focus();
-  try {
-    document.execCommand("selectAll");
-  } catch {
-    /* fall through to Range */
-  }
-  const sel = window.getSelection();
-  if (sel && sel.rangeCount && !sel.isCollapsed && node.contains(sel.anchorNode)) return;
-  const range = document.createRange();
-  range.selectNodeContents(node);
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-}
-
-function isEditTypeKey(ev) {
-  if (ev.metaKey || ev.ctrlKey || ev.altKey) return false;
-  if (ev.key === "Backspace" || ev.key === "Delete" || ev.key === "Enter") return true;
-  return ev.key.length === 1;
-}
-
-function placeCaretAtPoint(node, ev) {
-  const sel = window.getSelection();
-  if (!sel) return;
-  let range = null;
-  if (document.caretRangeFromPoint) {
-    range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
-  } else if (document.caretPositionFromPoint) {
-    const pos = document.caretPositionFromPoint(ev.clientX, ev.clientY);
-    if (pos) {
-      range = document.createRange();
-      range.setStart(pos.offsetNode, pos.offset);
-      range.collapse(true);
-    }
-  }
-  if (range && node.contains(range.startContainer)) {
-    sel.removeAllRanges();
-    sel.addRange(range);
-    return;
-  }
-  sel.collapseToEnd();
 }
 
 function bindEditingNode(node) {
@@ -1211,20 +867,7 @@ function noteProjectViewed(p) {
   }
 }
 
-/** Stable per-tab id (sessionStorage survives reload but not duplication). */
-function editorTabId() {
-  try {
-    let id = sessionStorage.getItem("oss:tabId");
-    if (!id) {
-      id = (crypto.randomUUID && crypto.randomUUID()) || `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-      sessionStorage.setItem("oss:tabId", id);
-    }
-    return id;
-  } catch {
-    return "default";
-  }
-}
-
+createEditorLeaseClient({ project: currentProjectPath, tabId: resilience.editorTabId }).attach();
 /** Last disk revision the server confirmed — sent as baseRevision on edits. */
 let lastDiskRevision = "";
 
@@ -1238,7 +881,7 @@ async function api(path, opts) {
       target += `${target.includes("?") ? "&" : "?"}project=${encodeURIComponent(cur)}`;
     }
     if (!/[?&]tab=/.test(target)) {
-      target += `${target.includes("?") ? "&" : "?"}tab=${encodeURIComponent(editorTabId())}`;
+      target += `${target.includes("?") ? "&" : "?"}tab=${encodeURIComponent(resilience.editorTabId())}`;
     }
   } catch {
     // fall through with the original target
@@ -1273,7 +916,7 @@ async function api(path, opts) {
       lastDiskRevision = data.revision;
     }
     if (!res.ok) {
-      const error = new Error(data.error || res.statusText);
+      const error = new Error(editorApiErrorMessage(res.status, data, res.statusText));
       error.status = res.status;
       if (data?.code) error.code = data.code;
       if (data?.comment) error.comment = data.comment;
@@ -1286,599 +929,12 @@ async function api(path, opts) {
   return res;
 }
 
-function canvasChartSwatch(el, i) {
-  const declaredSeriesCount = Array.isArray(el.chartSeries) ? el.chartSeries.length : 0;
-  const dataSeriesCount = Math.max(0, (el.chartData?.cols?.length || 0) - 1);
-  const seriesCount = Math.max(declaredSeriesCount, dataSeriesCount);
-  return chartSwatch(
-    { colors: el.chartColors, series: el.chartSeries, data: el.chartData },
-    i,
-    seriesCount,
-  );
-}
-
-function chartSemanticInput(el) {
-  return {
-    data: el.chartData || { cols: [], rows: [] },
-    series:
-      Array.isArray(el.chartSeries) && el.chartSeries.length
-        ? el.chartSeries
-        : [{ type: el.chartType || "bar" }],
-  };
-}
-
-function chartNumber(value, signed = false) {
-  return formatChartValue(value, undefined, { signed });
-}
-
 /**
- * Shared painter plumbing: resolve the legend spec, run the same chartLayout
- * the exporter uses, and convert every rect to the element's local frame.
- * `tickLabels`/`categoryLabels` feed the axis reserves.
+ * Paint a chart against the page it sits on (its surroundings and chrome), so history previews and thumbnails paint their own version.
+ * @param {import("./chart-paint.js").ChartRenderElement} el @param {import("../types/app/editor.js").EditorModel | null} [page]
  */
-function chartLayoutFor(el, categorical, opts = {}) {
-  const w = el.bounds[2];
-  const h = el.bounds[3];
-  const legend = resolveChartLegend(el.chartLegend);
-  const axis = el.chartAxis || {};
-  const scale = opts.scale || categorical?.scale;
-  const tickDecimals = scale ? scale.tickDecimals : 0;
-  const tickLabels = scale
-    ? scale.ticks.map((t) => formatChartValue(t, tickDecimals))
-    : ["0"];
-  const widestTickLabel = tickLabels.reduce(
-    (best, label) => (label.length > best.length ? label : best),
-    "",
-  );
-  const categories = categorical?.categories ?? opts.categories ?? [];
-  const widestCategoryLabel = categories.reduce(
-    (best, label) => (String(label).length > best.length ? String(label) : best),
-    "",
-  );
-  const secondaryScale = opts.secondaryScale;
-  const widestSecondaryTickLabel = secondaryScale
-    ? secondaryScale.ticks
-        .map((t) => formatChartValue(t, secondaryScale.tickDecimals))
-        .reduce((best, label) => (label.length > best.length ? label : best), "")
-    : undefined;
-  const kind = chartKind(chartSemanticInput(el));
-  const legendItems =
-    kind === "pie"
-      ? categories
-      : (categorical?.series ?? []).map((series) => series.name);
-  const layout = chartLayout({ w, h }, {
-    title: el.chartTitle || opts.title || "",
-    legend,
-    legendItems,
-    widestTickLabel,
-    widestCategoryLabel,
-    categoryCount: Math.max(1, categories.length),
-    hasSecondaryAxis: Boolean(secondaryScale),
-    widestSecondaryTickLabel,
-    axis: {
-      x: axis.x,
-      y: axis.y,
-      secondaryY: axis.secondaryY,
-    },
-    reserveBelowLabel:
-      kind !== "pie" &&
-      kind !== "scatter" &&
-      kind !== "waterfall" &&
-      categorical?.orientation !== "horizontal" &&
-      ((scale?.min ?? 0) < 0 || (secondaryScale?.min ?? 0) < 0),
-  });
-  return { legend, layout, scale, tickDecimals };
-}
-
-function legendSvg(layout, swatch, ink, fontPx = CHART_TEXT_PX.legend, names) {
-  if (!layout.legend) return "";
-  return layout.legend.items
-    .map((item, index) => {
-      const label = names?.[index] ?? item.name;
-      return `<rect x="${item.swatch.x}" y="${item.swatch.y}" width="${item.swatch.w}" height="${item.swatch.h}" fill="${escapeHtmlText(swatch(index))}"></rect>` +
-        `<text x="${item.textAnchor.x}" y="${item.textAnchor.y}" font-size="${fontPx}" fill="${ink}">${escapeHtmlText(label)}</text>`;
-    })
-    .join("");
-}
-
-/** Value-axis grid + tick labels for a shared scale inside `plot`. */
-function valueGridSvg(plot, scale, ink, gridColor, opts = {}) {
-  const range = Math.max(1e-9, scale.max - scale.min);
-  const yFor = (v) => plot.y + plot.h - ((v - scale.min) / range) * plot.h;
-  const lines = scale.ticks
-    .map((tick) => {
-      const y = yFor(tick);
-      const label = formatChartValue(tick, scale.tickDecimals);
-      const secondary = opts.secondaryScale
-        ? `<text x="${plot.x + plot.w + 6}" y="${y + 3}" text-anchor="start" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(
-            formatChartValue(
-              opts.secondaryScale.min +
-                ((tick - scale.min) / range) *
-                  (opts.secondaryScale.max - opts.secondaryScale.min),
-              opts.secondaryScale.tickDecimals,
-            ),
-          )}</text>`
-        : "";
-      return `<line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.w}" y2="${y}" stroke="${gridColor}" stroke-width="1"/><text x="${plot.x - 6}" y="${y + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(label)}</text>${secondary}`;
-    })
-    .join("");
-  return { svg: lines, yFor };
-}
-
-function paintWaterfallSvg(el, w, h, titleSvg, axisSvg, ink, gridColor) {
-  const model = waterfallChartModel(chartSemanticInput(el));
-  const { layout } = chartLayoutFor(el, null, {
-    scale: model.scale,
-    categories: model.bars.map((bar) => bar.label),
-  });
-  const plot = layout.plot;
-  const valueMin = model.scale.min;
-  const range = Math.max(1e-9, model.scale.max - valueMin);
-  const yFor = (value) => plot.y + ((model.scale.max - value) / range) * plot.h;
-  const group = plot.w / Math.max(1, model.bars.length);
-  const barW = Math.max(8, Math.min(46, group * 0.58));
-  const grid = model.scale.ticks
-    .map((tick) => {
-      const y = yFor(tick);
-      return `<line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.w}" y2="${y}" stroke="${gridColor}" stroke-width="1"/><text x="${plot.x - 6}" y="${y + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(formatChartValue(tick, model.scale.tickDecimals))}</text>`;
-    })
-    .join("");
-  const bars = model.bars
-    .map((bar, index) => {
-      const centerX = plot.x + group * (index + 0.5);
-      const x = centerX - barW / 2;
-      const yTop = Math.max(plot.y, yFor(Math.max(bar.start, bar.end)));
-      const yBottom = Math.min(plot.y + plot.h, yFor(Math.min(bar.start, bar.end)));
-      const height = Math.max(2, yBottom - yTop);
-      const color =
-        bar.kind === "increase"
-          ? "#10B981"
-          : bar.kind === "decrease"
-            ? "#EF4444"
-            : bar.kind === "subtotal"
-              ? "#F59E0B"
-              : "#2563EB";
-      const value = chartNumber(
-        bar.value,
-        bar.kind === "increase" || bar.kind === "decrease",
-      );
-      const labelY = Math.max(plot.y + 11, yTop - 4);
-      const categoryY = layout.categoryBand
-        ? layout.categoryBand.y + CHART_TEXT_PX.category
-        : plot.y + plot.h + 14;
-      const next = model.bars[index + 1];
-      const connector = next
-        ? `<line x1="${x + barW}" y1="${yFor(next.kind === "total" ? bar.end : next.start)}" x2="${plot.x + group * (index + 1.5) - barW / 2}" y2="${yFor(next.kind === "total" ? bar.end : next.start)}" stroke="#9CA3AF" stroke-width="1" stroke-dasharray="3 3"/>`
-        : "";
-      return `${connector}<rect x="${x}" y="${yTop}" width="${barW}" height="${height}" rx="1" fill="${color}"/><text x="${centerX}" y="${labelY}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(value)}</text><text x="${centerX}" y="${categoryY}" text-anchor="middle" font-size="${CHART_TEXT_PX.category}" fill="${ink}">${escapeHtmlText(bar.label)}</text>`;
-    })
-    .join("");
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${grid}${bars}${axisSvg}</svg>`;
-}
-
-function paintScatterSvg(el, w, h, titleSvg, ink, gridColor) {
-  const model = scatterChartModel(chartSemanticInput(el));
-  const { layout } = chartLayoutFor(el, null, {
-    scale: model.yScale,
-    categories: [],
-  });
-  const plot = layout.plot;
-  const xRange = Math.max(1e-9, model.xMax - model.xMin);
-  const yRange = Math.max(1e-9, model.yMax - model.yMin);
-  const xFor = (value) => plot.x + ((value - model.xMin) / xRange) * plot.w;
-  const yFor = (value) => plot.y + ((model.yMax - value) / yRange) * plot.h;
-  const xThreshold = model.xMin + xRange * 0.7;
-  const yThreshold = model.yMin + yRange * 0.7;
-  const thresholdX = xFor(xThreshold);
-  const thresholdY = yFor(yThreshold);
-  const quadrants = `<rect x="${plot.x}" y="${plot.y}" width="${thresholdX - plot.x}" height="${thresholdY - plot.y}" fill="#FEF3C7" opacity="0.45"/><rect x="${thresholdX}" y="${plot.y}" width="${plot.x + plot.w - thresholdX}" height="${thresholdY - plot.y}" fill="#FEE2E2" opacity="0.7"/><rect x="${plot.x}" y="${thresholdY}" width="${thresholdX - plot.x}" height="${plot.y + plot.h - thresholdY}" fill="#ECFDF5" opacity="0.7"/><rect x="${thresholdX}" y="${thresholdY}" width="${plot.x + plot.w - thresholdX}" height="${plot.y + plot.h - thresholdY}" fill="#FEF3C7" opacity="0.45"/>`;
-  const grid =
-    model.xScale.ticks
-      .map((tick) => {
-        const x = xFor(tick);
-        return `<line x1="${x}" y1="${plot.y}" x2="${x}" y2="${plot.y + plot.h}" stroke="${gridColor}" stroke-width="1"/><text x="${x}" y="${plot.y + plot.h + 13}" text-anchor="middle" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(formatChartValue(tick, model.xScale.tickDecimals))}</text>`;
-      })
-      .join("") +
-    model.yScale.ticks
-      .map((tick) => {
-        const y = yFor(tick);
-        return `<line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.w}" y2="${y}" stroke="${gridColor}" stroke-width="1"/><text x="${plot.x - 7}" y="${y + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(formatChartValue(tick, model.yScale.tickDecimals))}</text>`;
-      })
-      .join("");
-  const placements = placeScatterLabels(
-    model.points.map((point) => ({
-      label: point.label,
-      x: xFor(point.x),
-      y: yFor(point.y),
-    })),
-    { left: 2, top: 4, right: w - 2, bottom: h - 3 },
-    9,
-  );
-  const points = placements
-    .map(({ label, pointX, pointY, textX, baseline, anchor }) =>
-      `<circle cx="${pointX}" cy="${pointY}" r="6" fill="#DC2626" stroke="#FFFFFF" stroke-width="2"/><text x="${textX}" y="${baseline}" text-anchor="${anchor}" font-size="${CHART_TEXT_PX.scatterLabel}" font-weight="600" fill="#0B1F3A" style="paint-order:stroke;stroke:#FFFFFF;stroke-width:3px;stroke-linejoin:round;">${escapeHtmlText(label)}</text>`,
-    )
-    .join("");
-  const axes = `<text x="${plot.x + plot.w / 2}" y="${h - 3}" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(el.chartAxis?.x || model.xName)}</text><text transform="translate(10 ${plot.y + plot.h / 2}) rotate(-90)" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(el.chartAxis?.y || model.yName)}</text>`;
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${quadrants}${grid}${points}${axes}</svg>`;
-}
-
-function paintComboChartSvg(
-  el,
-  w,
-  h,
-  titleSvg,
-  categorical,
-  swatch,
-  ink,
-  gridColor,
-  showLabels,
-) {
-  const primarySeries = categorical.series.filter((series) => series.axis !== "secondary");
-  const secondarySeries = categorical.series.filter((series) => series.axis === "secondary");
-  const primaryScale = categorical.scale;
-  const secondaryScale = secondarySeries.length
-    ? alignedSecondaryScale(
-        secondarySeries.flatMap((series) => series.values),
-        primaryScale,
-      )
-    : undefined;
-  const { layout } = chartLayoutFor(el, categorical, {
-    secondaryScale,
-  });
-  const plot = layout.plot;
-  const yFor = (value, axis) => {
-    const scale = axis === "secondary" ? secondaryScale : primaryScale;
-    if (!scale) return plot.y + plot.h;
-    const range = Math.max(1e-9, scale.max - scale.min);
-    return plot.y + plot.h - ((value - scale.min) / range) * plot.h;
-  };
-  const zeroY = yFor(0, "primary");
-  const grid = primaryScale.ticks
-    .map((tick) => {
-      const y = yFor(tick, "primary");
-      const left = formatChartValue(tick, primaryScale.tickDecimals);
-      const right = secondaryScale
-        ? formatChartValue(
-            secondaryScale.min +
-              ((tick - primaryScale.min) /
-                Math.max(1e-9, primaryScale.max - primaryScale.min)) *
-                (secondaryScale.max - secondaryScale.min),
-            secondaryScale.tickDecimals,
-          )
-        : "";
-      return `<line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.w}" y2="${y}" stroke="${gridColor}" stroke-width="1"/><text x="${plot.x - 6}" y="${y + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(left)}</text>${secondaryScale ? `<text x="${plot.x + plot.w + 6}" y="${y + 3}" text-anchor="start" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(right)}</text>` : ""}`;
-    })
-    .join("");
-  const categories = categorical.categories;
-  const xStep = categories.length ? plot.w / categories.length : plot.w;
-  const barSeries = categorical.series.filter((series) => series.kind === "bar");
-  const barWidth = Math.max(4, Math.min(34, (xStep * 0.62) / Math.max(1, barSeries.length)));
-  const bars = barSeries
-    .map((series, seriesIndex) =>
-      series.values
-        .map((value, rowIndex) => {
-          const groupWidth = barWidth * barSeries.length;
-          const x = plot.x + xStep * (rowIndex + 0.5) - groupWidth / 2 + seriesIndex * barWidth;
-          const axisScale = series.axis === "secondary" ? secondaryScale : primaryScale;
-          const baseY = axisScale
-            ? yFor(Math.max(axisScale.min, 0), series.axis)
-            : zeroY;
-          const y = yFor(value, series.axis);
-          const top = Math.min(y, baseY);
-          const height = Math.max(1, Math.abs(baseY - y));
-          const color = swatch(categorical.series.indexOf(series));
-          const label = showLabels && value !== 0
-            ? `<text x="${x + barWidth / 2}" y="${value >= 0 ? Math.max(plot.y + 11, top - 4) : top + height + 11}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(formatChartValue(value))}</text>`
-            : "";
-          return `<rect x="${x}" y="${top}" width="${Math.max(1, barWidth - 2)}" height="${height}" fill="${color}"/>${label}`;
-        })
-        .join(""),
-    )
-    .join("");
-  const lines = categorical.series
-    .filter((series) => series.kind === "line" || series.kind === "area")
-    .map((series) => {
-      const color = swatch(categorical.series.indexOf(series));
-      const points = series.values.map((value, index) => ({
-        x: plot.x + xStep * (index + 0.5),
-        y: yFor(value, series.axis),
-        value,
-      }));
-      const pointList = points.map((point) => `${point.x},${point.y}`).join(" ");
-      const area =
-        series.kind === "area" && points.length
-          ? `<polygon points="${pointList} ${points.at(-1).x},${zeroY} ${points[0].x},${zeroY}" fill="${color}33"/>`
-          : "";
-      const labels = showLabels
-        ? points
-            .map(
-              (point) =>
-                `<text x="${point.x}" y="${Math.max(plot.y + 11, point.y - 7)}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(formatChartValue(point.value))}</text>`,
-            )
-            .join("")
-        : "";
-      const dots = points
-        .map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="${color}"/>`)
-        .join("");
-      return `${area}<polyline points="${pointList}" fill="none" stroke="${color}" stroke-width="3"/>${dots}${labels}`;
-    })
-    .join("");
-  const categoryLabels = categories
-    .map((category, index) => {
-      const y = layout.categoryBand
-        ? layout.categoryBand.y + CHART_TEXT_PX.category
-        : plot.y + plot.h + 14;
-      return `<text x="${plot.x + xStep * (index + 0.5)}" y="${y}" text-anchor="middle" font-size="${CHART_TEXT_PX.category}" fill="${ink}">${escapeHtmlText(category)}</text>`;
-    })
-    .join("");
-  const legend = legendSvg(layout, swatch, ink);
-  const axisTitles =
-    (layout.axisTitleX
-      ? `<text x="${layout.axisTitleX.x + layout.axisTitleX.w / 2}" y="${layout.axisTitleX.y + layout.axisTitleX.h - 3}" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(el.chartAxis?.x || "")}</text>`
-      : "") +
-    (layout.axisTitleY
-      ? `<text transform="translate(${layout.axisTitleY.x + CHART_TEXT_PX.axisTitle - 2} ${layout.axisTitleY.y + layout.axisTitleY.h / 2}) rotate(-90)" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(el.chartAxis?.y || "")}</text>`
-      : "") +
-    (layout.axisTitleSecondaryY
-      ? `<text transform="translate(${layout.axisTitleSecondaryY.x + 4} ${layout.axisTitleSecondaryY.y + layout.axisTitleSecondaryY.h / 2}) rotate(90)" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(el.chartAxis?.secondaryY || "")}</text>`
-      : "");
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${grid}${bars}${lines}${categoryLabels}${legend}${axisTitles}</svg>`;
-}
-
-/**
- * The colour actually behind an element: its own background, else the topmost
- * opaque element painted under it — a chart dropped onto a dark panel is the
- * common case — else the page background. The native exporter composites the
- * same underlay, so the preview and the exported PPTX agree on chart ink.
- */
-function chartBackdropCss(el) {
-  const elements = Array.isArray(model?.elements) ? model.elements : [];
-  // The painter may be handed a copy of the element, so locate it by id.
-  const index = elements.findIndex((candidate) => candidate === el || (el.id && candidate.id === el.id));
-  if (index <= 0) return "";
-  const [x, y, w, h] = el.bounds || [0, 0, 0, 0];
-  let backdrop = "";
-  for (let i = 0; i < index; i += 1) {
-    const other = elements[i];
-    if (!other || other.hidden) continue;
-    // Canvas elements expose their paint as a CSS colour (`fillCss`), the same
-    // value the shape renderer uses.
-    const fill = other.fillCss;
-    if (!isSolidHex(fill)) continue;
-    const bounds = other.bounds || [0, 0, 0, 0];
-    if (bounds[0] <= x && bounds[1] <= y && bounds[0] + bounds[2] >= x + w && bounds[1] + bounds[3] >= y + h) {
-      backdrop = fill;
-    }
-  }
-  return backdrop;
-}
-
-function paintChartSvg(el) {
-  const w = el.bounds[2];
-  const h = el.bounds[3];
-  const title = escapeHtmlText(el.chartTitle || "");
-  const semanticInput = chartSemanticInput(el);
-  const type = chartKind(semanticInput);
-  // Deck text is LLM/user data — everything interpolated into the SVG string
-  // is escaped so a hostile title/label cannot pivot into markup.
-  const swatch = (i) => escapeHtmlText(canvasChartSwatch(el, i));
-  const chartSurfaceCss = el.chartBackgroundCss || chartBackdropCss(el) || model?.backgroundCss || "";
-  const darkSurface = typeof isDarkCss === "function" && isDarkCss(chartSurfaceCss);
-  const ink = darkSurface ? CHART_INK.dark : CHART_INK.light;
-  const gridColor = darkSurface ? CHART_GRID.dark : CHART_GRID.light;
-  const axis = el.chartAxis || {};
-  const axisSvg =
-    (axis.x
-      ? `<text x="${w / 2}" y="${h - 4}" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(axis.x)}</text>`
-      : "") +
-    (axis.y
-      ? `<text transform="translate(10 ${h / 2}) rotate(-90)" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(axis.y)}</text>`
-      : "");
-  const showLabels = el.chartLabels !== false;
-  const focusRow = el.chartFocusRow ?? chartFocusRow;
-  const titleSvg = title ? `<text x="12" y="18" font-size="${CHART_TEXT_PX.title}" fill="${ink}">${title}</text>` : "";
-  if (type === "waterfall") {
-    return paintWaterfallSvg(el, w, h, titleSvg, axisSvg, ink, gridColor);
-  }
-  if (type === "scatter") {
-    return paintScatterSvg(el, w, h, titleSvg, ink, gridColor);
-  }
-  const categorical = categoricalChartModel(semanticInput);
-  const combo =
-    new Set(categorical.series.map((series) => series.kind)).size >= 2 &&
-    categorical.series.some((series) => series.axis === "secondary");
-  if (combo) {
-    return paintComboChartSvg(
-      el,
-      w,
-      h,
-      titleSvg,
-      categorical,
-      swatch,
-      ink,
-      gridColor,
-      showLabels,
-    );
-  }
-  const categories = categorical.categories;
-  const chartSeries = categorical.series;
-  const seriesCount = Math.max(1, chartSeries.length);
-  const vals = chartSeries[0]?.values || [];
-  const scale = categorical.scale;
-  const range = Math.max(1e-9, scale.max - scale.min);
-  const { layout } = chartLayoutFor(el, categorical);
-  const plot = layout.plot;
-  const yFor = (v) => plot.y + plot.h - ((v - scale.min) / range) * plot.h;
-  const zeroY = yFor(Math.max(scale.min, Math.min(0, scale.max)));
-  const catBandY = layout.categoryBand
-    ? layout.categoryBand.y + CHART_TEXT_PX.category
-    : plot.y + plot.h + 13;
-  const valueDecimals = seriesDecimals(chartSeries.flatMap((s) => s.values));
-  const valueText = (v) => formatChartValue(v, valueDecimals || undefined);
-  const gridSvg =
-    type === "pie"
-      ? ""
-      : scale.ticks
-          .map((tick) => {
-            const y = yFor(tick);
-            return `<line x1="${plot.x}" y1="${y}" x2="${plot.x + plot.w}" y2="${y}" stroke="${gridColor}" stroke-width="1"/><text x="${plot.x - 6}" y="${y + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(formatChartValue(tick, scale.tickDecimals))}</text>`;
-          })
-          .join("");
-  const legend = legendSvg(
-    layout,
-    swatch,
-    ink,
-    CHART_TEXT_PX.legend,
-    type === "pie" ? categories : chartSeries.map((s) => s.name),
-  );
-  const axisTitlesSvg =
-    (layout.axisTitleX
-      ? `<text x="${layout.axisTitleX.x + layout.axisTitleX.w / 2}" y="${layout.axisTitleX.y + layout.axisTitleX.h - 3}" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(axis.x || "")}</text>`
-      : "") +
-    (layout.axisTitleY
-      ? `<text transform="translate(${layout.axisTitleY.x + CHART_TEXT_PX.axisTitle - 2} ${layout.axisTitleY.y + layout.axisTitleY.h / 2}) rotate(-90)" text-anchor="middle" font-size="${CHART_TEXT_PX.axisTitle}" fill="${ink}">${escapeHtmlText(axis.y || "")}</text>`
-      : "");
-  if (type === "pie") {
-    const sum = vals.reduce((a, b) => a + b, 0);
-    const cx = layout.plot.x + layout.plot.w / 2;
-    const cy = layout.plot.y + layout.plot.h / 2;
-    const r = Math.min(layout.plot.w, layout.plot.h) / 2;
-    if (sum <= 0) {
-      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${legend}${axisSvg}</svg>`;
-    }
-    let a0 = -Math.PI / 2;
-    const parts = [];
-    vals.forEach((v, i) => {
-      if (v <= 0) return;
-      const a1 = a0 + (v / sum) * Math.PI * 2;
-      const large = a1 - a0 > Math.PI ? 1 : 0;
-      const d = `M ${cx} ${cy} L ${cx + Math.cos(a0) * r} ${cy + Math.sin(a0) * r} A ${r} ${r} 0 ${large} 1 ${cx + Math.cos(a1) * r} ${cy + Math.sin(a1) * r} Z`;
-      parts.push(`<path d="${d}" fill="${swatch(i)}"></path>`);
-      if (showLabels) {
-        const mid = (a0 + a1) / 2;
-        const lx = cx + Math.cos(mid) * r * 0.55;
-        const ly = cy + Math.sin(mid) * r * 0.55;
-        const pct = Math.round((v / sum) * 100);
-        const name = categories[i] ?? "";
-        parts.push(`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(name)} ${pct}%</text>`);
-      }
-      a0 = a1;
-    });
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${parts.join("")}${legend}${axisSvg}</svg>`;
-  }
-  const iw = plot.w;
-  const ih = plot.h;
-  if (type === "area" || type === "line") {
-    const xStep = iw / Math.max(1, categories.length);
-    const center = (i) => plot.x + xStep * i + xStep / 2;
-    const paths = chartSeries.map((series, s) => {
-      const col = series.values;
-      const pts = col.map((v, i) => `${center(i)},${yFor(v)}`).join(" ");
-      const color = swatch(s);
-      const valueLabs = showLabels
-        ? col
-            .map((v, i) => {
-              const x = center(i);
-              const y = yFor(v);
-              const above = v >= 0;
-              return `<text x="${x}" y="${above ? Math.max(plot.y + 11, y - 6) : y + 14}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(valueText(v))}</text>`;
-            })
-            .join("")
-        : "";
-      if (type === "area") {
-        const lastX = center(categories.length - 1);
-        const base = `${lastX},${zeroY} ${center(0)},${zeroY}`;
-        return `<polygon fill="${color}55" stroke="${color}" stroke-width="2" points="${pts} ${base}"></polygon>${valueLabs}`;
-      }
-      const dots = col
-        .map((v, i) => `<circle cx="${center(i)}" cy="${yFor(v)}" r="3" fill="${color}"/>`)
-        .join("");
-      return `<polyline fill="none" stroke="${color}" stroke-width="3" points="${pts}"></polyline>${dots}${valueLabs}`;
-    }).join("");
-    const catLabs = categories
-      .map((category, i) => `<text x="${center(i)}" y="${catBandY}" text-anchor="middle" font-size="${CHART_TEXT_PX.category}" fill="${ink}">${escapeHtmlText(category)}</text>`)
-      .join("");
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${gridSvg}${paths}${catLabs}${legend}${axisTitlesSvg}</svg>`;
-  }
-  if (categorical.orientation === "horizontal") {
-    const hPlot = {
-      x: plot.x + measureChartTextMax(categories, CHART_TEXT_PX.category) + 8,
-      y: plot.y,
-      w: Math.max(1, plot.x + plot.w - (plot.x + measureChartTextMax(categories, CHART_TEXT_PX.category) + 8)),
-      h: plot.h,
-    };
-    const xFor = (v) => hPlot.x + ((v - scale.min) / range) * hPlot.w;
-    const zeroX = xFor(Math.max(scale.min, Math.min(0, scale.max)));
-    const grid = scale.ticks
-      .map((tick) => {
-        const x = xFor(tick);
-        return `<line x1="${x}" y1="${hPlot.y}" x2="${x}" y2="${hPlot.y + hPlot.h}" stroke="${gridColor}" stroke-width="1"/><text x="${x}" y="${catBandY}" text-anchor="middle" font-size="${CHART_TEXT_PX.tick}" fill="${ink}">${escapeHtmlText(formatChartValue(tick, scale.tickDecimals))}</text>`;
-      })
-      .join("");
-    const groupGap = 7;
-    const groupH = categories.length
-      ? (hPlot.h - groupGap * Math.max(0, categories.length - 1)) / categories.length
-      : hPlot.h;
-    const barGap = 2;
-    const barH = Math.max(3, (groupH - barGap * (seriesCount - 1)) / seriesCount);
-    const bars = categories.map((category, rowIndex) => {
-      const groupY = hPlot.y + rowIndex * (groupH + groupGap);
-      const categoryLabel = `<text x="${hPlot.x - 7}" y="${groupY + groupH / 2 + 3}" text-anchor="end" font-size="${CHART_TEXT_PX.category}" fill="${ink}">${escapeHtmlText(category)}</text>`;
-      const items = chartSeries.map((series, seriesIndex) => {
-        const value = series.values[rowIndex] || 0;
-        const x0 = Math.min(xFor(value), zeroX);
-        const x1 = Math.max(xFor(value), zeroX);
-        const width = Math.max(1, x1 - x0);
-        const y = groupY + seriesIndex * (barH + barGap);
-        const fill = seriesCount === 1 ? swatch(rowIndex) : swatch(seriesIndex);
-        const highlight = focusRow === rowIndex ? ` stroke="#2f86f0" stroke-width="2"` : "";
-        const labelX = value >= 0 ? x1 + 4 : x0 - 4;
-        const valueLabel = showLabels && value !== 0
-          ? `<text x="${labelX}" y="${y + barH / 2 + 3}" text-anchor="${value >= 0 ? "start" : "end"}" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(valueText(value))}</text>`
-          : "";
-        return `<rect x="${x0}" y="${y}" width="${width}" height="${barH}" fill="${fill}"${highlight}></rect>${valueLabel}`;
-      }).join("");
-      return categoryLabel + items;
-    }).join("");
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${grid}${bars}${legend}${axisTitlesSvg}</svg>`;
-  }
-  const groupGap = 10;
-  const barGap = 2;
-  const groupW = categories.length ? (iw - groupGap * (categories.length - 1)) / categories.length : iw;
-  const bw = Math.max(3, (groupW - barGap * (seriesCount - 1)) / seriesCount);
-  const bars = categories
-    .map((category, i) => {
-      const gx = plot.x + i * (groupW + groupGap);
-      const parts = Array.from({ length: seriesCount }, (_, s) => {
-        const v = chartSeries[s]?.values[i] || 0;
-        const y = yFor(v);
-        const top = Math.min(y, zeroY);
-        const height = Math.max(1, Math.abs(zeroY - y));
-        const x = gx + s * (bw + barGap);
-        const fill = seriesCount === 1 ? swatch(i) : swatch(s);
-        const hl = focusRow === i ? ` stroke="#2f86f0" stroke-width="2"` : "";
-        // Same place as the exported outEnd label: just above a positive
-        // bar, just below a negative one. The shared layout reserves both
-        // bands, so the label stays off the fill and the category names.
-        const labelY = v >= 0 ? top - 4 : top + height + 11;
-        const valLab = showLabels && v !== 0
-          ? `<text x="${x + bw / 2}" y="${labelY}" text-anchor="middle" font-size="${CHART_TEXT_PX.dataLabel}" fill="${ink}">${escapeHtmlText(valueText(v))}</text>`
-          : "";
-        return `<rect x="${x}" y="${top}" width="${bw}" height="${height}" fill="${fill}"${hl}></rect>${valLab}`;
-      });
-      const xLab = `<text x="${gx + groupW / 2}" y="${catBandY}" text-anchor="middle" font-size="${CHART_TEXT_PX.category}" fill="${ink}">${escapeHtmlText(category)}</text>`;
-      return parts.join("") + xLab;
-    })
-    .join("");
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" font-family="${SLIDE_FONT_STACK}">${titleSvg}${gridSvg}${bars}${legend}${axisTitlesSvg}</svg>`;
-}
-
-function measureChartTextMax(labels, fontPx) {
-  return labels.reduce(
-    (best, label) => Math.max(best, measureChartText(String(label), fontPx)),
-    0,
-  );
+function paintChartSvg(el, page = model) {
+  return chartPaintMarkup(el, chartContextOf(page, page === model ? chartFocusRow : -1));
 }
 
 function repaintChartNode(el, patch = {}) {
@@ -1895,46 +951,9 @@ function repaintChartNode(el, patch = {}) {
   else node.insertBefore(fresh, node.firstChild);
 }
 
-function iconKey(name) {
-  return String(name || "star").replace(/^(fas|far|fab):/, "");
-}
-
-function paintIconSvg(el) {
-  const fill = escapeHtmlText(el.fillCss || "#000000");
-  const name = iconKey(el.iconName);
-  const d = {
-    star: "M12 2l2.9 6.6L22 9.3l-5 4.7 1.4 7L12 17.8 5.6 21l1.4-7-5-4.7 7.1-.7z",
-    heart: "M12 21s-6.7-4.4-9.3-8.2C.7 10 1.2 6.6 4 5.3 6.2 4.3 8.4 5 12 8.2c3.6-3.2 5.8-3.9 8-2.9 2.8 1.3 3.3 4.7 1.3 7.5C18.7 16.6 12 21 12 21z",
-    check: "M9.2 16.6L4.8 12.2l1.4-1.4 3 3 8.6-8.6 1.4 1.4z",
-    xmark: "M6.4 5l5.6 5.6L17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z",
-    plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
-    minus: "M5 11h14v2H5z",
-    house: "M12 3l9 8h-2v9h-6v-6H11v6H5v-9H3z",
-    user: "M12 12a4 4 0 100-8 4 4 0 000 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z",
-    gear: "M10 2h4l.6 2.4 2.2.9 2.1-1.4 2.8 2.8-1.4 2.1.9 2.2L23 10v4l-2.4.6-.9 2.2 1.4 2.1-2.8 2.8-2.1-1.4-2.2.9L14 23h-4l-.6-2.4-2.2-.9-2.1 1.4L2.3 18l1.4-2.1-.9-2.2L1 14v-4l2.4-.6.9-2.2L2.9 5.1 5.7 2.3l2.1 1.4 2.2-.9zm2 7a3 3 0 110 6 3 3 0 010-6z",
-    lightbulb: "M9 21h6v-1H9zm3-19a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z",
-    comment: "M4 4h16v12H7l-3 3z",
-    envelope: "M3 6h18v12H3zm0 0l9 7 9-7",
-    camera: "M9 6l1.5-2h3L15 6h4v12H5V6zm7 6a4 4 0 11-8 0 4 4 0 018 0z",
-    file: "M6 3h8l4 4v14H6z",
-    "magnifying-glass": "M10 4a6 6 0 014.9 9.6L20 18.7 18.7 20l-5.1-5.1A6 6 0 1110 4zm0 2a4 4 0 100 8 4 4 0 000-8z",
-    bell: "M12 3a6 6 0 016 6v5l2 2H4l2-2V9a6 6 0 016-6zm-2 16h4a2 2 0 01-4 0z",
-    bookmark: "M7 3h10v18l-5-3-5 3z",
-    flag: "M5 3h1v18H5zm2 0h12l-3 4 3 4H7z",
-    bolt: "M13 2L4 14h7l-1 8 10-14h-7z",
-    circle: "M12 3a9 9 0 110 18 9 9 0 010-18z",
-  };
-  const path = d[name] || d.star;
-  return `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="${fill}" d="${path}"/></svg>`;
-}
-
-function paintShapeSvg(el) {
-  return typeof shapePaintMarkup === "function" ? shapePaintMarkup(el) : null;
-}
-
 function replaceShapeSvg(node, el) {
   if (!node) return;
-  const markup = paintShapeSvg(el);
+  const markup = shapeSvgMarkup(el, mediaUrl);
   if (!markup) return;
   const wrap = document.createElement("div");
   wrap.innerHTML = markup;
@@ -2056,91 +1075,6 @@ function exitCropMode() {
   showToast(t("裁切修改已应用，可使用撤销恢复。"), 5000);
 }
 
-function applyCropShapeMask(node, el) {
-  if (el.cropShape?.shapeName === "ellipse") node.style.borderRadius = "50%";
-  if (el.cropShape?.shapeName === "roundRect") node.style.borderRadius = "18px";
-  if (el.cropShape?.shapeName === "diamond") node.style.clipPath = "polygon(50% 0, 100% 50%, 50% 100%, 0 50%)";
-  if (el.cropShape?.shapeName === "hexagon") {
-    node.style.clipPath = "polygon(25% 6%, 75% 6%, 100% 50%, 75% 94%, 25% 94%, 0 50%)";
-  }
-}
-
-function applyImageCropDisplay(node, el) {
-  const crop = el.crop || {};
-  const l = crop.left || 0;
-  const t = crop.top || 0;
-  const r = crop.right || 0;
-  const b = crop.bottom || 0;
-  node.style.backgroundSize =
-    el.fit === "contain" ? "contain" : el.fit === "fill" ? "100% 100%" : "cover";
-  node.style.backgroundPosition = "center";
-  if (l || t || r || b) {
-    const zw = 1 / Math.max(0.08, 1 - l - r);
-    const zh = 1 / Math.max(0.08, 1 - t - b);
-    node.style.backgroundSize = `${zw * 100}% ${zh * 100}%`;
-    node.style.backgroundPosition = `${(l / Math.max(0.01, l + r)) * 100}% ${(t / Math.max(0.01, t + b)) * 100}%`;
-  }
-  applyCropShapeMask(node, el);
-}
-
-function paintCropChromeStyles(node, c) {
-  if (!node) return;
-  const l = c.left || 0;
-  const t = c.top || 0;
-  const r = c.right || 0;
-  const b = c.bottom || 0;
-  const frame = node.querySelector(".crop-frame");
-  if (frame) {
-    frame.style.left = `${l * 100}%`;
-    frame.style.top = `${t * 100}%`;
-    frame.style.right = `${r * 100}%`;
-    frame.style.bottom = `${b * 100}%`;
-  }
-  const tDim = node.querySelector(".crop-dim-t");
-  if (tDim) tDim.style.height = `${t * 100}%`;
-  const bDim = node.querySelector(".crop-dim-b");
-  if (bDim) bDim.style.height = `${b * 100}%`;
-  const lDim = node.querySelector(".crop-dim-l");
-  if (lDim) {
-    lDim.style.width = `${l * 100}%`;
-    lDim.style.top = `${t * 100}%`;
-    lDim.style.bottom = `${b * 100}%`;
-  }
-  const rDim = node.querySelector(".crop-dim-r");
-  if (rDim) {
-    rDim.style.width = `${r * 100}%`;
-    rDim.style.top = `${t * 100}%`;
-    rDim.style.bottom = `${b * 100}%`;
-  }
-}
-
-function paintFaIcon(el) {
-  const fill = escapeHtmlText(el.fillCss || "#000000");
-  const raw = String(el.iconName || "fas:star");
-  const [prefix, name] = raw.includes(":") ? raw.split(":") : ["fas", raw];
-  const uni = faUnicode[name];
-  if (!uni) return paintIconSvg(el);
-  const family = prefix === "fab" ? "Font Awesome 6 Brands" : "Font Awesome 6 Free";
-  const weight = prefix === "fas" ? 900 : 400;
-  // uni comes from the bundled fa-unicode map; fill/family are escaped above.
-  return `<span class="fa-icon" style="font-family:'${family}';font-weight:${weight};color:${fill};font-size:80%">&#x${escapeHtmlText(uni)};</span>`;
-}
-
-function linePathFromPoints(points, curve, w, h) {
-  const pts = String(points || "")
-    .trim()
-    .split(/\s+/)
-    .map((p) => p.split(",").map(Number))
-    .filter((p) => p.length === 2 && p.every(Number.isFinite));
-  if (pts.length < 2) return `M 0 ${h / 2} L ${w} ${h / 2}`;
-  const [x0, y0] = pts[0];
-  if (curve === "smooth" && pts.length >= 3) {
-    if (pts.length === 3) return `M ${x0} ${y0} Q ${pts[1][0]} ${pts[1][1]} ${pts[2][0]} ${pts[2][1]}`;
-    return `M ${x0} ${y0} C ${pts[1][0]} ${pts[1][1]} ${pts[2][0]} ${pts[2][1]} ${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
-  }
-  return pts.map((p, i) => `${i ? "L" : "M"} ${p[0]} ${p[1]}`).join(" ");
-}
-
 function attachSelBox(node) {
   const box = document.createElement("div");
   box.className = "sel-box";
@@ -2194,15 +1128,6 @@ function attachAdjHandles(node, el) {
   });
 }
 
-function animClass(effect) {
-  const e = String(effect || "fade-in");
-  if (e.includes("fly")) return "anim-play-fly";
-  if (e.includes("zoom")) return "anim-play-zoom";
-  if (e.includes("wipe")) return "anim-play-wipe";
-  if (e.includes("float")) return "anim-play-float";
-  return "anim-play-fade";
-}
-
 function paintSlide(target, m, opts = {}) {
   const interactive = opts.interactive !== false;
   const [sw, sh] = m.size;
@@ -2241,132 +1166,13 @@ function paintSlide(target, m, opts = {}) {
         : [],
   );
   for (const el of m.elements) {
-    const [x, y, w, h] = el.bounds;
-    const node = document.createElement("div");
-    node.className = `el ${el.type}${ids.has(el.id) ? " selected" : ""}`;
-    node.dataset.id = el.id;
-    if (el.layoutRole) node.dataset.layoutRole = el.layoutRole;
-    node.style.left = `${x}px`;
-    node.style.top = `${y}px`;
-    node.style.width = `${w}px`;
-    node.style.height = `${h}px`;
-    node.style.padding = "0";
-    node.style.boxSizing = "border-box";
-    node.style.opacity = String(el.opacity ?? 1);
-    const flips = [];
-    if (el.flipH) flips.push("scaleX(-1)");
-    if (el.flipV) flips.push("scaleY(-1)");
-    if (el.rotation) flips.push(`rotate(${el.rotation}deg)`);
-    if (flips.length) node.style.transform = flips.join(" ");
-    if (el.hidden) node.classList.add("is-hidden");
-    if (el.locked) node.classList.add("is-locked");
-    if (el.shadow) {
-      const sh = el.shadow;
-      node.style.boxShadow = `${sh.offsetX || 0}px ${sh.offsetY || 4}px ${sh.blur || 12}px ${sh.color || "rgba(0,0,0,.25)"}`;
-    }
-    if (step != null) {
-      const gi = groups.findIndex((g) => g.some((a) => a.elementId === el.id));
-      if (gi >= 0 && gi >= step) {
-        node.classList.add("anim-hidden");
-      } else if (gi >= 0 && gi === step - 1 && opts.playLast) {
-        const hit = groups[gi].find((a) => a.elementId === el.id);
-        node.classList.add(animClass(hit?.effect));
-      }
-    }
+    const node = createCanvasElement(el, { ids, groups, step, opts });
     if (el.type === "text") {
-      const [ha, va] = el.align || ["left", "top"];
-      applyTextStyleToNode(node, el);
-      if (el.href) {
-        node.dataset.href = el.href;
-        node.title = el.href;
-        node.classList.add("is-link");
-      }
-      if (el.wrap === false) node.style.whiteSpace = "nowrap";
-      if (va === "middle" || va === "bottom") {
-        node.style.display = "flex";
-        node.style.flexDirection = "column";
-        node.style.justifyContent = va === "bottom" ? "flex-end" : "center";
-        node.style.alignItems =
-          ha === "center" ? "center" : ha === "right" ? "flex-end" : "flex-start";
-      }
-      const runs = Array.isArray(el.runs) && el.runs.length ? el.runs : null;
-      if (el.list) {
-        const list = document.createElement(el.list === "number" ? "ol" : "ul");
-        list.className = `text-list text-list-${el.list}`;
-        const lines = String(el.text || "").split(/\n/);
-        for (const line of lines) {
-          const li = document.createElement("li");
-          li.textContent = line;
-          list.append(li);
-        }
-        node.append(list);
-      } else if (runs) {
-        appendTextRuns(node, runs);
-      } else node.textContent = String(el.text || "");
+      paintTextDisplay(node, el, isLiveRichText(el.id));
     } else if (el.type === "shape") {
-      const svg = paintShapeSvg(el);
-      if (svg) {
-        node.style.background = "transparent";
-        node.innerHTML = svg;
-      } else {
-        node.style.background = el.fillCss || "transparent";
-        if (el.shapeName === "ellipse") node.style.borderRadius = "50%";
-        if (el.shapeName === "roundRect") node.style.borderRadius = "12px";
-        if (el.border?.width) {
-          node.style.border = `${el.border.width}px ${el.border.style || "solid"} ${el.border.color || "#111"}`;
-        }
-      }
+      paintCanvasShape(node, el, { mediaUrl });
     } else if (el.type === "image" && el.src) {
-      const crop = el.crop || {};
-      const l = crop.left || 0;
-      const t = crop.top || 0;
-      const r = crop.right || 0;
-      const b = crop.bottom || 0;
-      const cropping = interactive && croppingId === el.id;
-      node.style.backgroundImage = `url("${mediaUrl(el.src)}")`;
-      node.style.backgroundRepeat = "no-repeat";
-      if (cropping) {
-        node.classList.add("is-cropping");
-        node.style.backgroundSize = "100% 100%";
-        node.style.backgroundPosition = "0 0";
-        const dim = (cls, style) => {
-          const d = document.createElement("div");
-          d.className = `crop-dim ${cls}`;
-          Object.assign(d.style, style);
-          node.append(d);
-        };
-        dim("crop-dim-t", { left: "0", top: "0", right: "0", height: `${t * 100}%` });
-        dim("crop-dim-b", { left: "0", bottom: "0", right: "0", height: `${b * 100}%` });
-        dim("crop-dim-l", { left: "0", top: `${t * 100}%`, width: `${l * 100}%`, bottom: `${b * 100}%` });
-        dim("crop-dim-r", { right: "0", top: `${t * 100}%`, width: `${r * 100}%`, bottom: `${b * 100}%` });
-        const frame = document.createElement("div");
-        frame.className = "crop-frame";
-        frame.style.left = `${l * 100}%`;
-        frame.style.top = `${t * 100}%`;
-        frame.style.right = `${r * 100}%`;
-        frame.style.bottom = `${b * 100}%`;
-        for (const [dir, left, top] of [
-          ["nw", "0%", "0%"],
-          ["n", "50%", "0%"],
-          ["ne", "100%", "0%"],
-          ["e", "100%", "50%"],
-          ["se", "100%", "100%"],
-          ["s", "50%", "100%"],
-          ["sw", "0%", "100%"],
-          ["w", "0%", "50%"],
-        ]) {
-          const h = document.createElement("i");
-          h.className = `handle handle-crop handle-${dir}`;
-          h.dataset.crop = dir;
-          h.style.left = left;
-          h.style.top = top;
-          h.addEventListener("pointerdown", (ev) => startCropDrag(ev, el, dir));
-          frame.append(h);
-        }
-        node.append(frame);
-      } else {
-        applyImageCropDisplay(node, el);
-      }
+      paintCanvasImage(node, el, { cropping: interactive && croppingId === el.id, mediaUrl, startCropDrag });
     } else if (el.type === "table" && el.tableRows) {
       const table = document.createElement("table");
       table.className = "el-table";
@@ -2431,40 +1237,11 @@ function paintSlide(target, m, opts = {}) {
       node.append(table);
     } else if (el.type === "chart") {
       node.style.background = el.chartBackgroundCss || "transparent";
-      node.innerHTML = paintChartSvg(el);
+      node.innerHTML = paintChartSvg(el, m);
     } else if (el.type === "line") {
-      const color = escapeHtmlText(el.border?.color || "#111");
-      const width = el.border?.width || 3;
-      const style = el.border?.style || "solid";
-      const dash = style === "dash" ? "12 8" : style === "dot" ? "2 6" : "";
-      const [start, end] = el.lineArrow || [null, null];
-      const id = `ln${el.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
-      const d = linePathFromPoints(el.linePoints, el.lineCurve, w, h);
-      const join = el.lineCurve === "sharp" ? "miter" : "round";
-      const marker = (kind, side) => {
-        if (!kind) return "";
-        return `<marker id="${id}-${side}" viewBox="0 0 10 10" refX="${side === "start" ? 1 : 9}" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="${kind === "diamond" ? "M5 1 L9 5 L5 9 L1 5 Z" : kind === "oval" ? "M5 1 A4 4 0 1 1 4.9 1 Z" : kind === "stealth" ? "M1 1 L9 5 L1 9 L3 5 Z" : "M0 0 L10 5 L0 10 Z"}" fill="${color}"/></marker>`;
-      };
-      const pts = String(el.linePoints || "")
-        .trim()
-        .split(/\s+/)
-        .map((p) => p.split(",").map(Number));
-      const handles =
-        interactive && ids.has(el.id)
-          ? pts
-              .map((p, i) =>
-                Number.isFinite(p[0])
-                  ? `<circle class="bez" data-i="${i}" cx="${p[0]}" cy="${p[1]}" r="6" fill="#fff" stroke="#3b82f6" stroke-width="2" />`
-                  : "",
-              )
-              .join("")
-          : "";
-      const edgeLabel = el.lineLabel
-        ? `<text class="line-label" x="${w / 2}" y="${Math.max(12, h / 2 - 8)}" text-anchor="middle" font-size="10" font-style="italic" fill="${color}">${escapeHtmlText(el.lineLabel)}</text>`
-        : "";
-      node.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%"><defs>${marker(start, "start")}${marker(end, "end")}</defs><path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="${join}" ${dash ? `stroke-dasharray="${dash}"` : ""} ${start ? `marker-start="url(#${id}-start)"` : ""} ${end ? `marker-end="url(#${id}-end)"` : ""} />${edgeLabel}${handles}</svg>`;
+      node.innerHTML = linePaintMarkup(el, { showHandles: interactive && ids.has(el.id) });
     } else if (el.type === "icon") {
-      node.innerHTML = paintFaIcon(el);
+      node.innerHTML = paintFaIcon(el, faUnicode);
     } else {
       node.textContent = el.type;
     }
@@ -2562,6 +1339,15 @@ function paintSlide(target, m, opts = {}) {
   }
 }
 
+/**
+ *  A rotate drag's live transform keeps the element's flips, in the same order the canvas paints them.
+ * @param {string} id @param {number} deg
+ */
+function rotateDragTransform(id, deg) {
+  const live = selectedEl();
+  return live?.id === id ? elementTransform(live, deg) : `rotate(${deg}deg)`;
+}
+
 function slideScale() {
   const slide = $("slide");
   const t = slide.style.transform || "";
@@ -2635,7 +1421,7 @@ function onDrag(ev) {
   } else if (drag.mode === "rot") {
     const deg = drag.rotation + dx;
     const node = slideElNode(drag.id);
-    if (node) node.style.transform = `rotate(${deg}deg)`;
+    if (node) node.style.transform = rotateDragTransform(drag.id, deg);
     drag.nextRotation = deg;
     return;
   } else if (String(drag.mode).startsWith("crop:")) {
@@ -2826,7 +1612,7 @@ function fitStage() {
 function syncRailVisibility() {
   const rail = $("rail");
   if (!rail || !model) return;
-  rail.hidden = !model.pageRailOpen;
+  rail.hidden = !model.pageRailOpen || Boolean(layoutSurface(viewModel()));
   const railToggle = $("btn-rail");
   railToggle?.classList.toggle("active", Boolean(model.pageRailOpen));
   if (railToggle) {
@@ -3501,6 +2287,18 @@ function elementReadableName(el) {
   return shapeNames[subtype] || (subtype ? `${type} · ${subtype}` : type);
 }
 
+/** @param {string[]} ids @param {any} el */
+function propertyPanelTitle(ids, el) {
+  if (ids.length > 1) {
+    const selected = ids.map((id) => model?.elements?.find((candidate) => candidate.id === id)).filter(Boolean);
+    const hiddenTag = selected.some((candidate) => candidate.hidden) ? t(" · 含隐藏对象") : "";
+    const lockedTag = selected.some((candidate) => candidate.locked) ? t(" · 含锁定对象") : "";
+    return t(`{p0} 个对象{p1}`, { p0: ids.length, p1: `${hiddenTag}${lockedTag}` });
+  }
+  if (!el) return t("未选择对象");
+  return `${elementReadableName(el)}${el.hidden ? t(" · 已隐藏") : ""}${el.locked ? t(" · 已锁定") : ""}`;
+}
+
 function updatePropertyPanel(ids = selectedIds(), el = selectedEl()) {
   const panel = $("property-panel");
   const title = $("property-title");
@@ -3519,21 +2317,16 @@ function updatePropertyPanel(ids = selectedIds(), el = selectedEl()) {
     window.innerWidth <= 1440
   );
   const collapsed = (propertyPanelCollapsed || propertyPanelAutoCollapsedForAgent) && hasContext;
-  panel.hidden = commentMode || Boolean(model?.presenting) || (chatOpen && !hasContext);
+  panel.hidden =
+    commentMode ||
+    Boolean(model?.presenting) ||
+    (chatOpen && !hasContext && !pageLayoutOpen(model));
   panel.dataset.inspectorType = el?.smartArt ? "smartart" : el?.type || "none";
   panel.dataset.selectionState = ids.length > 1 ? "multi" : el ? "single" : "empty";
   panel.classList.toggle("is-empty", autoEmpty);
   panel.classList.toggle("is-collapsed", collapsed);
   panel.toggleAttribute("data-agent-auto-collapsed", propertyPanelAutoCollapsedForAgent && hasContext);
-  if (title) {
-    const selected = ids.map((id) => model?.elements?.find((candidate) => candidate.id === id)).filter(Boolean);
-    const multiState = `${selected.some((candidate) => candidate.hidden) ? t(" · 含隐藏对象") : ""}${selected.some((candidate) => candidate.locked) ? t(" · 含锁定对象") : ""}`;
-    title.textContent = ids.length > 1
-        ? t(`{p0} 个对象{p1}`, { p0: ids.length, p1: multiState })
-        : el
-          ? `${elementReadableName(el)}${el.hidden ? t(" · 已隐藏") : ""}${el.locked ? t(" · 已锁定") : ""}`
-          : t("未选择对象");
-  }
+  if (title) title.textContent = propertyPanelTitle(ids, el);
   if (empty) empty.hidden = hasContext || propertyPanelCollapsed;
   if (toggle) {
     toggle.hidden = autoEmpty;
@@ -4530,6 +3323,28 @@ function renderCtxBar() {
   finish();
 }
 
+/** @param {any} vm @param {boolean} historyPreview */
+function syncNotesChrome(vm, historyPreview) {
+  $("notes-panel").hidden = !model.notesOpen;
+  document.querySelector(".app")?.classList.toggle("is-notes", Boolean(model.notesOpen));
+  const notesLink = $("btn-notes-link");
+  if (notesLink) notesLink.textContent = model.notesOpen ? t("隐藏演讲者备注") : t("显示演讲者备注");
+  const notesText = $("notes-text");
+  const readOnly = historyPreview || Boolean(layoutSurface(vm));
+  notesText.readOnly = readOnly;
+  notesText.setAttribute("aria-readonly", String(readOnly));
+  notesText.style.resize = readOnly ? "none" : "";
+  notesText.style.cursor = readOnly ? "default" : "";
+  notesText.style.background = readOnly ? "#f6f7f9" : "";
+  const notesLabel = notesText.closest("label")?.firstChild;
+  if (notesLabel?.nodeType === Node.TEXT_NODE) {
+    notesLabel.textContent = historyPreview ? t("演讲者备注 · 历史版本只读\n") : t("演讲者备注\n");
+  }
+  if (historyPreview || document.activeElement !== notesText) {
+    notesText.value = vm.notes || "";
+  }
+}
+
 function renderChrome() {
   const vm = viewModel();
   const historyPreview = Boolean(previewVersion);
@@ -4540,23 +3355,7 @@ function renderChrome() {
   $("btn-rail").classList.toggle("active", model.pageRailOpen);
   const meta = $("rail-meta");
   if (meta) meta.hidden = false;
-  $("notes-panel").hidden = !model.notesOpen;
-  document.querySelector(".app")?.classList.toggle("is-notes", Boolean(model.notesOpen));
-  const notesLink = $("btn-notes-link");
-  if (notesLink) notesLink.textContent = model.notesOpen ? t("隐藏演讲者备注") : t("显示演讲者备注");
-  const notesText = $("notes-text");
-  notesText.readOnly = historyPreview;
-  notesText.setAttribute("aria-readonly", String(historyPreview));
-  notesText.style.resize = historyPreview ? "none" : "";
-  notesText.style.cursor = historyPreview ? "default" : "";
-  notesText.style.background = historyPreview ? "#f6f7f9" : "";
-  const notesLabel = notesText.closest("label")?.firstChild;
-  if (notesLabel?.nodeType === Node.TEXT_NODE) {
-    notesLabel.textContent = historyPreview ? t("演讲者备注 · 历史版本只读\n") : t("演讲者备注\n");
-  }
-  if (historyPreview || document.activeElement !== notesText) {
-    notesText.value = vm.notes || "";
-  }
+  syncNotesChrome(vm, historyPreview);
   for (const id of ["btn-rail-view", "btn-mode-edit"]) {
     const control = $(id);
     if (control) control.disabled = historyPreview;
@@ -4617,6 +3416,7 @@ function renderChrome() {
   renderCtxBar();
   renderTimeline();
   renderComments();
+  layoutMode.paintChrome(vm, Boolean(previewVersion));
 }
 
 let lastPage = -1;
@@ -4702,6 +3502,8 @@ function command(cmd, payload = {}) {
   return attempt;
 }
 
+const layoutMode = createLayoutMode({ command, showToast, paintSlide, getView: () => viewModel() });
+
 window.addEventListener("unhandledrejection", (event) => {
   if (event.reason && (typeof event.reason === "object" || typeof event.reason === "function") && reportedCommandErrors.has(event.reason)) {
     // command() has already surfaced this failure. Async DOM handlers may
@@ -4726,6 +3528,9 @@ async function runCommand(cmd, payload = {}) {
     "select",
     "undo",
     "redo",
+    "layoutEnter",
+    "layoutExit",
+    "layoutSelect",
   ]);
   if (settleBefore.has(cmd)) {
     // Keep the boundary action from overtaking a failed local save. The
@@ -4758,6 +3563,7 @@ async function runCommand(cmd, payload = {}) {
       next[payload.boundsIndex] = payload.boundsValue;
       requestPayload = { bounds: next };
     }
+    const undone = cmd === "undo" ? undoneLayoutMark(model) : null;
     const data = await api("/api/command", {
       method: "POST",
       body: JSON.stringify({ cmd, baseRevision: lastDiskRevision || undefined, ...requestPayload }),
@@ -4778,6 +3584,7 @@ async function runCommand(cmd, payload = {}) {
     });
     model = data.model;
     if (data.thumbs) thumbs = data.thumbs;
+    if (undone) layoutMode.afterUndo(undone, model);
     const selectedTarget = payload.elementId
       ? [payload.elementId]
       : Array.isArray(payload.elementIds) ? payload.elementIds : [];
@@ -4876,7 +3683,6 @@ function showExportResult(info) {
   if (err) err.hidden = true;
   if (!result) return;
   result.hidden = false;
-  const deg = Number(info.degradations) || 0;
   const embedded = Array.isArray(info.embeddedFonts) ? info.embeddedFonts : [];
   const skipped = Array.isArray(info.skippedFonts) ? info.skippedFonts : [];
   const embeddedNames = embedded
@@ -4905,7 +3711,7 @@ function showExportResult(info) {
     .join("、");
   result.innerHTML = `<strong class="export-file">${escapeHtmlText(info.filename)}</strong>
     <span>${t("{p0} 页 · {p1}", { p0: info.pages, p1: info.size })}</span>
-    ${deg > 0 ? `<small class="export-deg">${t("{p0} 处存在导出差异", { p0: deg })}</small>` : ""}
+    ${exportDegradationHtml(info.degradations)}
     ${embedded.length ? `<small class="export-fonts">${t("已嵌入字体：{p0}", { p0: embeddedNames })}</small>` : ""}
     ${builtin.length ? `<small class="export-fonts">${t("Office / WPS 自带，无需嵌入：{p0}", { p0: builtinNames })}</small>` : ""}
     ${problems.length ? `<small class="export-fonts export-fonts-skipped">${t("未能嵌入：{p0}", { p0: problemNames })}</small>` : ""}`;
@@ -4933,7 +3739,7 @@ async function downloadExport(format) {
       body: JSON.stringify({
         format,
         project: currentProjectPath(),
-        tabId: editorTabId(),
+        tabId: resilience.editorTabId(),
         embedFonts: Boolean($("export-embed-fonts")?.checked),
       }),
     });
@@ -4960,7 +3766,7 @@ async function downloadExport(format) {
       filename,
       pages,
       size: formatExportSize(bytes),
-      degradations: report?.degradations ?? 0,
+      degradations: report?.degradationKinds ?? report?.degradations ?? 0,
       embeddedFonts: report?.embeddedFonts ?? [],
       skippedFonts: report?.skippedFonts ?? [],
     });
@@ -5012,125 +3818,76 @@ function pickImageFile(cb) {
   input.click();
 }
 
-function agentAttachmentStorageKey() {
-  const project = new URLSearchParams(location.search).get("project") || "default";
-  return `oss.editor.agent-attachments:${project}`;
-}
-
-function persistPendingAgentAttachments() {
-  try {
-    localStorage.setItem(agentAttachmentStorageKey(), JSON.stringify(pendingAgentAttachments));
-  } catch {
-    // The visible chips remain authoritative for this tab when storage is unavailable.
-  }
-}
-
-function renderPendingAgentAttachments() {
-  const box = $("agent-attachments");
-  if (!box) return;
-  box.replaceChildren();
-  box.hidden = pendingAgentAttachments.length === 0;
-  for (const attachment of pendingAgentAttachments) {
-    const chip = document.createElement("span");
-    chip.className = "agent-attachment-chip";
-    chip.dataset.attachmentId = attachment.id;
-    const label = document.createElement("span");
-    label.textContent = attachment.consumed
-      ? t(`{p0}`, { p0: attachment.name })
-      : `${attachment.name} · ${formatExportSize(attachment.bytes)}`;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.title = t(`移除 {p0}`, { p0: attachment.name });
-    remove.setAttribute("aria-label", t(`移除附件 {p0}`, { p0: attachment.name }));
-    remove.textContent = "×";
-    remove.addEventListener("click", async () => {
-      remove.disabled = true;
-      try {
-        const response = await fetch(`/api/attachments/${encodeURIComponent(attachment.id)}`, { method: "DELETE" });
-        if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
-        pendingAgentAttachments = pendingAgentAttachments.filter((entry) => entry.id !== attachment.id);
-        persistPendingAgentAttachments();
-        renderPendingAgentAttachments();
-      } catch (error) {
-        remove.disabled = false;
-        showToast(t(`移除附件失败：{p0}`, { p0: error instanceof Error ? error.message : String(error) }), 5000);
-      }
-    });
-    chip.append(label, remove);
-    box.append(chip);
-  }
-}
-
+/** @param {boolean} busy */
 function setPendingAgentAttachmentsBusy(busy) {
   const box = $("agent-attachments");
   box?.setAttribute("aria-busy", String(Boolean(busy)));
-  if ($("composer-plus")) $("composer-plus").disabled = Boolean(busy) || agentAttachmentUploadActive;
-  if ($("agent-attachment-file")) $("agent-attachment-file").disabled = Boolean(busy);
+  const plus = /** @type {HTMLButtonElement | null} */ ($("composer-plus"));
+  if (plus) plus.disabled = Boolean(busy) || agentAttachments.busy();
+  const input = /** @type {HTMLInputElement | null} */ ($("agent-attachment-file"));
+  if (input) input.disabled = Boolean(busy);
   box?.querySelectorAll("button").forEach((button) => {
     button.disabled = Boolean(busy);
   });
 }
 
-async function uploadAgentAttachment(file) {
-  const data = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error || new Error(t(`无法读取 {p0}`, { p0: file.name })));
-    reader.readAsDataURL(file);
-  });
-  return api("/api/attachments", {
-    method: "POST",
-    body: JSON.stringify({ name: file.name, data }),
-  });
+/** Idle send-button label; an attachment that blocks sending names itself here (the submit handler enforces it). */
+function syncComposerSendLabel() {
+  const send = /** @type {HTMLButtonElement | null} */ (document.querySelector("#work-form .composer-send"));
+  if (!send || generationInteractionLocked() || aiReviewTurnActive) return;
+  const count = selectedCommentEntries().length;
+  send.title = agentAttachments.gate() || (count ? t(`发送 {p0} 条批注`, { p0: count }) : t("发送消息"));
+  send.setAttribute("aria-label", send.title);
 }
 
-async function restorePendingAgentAttachments() {
-  let saved = [];
+/** The model the next message uses: the composer picker, else the session's provider. */
+function assistantModelKey() {
+  const override = String(/** @type {HTMLSelectElement | null} */ ($("assistant-model"))?.value || "");
+  if (override) return override;
+  const provider = generationActivity?.provider;
+  return provider ? modelOptionValue(provider.providerId || "", provider.modelId || "") : "";
+}
+
+function openAssistantModelPicker() {
+  const select = /** @type {HTMLSelectElement | null} */ ($("assistant-model"));
+  select?.focus();
   try {
-    saved = JSON.parse(localStorage.getItem(agentAttachmentStorageKey()) || "[]");
+    select?.showPicker?.();
   } catch {
-    saved = [];
+    /* showPicker needs a user gesture in some browsers; focus is enough */
   }
-  if (!Array.isArray(saved) || !saved.length) {
-    pendingAgentAttachments = [];
-    renderPendingAgentAttachments();
-    return;
-  }
-  const restored = [];
-  for (const item of saved.slice(0, 6)) {
-    const id = String(item?.id || "");
-    if (!id) continue;
-    try {
-      const rec = await api(`/api/attachments/${encodeURIComponent(id)}`);
-      if (rec.parsed && typeof rec.text === "string") {
-        restored.push({ id: rec.id, name: rec.name, bytes: rec.bytes, consumed: Boolean(item.consumed) });
-      }
-    } catch {
-      // Attachment sidecar state may have been restarted; stale chips are dropped.
-    }
-  }
-  pendingAgentAttachments = restored;
-  persistPendingAgentAttachments();
-  renderPendingAgentAttachments();
 }
 
+const agentAttachments = mountEditorAttachments({
+  projectKey: () => new URLSearchParams(location.search).get("project") || "default",
+  apiPath: (path) => {
+    const project = currentProjectPath();
+    return nativeApi(path) + (project ? `?project=${encodeURIComponent(project)}` : "");
+  },
+  onBusy: () => {
+    setPendingAgentAttachmentsBusy(false);
+    syncComposerSendLabel();
+  },
+  onMessage: (message) => showToast(message, 6000),
+  onItemsChanged: (next) => {
+    pendingAgentAttachments = next;
+    syncComposerSendLabel();
+  },
+  vision: { modelKey: assistantModelKey, onOpenModelPicker: openAssistantModelPicker },
+});
+onLangChange(() => agentAttachments.repaint());
+
+/** One restore per page load; a turn settled later waits for it before it consumes. @type {Promise<void> | undefined} */
+let attachmentsRestored;
+const restorePendingAgentAttachments = () => (attachmentsRestored ??= agentAttachments.restore());
+// Read the saved selection now: a chip repaint (vision capability, language switch) persists
+// the in-memory list, so waiting for /api/open could overwrite it with an empty one.
+void restorePendingAgentAttachments();
+
+/** @param {Pick<import("./editor-attachments.js").AgentAttachment, "id" | "packId">[]} attachments */
 async function consumePendingAgentAttachments(attachments) {
-  const cleanup = await Promise.all(attachments.map(async (attachment) => {
-    try {
-      const response = await fetch(`/api/attachments/${encodeURIComponent(attachment.id)}`, { method: "DELETE" });
-      return { id: attachment.id, removed: response.ok || response.status === 404 };
-    } catch {
-      return { id: attachment.id, removed: false };
-    }
-  }));
-  const removed = new Set(cleanup.filter((entry) => entry.removed).map((entry) => entry.id));
-  const cleanupFailed = new Set(cleanup.filter((entry) => !entry.removed).map((entry) => entry.id));
-  pendingAgentAttachments = pendingAgentAttachments
-    .filter((attachment) => !removed.has(attachment.id))
-    .map((attachment) => cleanupFailed.has(attachment.id) ? { ...attachment, consumed: true } : attachment);
-  persistPendingAgentAttachments();
-  renderPendingAgentAttachments();
-  if (cleanupFailed.size) showToast(t("Agent 已收到附件，但有附件清理失败；可用 × 重试清理。"), 6000);
+  await restorePendingAgentAttachments();
+  await agentAttachments.consumeSent(attachments);
 }
 
 function positionInsertPopover(popover, trigger) {
@@ -5212,39 +3969,6 @@ $("btn-sparkles")?.addEventListener("click", () => {
   showWorkChat();
 });
 $("chat-close")?.addEventListener("click", () => hideWorkChat());
-$("composer-plus")?.addEventListener("click", () => $("agent-attachment-file")?.click());
-$("agent-attachment-file")?.addEventListener("change", async (event) => {
-  const input = event.currentTarget;
-  const files = [...(input.files || [])];
-  input.value = "";
-  if (!files.length) return;
-  if (pendingAgentAttachments.length + files.length > 6) {
-    showToast(t("每次最多发送 6 个附件。"), 5000);
-    return;
-  }
-  agentAttachmentUploadActive = true;
-  setPendingAgentAttachmentsBusy(false);
-  try {
-    for (const file of files) {
-      const uploaded = await uploadAgentAttachment(file);
-      if (!uploaded.parsed) {
-        await fetch(`/api/attachments/${encodeURIComponent(uploaded.id)}`, { method: "DELETE" }).catch(() => undefined);
-        throw new Error(uploaded.note || t(`{p0}`, { p0: file.name }));
-      }
-      pendingAgentAttachments.push(uploaded);
-    }
-    persistPendingAgentAttachments();
-    renderPendingAgentAttachments();
-  } catch (error) {
-    showToast(t(`附件上传失败：{p0}`, { p0: error instanceof Error ? error.message : String(error) }), 6000);
-  } finally {
-    agentAttachmentUploadActive = false;
-    persistPendingAgentAttachments();
-    renderPendingAgentAttachments();
-    setPendingAgentAttachmentsBusy(false);
-  }
-});
-
 function versionUiLabel(version) {
   const id = String(version?.id || "");
   return /^v[1-9]\d*$/i.test(id) ? id.toUpperCase() : String(version?.label || id || t("版本"));
@@ -5685,7 +4409,7 @@ $("present").addEventListener("click", (ev) => {
   }
 });
 $("notes-text").addEventListener("input", () => {
-  if (previewVersion) {
+  if (previewVersion || layoutSurface(viewModel())) {
     $("notes-text").value = viewModel()?.notes || "";
     return;
   }
@@ -6498,10 +5222,99 @@ async function rebindComment(comment, scope) {
   }
 }
 
+/**
+ * Review comments are loosely shaped legacy records (server JSON plus local
+ * UI flags), so `any` is intentional here.
+ * @typedef {Record<string, any>} ReviewCommentRecord
+ */
+
+/** @param {ReviewCommentRecord} comment */
+function ensureCommentScope(comment) {
+  if (comment.scope) return;
+  const legacyId = String(comment.elementId || "").trim();
+  comment.scope = legacyId ? { kind: "elements", elementIds: [legacyId] } : { kind: "page", elementIds: [] };
+}
+
+/**
+ * @param {ReviewCommentRecord} comment
+ * @param {ReviewCommentRecord | null} rebindScope
+ */
+function outgoingCommentPayload(comment, rebindScope) {
+  const outgoing = { ...comment };
+  delete outgoing._resolvePending;
+  if (rebindScope) outgoing.scope = rebindScope;
+  // Scope is immutable after creation. Omitting it on ordinary updates
+  // prevents a later selection change from silently retargeting a thread —
+  // unless this call is an explicit re-bind.
+  if (!rebindScope && Number.isInteger(comment.revision) && comment.revision >= 1) delete outgoing.scope;
+  return outgoing;
+}
+
+/**
+ * @param {ReviewCommentRecord} outgoing
+ * @param {ReviewCommentRecord} comment
+ * @param {{ pagePath: string, rebindScope: ReviewCommentRecord | null }} options
+ */
+async function patchReviewComment(outgoing, comment, { pagePath, rebindScope }) {
+  /** @param {ReviewCommentRecord} payload */
+  const sendPatch = (payload) =>
+    fetch(nativeApi("/api/reviews"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: currentProjectPath(),
+        pagePath,
+        comment: payload,
+        // An explicit re-bind is the one case where a scope may change.
+        ...(rebindScope ? { rebind: true } : {}),
+      }),
+    });
+  let response = await sendPatch(outgoing);
+  let result = await response.json().catch(() => null);
+  if (response.status === 400 && result?.code === "REVIEW_SCOPE_REQUIRED" && !outgoing.scope) {
+    // This browser still holds the comment but the project store no longer has
+    // its thread, so the server asks for an explicit scope. Re-send with the
+    // scope we already resolved locally instead of failing the save.
+    response = await sendPatch({ ...outgoing, scope: comment.scope });
+    result = await response.json().catch(() => null);
+  }
+  return { response, result };
+}
+
+/**
+ * Adopt the server copy after a 409 and build the error the save rejects with.
+ * @param {ReviewCommentRecord} result
+ */
+function applyCommentSaveConflict(result) {
+  const index = comments.findIndex((entry) => entry.id === result.comment.id);
+  if (index >= 0) Object.assign(comments[index], result.comment);
+  localStorage.setItem(commentKey(), JSON.stringify(comments));
+  renderComments();
+  const error = new Error(
+    result.code === "REVIEW_SCOPE_IMMUTABLE"
+      ? t("批注范围已锁定；如需改范围，请新建批注。")
+      : t("批注已被其他窗口更新，已载入最新版本。"),
+  );
+  error.code = result.code || "REVIEW_COMMENT_CONFLICT";
+  return error;
+}
+
+/** @param {ReviewCommentRecord} result */
+function commentSaveFailureError(result) {
+  const missing = Array.isArray(result?.missingElementIds) ? `：${result.missingElementIds.join("、")}` : "";
+  const error = new Error(
+    result?.code === "REVIEW_TARGET_MISSING"
+      ? t(`批注对象已不存在{p0}，请重新选择对象后新建批注。`, { p0: missing })
+      : result?.error || t("批注保存失败"),
+  );
+  error.code = result?.code || "REVIEW_SAVE_FAILED";
+  return error;
+}
+
 function saveComments(changedComment, { throwOnError = false, deferLocal = false, rebindScope = null } = {}) {
   const now = new Date().toISOString();
   for (const comment of comments) {
-    comment.id ||= globalThis.crypto?.randomUUID?.() || `review-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    comment.id ||= resilience.safeRandomUUID();
     comment.author ||= t("我");
     comment.createdAt ||= now;
     comment.updatedAt = now;
@@ -6513,58 +5326,11 @@ function saveComments(changedComment, { throwOnError = false, deferLocal = false
   const records = changedId ? comments.filter((comment) => comment.id === changedId) : comments.slice();
   const attempt = commentSaveTail.then(async () => {
     for (const comment of records) {
-      if (!comment.scope) {
-        const legacyId = String(comment.elementId || "").trim();
-        comment.scope = legacyId
-          ? { kind: "elements", elementIds: [legacyId] }
-          : { kind: "page", elementIds: [] };
-      }
-      const outgoing = { ...comment };
-      delete outgoing._resolvePending;
-      if (rebindScope) outgoing.scope = rebindScope;
-      // Scope is immutable after creation. Omitting it on ordinary updates
-      // prevents a later selection change from silently retargeting a thread —
-      // unless this call is an explicit re-bind.
-      if (!rebindScope && Number.isInteger(comment.revision) && comment.revision >= 1) delete outgoing.scope;
-      const sendPatch = (payload) => fetch(nativeApi("/api/reviews"), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project: currentProjectPath(),
-          pagePath,
-          comment: payload,
-          // An explicit re-bind is the one case where a scope may change.
-          ...(rebindScope ? { rebind: true } : {}),
-        }),
-      });
-      let response = await sendPatch(outgoing);
-      let result = await response.json().catch(() => null);
-      if (response.status === 400 && result?.code === "REVIEW_SCOPE_REQUIRED" && !outgoing.scope) {
-        // This browser still holds the comment but the project store no longer has
-        // its thread, so the server asks for an explicit scope. Re-send with the
-        // scope we already resolved locally instead of failing the save.
-        response = await sendPatch({ ...outgoing, scope: comment.scope });
-        result = await response.json().catch(() => null);
-      }
-      if (response.status === 409 && result?.comment) {
-        const index = comments.findIndex((entry) => entry.id === result.comment.id);
-        if (index >= 0) Object.assign(comments[index], result.comment);
-        localStorage.setItem(commentKey(), JSON.stringify(comments));
-        renderComments();
-        const error = new Error(result.code === "REVIEW_SCOPE_IMMUTABLE"
-          ? t("批注范围已锁定；如需改范围，请新建批注。")
-          : t("批注已被其他窗口更新，已载入最新版本。"));
-        error.code = result.code || "REVIEW_COMMENT_CONFLICT";
-        throw error;
-      }
-      if (!response.ok || !result?.comment) {
-        const missing = Array.isArray(result?.missingElementIds) ? `：${result.missingElementIds.join("、")}` : "";
-        const error = new Error(result?.code === "REVIEW_TARGET_MISSING"
-          ? t(`批注对象已不存在{p0}，请重新选择对象后新建批注。`, { p0: missing })
-          : result?.error || t("批注保存失败"));
-        error.code = result?.code || "REVIEW_SAVE_FAILED";
-        throw error;
-      }
+      ensureCommentScope(comment);
+      const outgoing = outgoingCommentPayload(comment, rebindScope);
+      const { response, result } = await patchReviewComment(outgoing, comment, { pagePath, rebindScope });
+      if (response.status === 409 && result?.comment) throw applyCommentSaveConflict(result);
+      if (!response.ok || !result?.comment) throw commentSaveFailureError(result);
       const index = comments.findIndex((entry) => entry.id === result.comment.id);
       if (index >= 0) Object.assign(comments[index], result.comment);
       syncCommentQueuePage(pagePath, comments);
@@ -6654,6 +5420,32 @@ function avoidInsertPill(px, py, orphan) {
   return { px, py, orphan };
 }
 
+/**
+ * @param {HTMLElement} layer
+ * @param {ReviewCommentRecord} c
+ * @param {DOMRect} vp
+ */
+function appendCommentAnchorMarks(layer, c, vp) {
+  const targetIds = commentElementIds(c);
+  // A missing element is NOT a page comment. Never paint a whole-slide outline
+  // as a fallback: it falsely tells the user that the note targets the page.
+  const boxes = targetIds.length
+    ? targetIds.map((elementId) => ({ elementId, rect: slideElNode(elementId)?.getBoundingClientRect() }))
+    : c.scope?.kind === "page"
+      ? [{ elementId: "", rect: vp }]
+      : [];
+  for (const { elementId, rect } of boxes) {
+    if (!rect || !rect.width || !rect.height) continue;
+    const mark = document.createElement("div");
+    mark.className = `comment-anchor${elementId ? "" : " is-page"}`;
+    mark.dataset.commentId = c.id || "";
+    mark.dataset.elementId = elementId;
+    positionCommentBox(mark, rect);
+    mark.setAttribute("aria-hidden", "true");
+    layer.append(mark);
+  }
+}
+
 function renderComments() {
   if (model) void ensureCommentQueue();
   renderCommentBatchChip();
@@ -6701,22 +5493,7 @@ function renderComments() {
       void openPinCard(c);
     });
     layer.append(pin);
-    const targetIds = commentElementIds(c);
-    // A missing element is NOT a page comment. Never paint a whole-slide outline
-    // as a fallback: it falsely tells the user that the note targets the page.
-    const boxes = targetIds.length
-      ? targetIds.map((elementId) => ({ elementId, rect: slideElNode(elementId)?.getBoundingClientRect() }))
-      : c.scope?.kind === "page" ? [{ elementId: "", rect: vp }] : [];
-    for (const { elementId, rect } of boxes) {
-      if (!rect || !rect.width || !rect.height) continue;
-      const mark = document.createElement("div");
-      mark.className = `comment-anchor${elementId ? "" : " is-page"}`;
-      mark.dataset.commentId = c.id || "";
-      mark.dataset.elementId = elementId;
-      positionCommentBox(mark, rect);
-      mark.setAttribute("aria-hidden", "true");
-      layer.append(mark);
-    }
+    appendCommentAnchorMarks(layer, c, vp);
     pin.addEventListener("mouseenter", () => syncCommentAnchorHighlight(c.id));
     pin.addEventListener("mouseleave", () => syncCommentAnchorHighlight());
     pin.addEventListener("focus", () => syncCommentAnchorHighlight(c.id));
@@ -7012,11 +5789,7 @@ function renderCommentBatchChip() {
       item.append(open,remove); list.append(item);
     });
   }
-  const send=document.querySelector('#work-form .composer-send');
-  if (send && !generationInteractionLocked() && !aiReviewTurnActive) {
-    const label=entries.length ? t(`发送 {p0} 条批注`, { p0: entries.length }) : t("发送消息");
-    send.title=label; send.setAttribute('aria-label',label);
-  }
+  syncComposerSendLabel();
   paintWorkAgentTarget();
 }
 
@@ -7094,6 +5867,10 @@ async function retryCommentSubmission(submission) {
 /** New requests leave through the composer; failed messages own their retry. */
 async function submitCommentBatch(entries = selectedCommentEntries(), { retryBrief } = {}) {
   if (!entries.length) return false;
+  if (layoutSurface(viewModel())) {
+    showToast(t("版式模式下不能发送批注，请先点「完成」退出版式模式。"));
+    return true;
+  }
   if (commentSubmitPending || generationInteractionLocked() || aiReviewTurnActive) return true;
   commentSubmitPending = true;
   const draft = retryBrief === undefined ? ($("work-brief")?.value || "") : undefined;
@@ -7792,6 +6569,35 @@ $("property-toggle")?.addEventListener("click", () => {
 });
 $("btn-comments")?.addEventListener("click", () => void setCommentMode(!commentMode, { focus: true }));
 $("comment-panel-close")?.addEventListener("click", () => { hideCommentPopover(); $("btn-comments")?.focus(); });
+/**
+ * Build the local record for a new draft comment anchored to its first target.
+ * @param {string} text
+ * @param {string[]} ids
+ */
+function buildCommentDraftRecord(text, ids) {
+  const [sw, sh] = slideSize();
+  const first = commentDraftScope !== "page" && ids.length ? model?.elements?.find((element) => element.id === ids[0]) : null;
+  const centerX = first?.bounds ? (first.bounds[0] + first.bounds[2] / 2) / sw : 0.5;
+  const centerY = first?.bounds ? (first.bounds[1] + first.bounds[3] / 2) / sh : 0.5;
+  /** @type {ReviewCommentRecord} */
+  const rec = {
+    x: Math.max(0, Math.min(1, centerX)),
+    y: Math.max(0, Math.min(1, centerY)),
+    elementId: commentDraftScope !== "page" ? ids[0] : undefined,
+    scope:
+      ids.length && commentDraftScope !== "page"
+        ? { kind: "elements", elementIds: ids.slice() }
+        : { kind: "page", elementIds: [] },
+    text,
+    resolved: false,
+  };
+  if (first?.bounds) {
+    rec.ox = first.bounds[2] / 2;
+    rec.oy = first.bounds[3] / 2;
+  }
+  return rec;
+}
+
 $("comment-add")?.addEventListener("click", async () => {
   const addButton = $("comment-add");
   const draft = $("comment-draft");
@@ -7809,26 +6615,7 @@ $("comment-add")?.addEventListener("click", async () => {
       : t("请先点击画布上的内容。"));
     return;
   }
-  const [sw, sh] = slideSize();
-  const first = commentDraftScope !== "page" && ids.length
-    ? model?.elements?.find((element) => element.id === ids[0])
-    : null;
-  const centerX = first?.bounds ? (first.bounds[0] + first.bounds[2] / 2) / sw : 0.5;
-  const centerY = first?.bounds ? (first.bounds[1] + first.bounds[3] / 2) / sh : 0.5;
-  const rec = {
-    x: Math.max(0, Math.min(1, centerX)),
-    y: Math.max(0, Math.min(1, centerY)),
-    elementId: commentDraftScope !== "page" ? ids[0] : undefined,
-    scope: ids.length && commentDraftScope !== "page"
-      ? { kind: "elements", elementIds: ids.slice() }
-      : { kind: "page", elementIds: [] },
-    text,
-    resolved: false,
-  };
-  if (first?.bounds) {
-    rec.ox = first.bounds[2] / 2;
-    rec.oy = first.bounds[3] / 2;
-  }
+  const rec = buildCommentDraftRecord(text, ids);
   comments.push(rec);
   if (addButton) {
     addButton.dataset.busy = "1";
@@ -8138,41 +6925,8 @@ Promise.all([
   if (model) render();
 });
 
-const INTERNAL_CLIPBOARD_TYPE = "application/x-open-slidestudio-elements";
-const INTERNAL_CLIPBOARD_HTML_ATTR = "data-open-slidestudio-clipboard";
-
-function nativeClipboardTarget(target = document.activeElement) {
-  return target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    Boolean(target?.isContentEditable || target?.closest?.('[contenteditable="true"]'));
-}
-
-function clipboardPlainText(data) {
-  const plain = data?.getData("text/plain") || "";
-  if (plain) return plain;
-  const html = data?.getData("text/html") || "";
-  if (!html) return "";
-  return new DOMParser().parseFromString(html, "text/html").body.textContent || "";
-}
-
-function clipboardHtml(payload) {
-  const node = document.createElement("span");
-  node.setAttribute(INTERNAL_CLIPBOARD_HTML_ATTR, payload.token);
-  node.textContent = payload.plain;
-  return node.outerHTML;
-}
-
-function clipboardTokenFromHtml(html) {
-  if (!html) return "";
-  return new DOMParser()
-    .parseFromString(html, "text/html")
-    .querySelector(`[${INTERNAL_CLIPBOARD_HTML_ATTR}]`)
-    ?.getAttribute(INTERNAL_CLIPBOARD_HTML_ATTR) || "";
-}
-
 function newCanvasClipboardPayload() {
-  const token = globalThis.crypto?.randomUUID?.() || `clipboard-${Date.now()}`;
+  const token = resilience.safeRandomUUID();
   const elementIds = selectedIds();
   return { token, elementIds, plain: t(`DSH SlideStudio 对象（{p0} 个）`, { p0: elementIds.length }) };
 }
@@ -8234,7 +6988,9 @@ async function copyCanvasSelectionFromMenu({ cut = false } = {}) {
   await commitCanvasClipboard(payload, { cut });
 }
 
-function applyCanvasClipboard({ token = "", plain = "" } = {}) {
+/** @param {unknown} [value] */
+function applyCanvasClipboard(value = {}) {
+  const { token, plain } = decodeClipboardContent(value);
   const internal = Boolean(internalClipboardClaim && token === internalClipboardClaim.token);
   if (internal) {
     void command("pasteClipboard").catch((error) =>
@@ -8254,6 +7010,7 @@ function applyCanvasClipboard({ token = "", plain = "" } = {}) {
     showToast(t(`粘贴文本失败：{p0}`, { p0: error instanceof Error ? error.message : String(error) })));
 }
 
+/** @param {ClipboardItem} item @param {string} type */
 async function clipboardItemText(item, type) {
   if (!item?.types?.includes(type)) return "";
   return (await item.getType(type)).text();
@@ -8294,161 +7051,212 @@ window.addEventListener("paste", (event) => {
   applyCanvasClipboard({ token, plain });
 });
 
-window.addEventListener("keydown", (ev) => {
-  if (ev.defaultPrevented) return;
-  // Pick the last open dialog: querySelector returns DOM order, and a modal
-  // shown later stacks above one opened before it. Escape must reach the top.
+/**
+ * Pick the last open dialog: querySelector returns DOM order, and a modal
+ * shown later stacks above one opened before it. Escape must reach the top.
+ * @param {KeyboardEvent} ev
+ * @returns {boolean} true when a dialog owns the key
+ */
+function handleOpenDialogKeydown(ev) {
   const openDialogs = document.querySelectorAll("dialog[open]");
   const openDialog = openDialogs[openDialogs.length - 1];
-  if (openDialog) {
-    ev.stopPropagation();
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      if (openDialog.id === "text-link-dialog" && textLinkDialogBusy) return;
-      const cancelEvent = new Event("cancel", { cancelable: true });
-      if (openDialog.dispatchEvent(cancelEvent) && openDialog.open) openDialog.close("cancel");
-    }
-    return;
+  if (!openDialog) return false;
+  ev.stopPropagation();
+  if (ev.key === "Escape") {
+    ev.preventDefault();
+    if (openDialog.id === "text-link-dialog" && textLinkDialogBusy) return true;
+    const cancelEvent = new Event("cancel", { cancelable: true });
+    if (openDialog.dispatchEvent(cancelEvent) && openDialog.open) openDialog.close("cancel");
   }
-  if (ev.isComposing || ev.keyCode === 229) return;
-  if (model?.presenting) {
-    if (ev.key === "Escape") command("present", { on: false });
-    if (ev.key === "ArrowRight" || ev.key === " " || ev.key === "Enter" || ev.key === "PageDown") {
-      ev.preventDefault();
-      presentAdvance(1);
-    }
-    if (ev.key === "ArrowLeft" || ev.key === "PageUp") {
-      ev.preventDefault();
-      presentAdvance(-1);
-    }
-    return;
+  return true;
+}
+
+/** @param {KeyboardEvent} ev */
+function keydownTargetIsTyping(ev) {
+  return ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement || ev.target.isContentEditable;
+}
+
+/** @param {KeyboardEvent} ev */
+function handlePresentingKeydown(ev) {
+  if (ev.key === "Escape") command("present", { on: false });
+  if (ev.key === "ArrowRight" || ev.key === " " || ev.key === "Enter" || ev.key === "PageDown") {
+    ev.preventDefault();
+    presentAdvance(1);
   }
-  const typing = ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement || ev.target.isContentEditable;
-  // Inputs outside the canvas own their keys, including ?, Tab and formatting.
-  if (typing && ev.key !== "Escape" && !$("slide")?.contains(ev.target)) return;
+  if (ev.key === "ArrowLeft" || ev.key === "PageUp") {
+    ev.preventDefault();
+    presentAdvance(-1);
+  }
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @returns {boolean} true when the arrow moved focus inside the context menu
+ */
+function handleContextMenuArrowKeydown(ev) {
   const contextMenu = $("ctx-menu");
   if (
-    (ev.key === "ArrowDown" || ev.key === "ArrowUp") &&
-    contextMenu &&
-    !contextMenu.hidden &&
-    contextMenu.contains(ev.target)
-  ) {
+    !(
+      (ev.key === "ArrowDown" || ev.key === "ArrowUp") &&
+      contextMenu &&
+      !contextMenu.hidden &&
+      contextMenu.contains(ev.target)
+    )
+  )
+    return false;
+  ev.preventDefault();
+  const items = [...contextMenu.querySelectorAll("button:not(:disabled)")];
+  const current = items.indexOf(document.activeElement);
+  const delta = ev.key === "ArrowDown" ? 1 : -1;
+  const next = current < 0 ? (delta > 0 ? 0 : items.length - 1) : (current + delta + items.length) % items.length;
+  items[next]?.focus();
+  return true;
+}
+
+/**
+ * Escape first closes the innermost transient popup or menu.
+ * @param {KeyboardEvent} ev
+ * @returns {boolean} true when a popup or menu was closed
+ */
+function closeEscapeOverlay(ev) {
+  const openCtx = document.querySelector(".ctx-popwrap.open");
+  if (openCtx) {
     ev.preventDefault();
-    const items = [...contextMenu.querySelectorAll("button:not(:disabled)")];
-    const current = items.indexOf(document.activeElement);
-    const delta = ev.key === "ArrowDown" ? 1 : -1;
-    const next = current < 0 ? (delta > 0 ? 0 : items.length - 1) : (current + delta + items.length) % items.length;
-    items[next]?.focus();
+    closeCtxPops({ restoreFocus: true });
+    return true;
+  }
+  const openInsertPopover = ["table-size", "shape-palette"].map((id) => $(id)).find((node) => node && !node.hidden);
+  if (openInsertPopover) {
+    ev.preventDefault();
+    openInsertPopover.hidden = true;
+    insertPopoverReturnFocus?.setAttribute?.("aria-expanded", "false");
+    insertPopoverReturnFocus?.focus?.();
+    insertPopoverReturnFocus = null;
+    return true;
+  }
+  const menu = $("ctx-menu");
+  if (menu && !menu.hidden) {
+    ev.preventDefault();
+    hideMenus();
+    contextMenuReturnFocus?.focus?.();
+    contextMenuReturnFocus = null;
+    return true;
+  }
+  const versionMenu = $("version-menu");
+  if (versionMenu && !versionMenu.hidden) {
+    ev.preventDefault();
+    versionMenu.hidden = true;
+    $("btn-versions")?.setAttribute("aria-expanded", "false");
+    $("btn-versions")?.focus();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Escape closes the innermost transient surface or mode, then clears the selection.
+ * @param {KeyboardEvent} ev
+ */
+function handleEscapeKeydown(ev) {
+  if (closeEscapeOverlay(ev)) return;
+  if (commentMode) {
+    ev.preventDefault();
+    setCommentMode(false, { focus: true });
     return;
   }
-  if (ev.key === "Escape") {
-    const openCtx = document.querySelector(".ctx-popwrap.open");
-    if (openCtx) {
-      ev.preventDefault();
-      closeCtxPops({ restoreFocus: true });
-      return;
-    }
-    const openInsertPopover = ["table-size", "shape-palette"]
-      .map((id) => $(id))
-      .find((node) => node && !node.hidden);
-    if (openInsertPopover) {
-      ev.preventDefault();
-      openInsertPopover.hidden = true;
-      insertPopoverReturnFocus?.setAttribute?.("aria-expanded", "false");
-      insertPopoverReturnFocus?.focus?.();
-      insertPopoverReturnFocus = null;
-      return;
-    }
-    const menu = $("ctx-menu");
-    if (menu && !menu.hidden) {
-      ev.preventDefault();
-      hideMenus();
-      contextMenuReturnFocus?.focus?.();
-      contextMenuReturnFocus = null;
-      return;
-    }
-    const versionMenu = $("version-menu");
-    if (versionMenu && !versionMenu.hidden) {
-      ev.preventDefault();
-      versionMenu.hidden = true;
-      $("btn-versions")?.setAttribute("aria-expanded", "false");
-      $("btn-versions")?.focus();
-      return;
-    }
-    if (commentMode) {
-      ev.preventDefault();
-      setCommentMode(false, { focus: true });
-      return;
-    }
-    if (editingId) {
-      ev.preventDefault();
-      cancelTextEdit();
-      return;
-    }
-    if (editingCell) {
-      ev.preventDefault();
-      cancelTableEdit();
-      return;
-    }
-    if (croppingId) {
-      ev.preventDefault();
-      exitCropMode();
-      return;
-    }
-    const help = $("kbd-help");
-    if (help && !help.hidden) {
-      help.hidden = true;
-      return;
-    }
-    const chat = $("work-chat");
-    if (chat && !chat.hidden) {
-      ev.preventDefault();
-      hideWorkChat();
-      return;
-    }
-    command("select", {});
+  if (editingId) {
+    ev.preventDefault();
+    cancelTextEdit();
     return;
   }
-  // In annotation mode, Tab navigates the panel; editing shortcuts must not
-  // recreate a canvas selection behind the comment targets.
-  if (commentMode) return;
+  if (editingCell) {
+    ev.preventDefault();
+    cancelTableEdit();
+    return;
+  }
+  if (croppingId) {
+    ev.preventDefault();
+    exitCropMode();
+    return;
+  }
+  const help = $("kbd-help");
+  if (help && !help.hidden) {
+    help.hidden = true;
+    return;
+  }
+  const chat = $("work-chat");
+  if (chat && !chat.hidden) {
+    ev.preventDefault();
+    hideWorkChat();
+    return;
+  }
+  command("select", {});
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @param {boolean} typing
+ * @returns {boolean} true when Tab moved the table cell or the canvas selection
+ */
+function handleTabKeydown(ev, typing) {
   if (ev.key === "Tab" && (editingCell || selectedEl()?.type === "table" || (tableFocusId && !selectedEl()))) {
     ev.preventDefault();
     moveTableCell(0, ev.shiftKey ? -1 : 1);
-    return;
+    return true;
   }
   if (ev.key === "Tab" && !typing) {
     ev.preventDefault();
     command("tabSelect", { dir: ev.shiftKey ? -1 : 1 });
-    return;
+    return true;
   }
+  return false;
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @param {boolean} typing
+ * @returns {boolean} true when Enter/F2 entered table editing or ? toggled help
+ */
+function handleTableEnterKeydown(ev, typing) {
   if (ev.key === "Enter" && !ev.metaKey && !ev.ctrlKey && (editingCell || (!typing && selectedEl()?.type === "table"))) {
     ev.preventDefault();
     if (editingCell) moveTableCell(ev.shiftKey ? -1 : 1, 0);
     else enterTableEdit(selectedEl().id, tableCell.row, tableCell.col);
-    return;
+    return true;
   }
   if (ev.key === "F2" && !typing && selectedEl()?.type === "table") {
     ev.preventDefault();
     enterTableEdit(selectedEl().id, tableCell.row, tableCell.col);
-    return;
+    return true;
   }
   if (ev.key === "?" || (ev.shiftKey && ev.key === "/")) {
     ev.preventDefault();
     toggleKeyboardHelp();
-    return;
+    return true;
   }
-  const meta = ev.metaKey || ev.ctrlKey;
-  if (meta && !ev.altKey && (editingId || selectedEl()?.type === "text")) {
-    const k = ev.key.toLowerCase();
-    if (k === "b" || k === "i" || k === "u") {
-      ev.preventDefault();
-      const key = k === "b" ? "bold" : k === "i" ? "italic" : "underline";
-      styleTextFromToolbar(`element.text.toolbar.${key}.toggle`, { [key]: true }, key);
-      return;
-    }
-  }
-  if (typing) return;
+  return false;
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @param {boolean} meta
+ * @returns {boolean} true when a bold/italic/underline shortcut was applied
+ */
+function handleTextFormatShortcut(ev, meta) {
+  if (!(meta && !ev.altKey && (editingId || selectedEl()?.type === "text"))) return false;
+  const k = ev.key.toLowerCase();
+  if (k !== "b" && k !== "i" && k !== "u") return false;
+  ev.preventDefault();
+  const key = k === "b" ? "bold" : k === "i" ? "italic" : "underline";
+  styleTextFromToolbar(`element.text.toolbar.${key}.toggle`, { [key]: true }, key);
+  return true;
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @param {boolean} meta
+ */
+function runSelectionCommandShortcuts(ev, meta) {
   if ((ev.key === "Delete" || ev.key === "Backspace") && selectedEl()) {
     ev.preventDefault();
     command("deleteSelected");
@@ -8465,6 +7273,13 @@ window.addEventListener("keydown", (ev) => {
     ev.preventDefault();
     command("ungroup");
   }
+}
+
+/**
+ * @param {KeyboardEvent} ev
+ * @param {boolean} meta
+ */
+function runTextAndHistoryShortcuts(ev, meta) {
   if (meta && ev.shiftKey && ev.key.toLowerCase() === "l" && selectedEl()?.type === "text") {
     ev.preventDefault();
     const cur = selectedEl().list;
@@ -8481,6 +7296,10 @@ window.addEventListener("keydown", (ev) => {
     ev.preventDefault();
     command(ev.shiftKey ? "redo" : "undo");
   }
+}
+
+/** @param {KeyboardEvent} ev */
+function handleArrowKeydown(ev) {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key) && selectedEl()?.type === "table") {
     ev.preventDefault();
     const dr = ev.key === "ArrowUp" ? -1 : ev.key === "ArrowDown" ? 1 : 0;
@@ -8496,6 +7315,34 @@ window.addEventListener("keydown", (ev) => {
     const ny = y + (ev.key === "ArrowUp" ? -step : ev.key === "ArrowDown" ? step : 0);
     command("setBounds", { bounds: [nx, ny, w, h] });
   }
+}
+
+window.addEventListener("keydown", (ev) => {
+  if (ev.defaultPrevented) return;
+  if (handleOpenDialogKeydown(ev)) return;
+  if (ev.isComposing || ev.keyCode === 229) return;
+  if (model?.presenting) {
+    handlePresentingKeydown(ev);
+    return;
+  }
+  const typing = keydownTargetIsTyping(ev);
+  // Inputs outside the canvas own their keys, including ?, Tab and formatting.
+  if (typing && ev.key !== "Escape" && !$("slide")?.contains(ev.target)) return;
+  if (handleContextMenuArrowKeydown(ev)) return;
+  if (ev.key === "Escape") {
+    handleEscapeKeydown(ev);
+    return;
+  }
+  // In annotation mode, Tab navigates the panel; editing shortcuts must not
+  // recreate a canvas selection behind the comment targets.
+  if (commentMode) return;
+  if (handleTabKeydown(ev, typing) || handleTableEnterKeydown(ev, typing)) return;
+  const meta = ev.metaKey || ev.ctrlKey;
+  if (handleTextFormatShortcut(ev, meta)) return;
+  if (typing) return;
+  runSelectionCommandShortcuts(ev, meta);
+  runTextAndHistoryShortcuts(ev, meta);
+  handleArrowKeydown(ev);
 });
 window.addEventListener("pointermove", (ev) => {
   if (!railDrag) return;
@@ -9847,6 +8694,48 @@ function closeGenerationLive() {
   generationLivePaint = 0;
 }
 window.addEventListener("pagehide", closeGenerationLive);
+// Background tabs throttle or drop the event stream; reopen it and poll once
+// when the tab is visible again while a turn may still be running.
+resilience.bindVisibilityRecovery({
+  shouldResume: () =>
+    Boolean(
+      liveGenerationSessionId() &&
+        (generationIsActive() ||
+          assistantTurnPending ||
+          generationResumeCandidate(generationActivity) ||
+          readPendingWorkspaceEdit()),
+    ),
+  reconnect: () => {
+    closeGenerationLive();
+    connectGenerationLive();
+  },
+  poll: () => void pollGenerationActivity(),
+});
+
+/** Paint the merged live rows on the next frame (one pending frame at most). */
+function scheduleGenerationLivePaint() {
+  if (generationLivePaint) return;
+  generationLivePaint = requestAnimationFrame(() => {
+    generationLivePaint = 0;
+    generationActivity = generationLiveBuffer.merge(generationActivity || {});
+    resilience.safePaint(paintEditorGeneration, generationActivity);
+  });
+}
+
+/** A terminal idle frame ends the turn: settle any still-running reasoning row and confirm by polling.
+ * @param {boolean} accepted whether the idle frame itself carried new rows */
+function settleGenerationLiveIdle(accepted) {
+  cancelAnimationFrame(generationLivePaint);
+  generationLivePaint = 0;
+  const merged = accepted ? generationLiveBuffer.merge(generationActivity || {}) : generationActivity;
+  assistantTurnPending = false;
+  generationLiveBuffer?.clear();
+  if (merged) {
+    generationActivity = resilience.settleResidualThinking(merged);
+    resilience.safePaint(paintEditorGeneration, generationActivity);
+  }
+  void pollGenerationActivity();
+}
 
 function connectGenerationLive() {
   const sessionId = liveGenerationSessionId();
@@ -9866,20 +8755,13 @@ function connectGenerationLive() {
   closeGenerationLive();
   const source = new EventSource(`/slides/sessions/${encodeURIComponent(sessionId)}/events`);
   generationLiveSource = source;
-  source.onmessage = (event) => {
-    if (source !== generationLiveSource) return;
-    try {
-      const data = JSON.parse(event.data);
-      if (!generationLiveBuffer.accept(data)) return;
-      if (!generationLivePaint) generationLivePaint = requestAnimationFrame(() => {
-        generationLivePaint = 0;
-        generationActivity = generationLiveBuffer.merge(generationActivity || {});
-        paintEditorGeneration(generationActivity);
-      });
-    } catch {
-      // An invalid transport frame never alters the durable project.
-    }
-  };
+  // Invalid frames are ignored: a transport frame never alters the durable project.
+  resilience.bindGenerationLiveSse(source, {
+    isCurrent: () => source === generationLiveSource,
+    accept: (data) => generationLiveBuffer.accept(data),
+    schedulePaint: scheduleGenerationLivePaint,
+    onTerminalIdle: settleGenerationLiveIdle,
+  });
 }
 
 async function pollGenerationActivity() {
@@ -9910,7 +8792,7 @@ async function pollGenerationActivity() {
     generationPollFailures = 0;
     adoptPolledGenerationActivity(activity);
     renderCommentBatchChip();
-    paintEditorGeneration(generationActivity);
+    resilience.safePaint(paintEditorGeneration, generationActivity);
     await refreshLiveGeneratedProject(generationActivity);
     await refreshGenerationResumeAvailability(generationActivity);
     if (generationResumePending || generationResumeUncertainSessionId === activity?.sessionId) {
@@ -9926,16 +8808,10 @@ async function pollGenerationActivity() {
   } catch (error) {
     console.warn("Generation activity refresh failed:", error instanceof Error ? error.message : String(error));
     generationPollFailures += 1;
-    generationActivity = {
-      ...(generationActivity || {}),
-      connectionState: "disconnected",
-      error: {
-        detail: t("生成状态暂时不可用；编辑仍受保护，正在重连并等待本次会话的最终状态。"),
-      },
-    };
-    paintEditorGeneration(generationActivity);
-    const delay = Math.min(10_000, 1200 * 2 ** Math.min(generationPollFailures - 1, 4));
-    generationPollTimer = window.setTimeout(pollGenerationActivity, delay);
+    generationActivity = resilience.disconnectedActivity(generationActivity);
+    // A throwing paint must not break the retry chain scheduled below.
+    resilience.safePaint(paintEditorGeneration, generationActivity);
+    generationPollTimer = window.setTimeout(pollGenerationActivity, resilience.pollBackoffDelay(generationPollFailures));
   }
 }
 
@@ -10020,8 +8896,7 @@ async function waitForAiReviewTurn(sessionId, before, target, updateStage, contr
   const beforePages = pageRevisionBaseline(before, target);
   let previousSnapshot = before;
   const targetPageIds = target.targetPageIds;
-  const hardTimeoutMs = requiresEveryTargetPage(target) ? 20 * 60 * 1000 : 4 * 60 * 1000;
-  const stalledTimeoutMs = requiresEveryTargetPage(target) ? 3 * 60 * 1000 : 2 * 60 * 1000;
+  const { hardTimeoutMs, stalledTimeoutMs } = resilience.reviewTurnTimeouts(requiresEveryTargetPage(target));
   let lastProgressAt = started;
   let previousChangedCount = 0;
   let journalSignature = generationActivityProgressSignature(generationActivity);
@@ -10036,8 +8911,7 @@ async function waitForAiReviewTurn(sessionId, before, target, updateStage, contr
       snap = await response.json();
       if (!response.ok) throw new Error(snap.error || t("无法读取 AI 修改进度"));
     } catch (error) {
-      const transient = error?.code === "AI_STATE_UNAVAILABLE" || error instanceof TypeError || ["AbortError", "TimeoutError"].includes(error?.name);
-      if (!transient) throw error;
+      if (!resilience.transientAiReviewStateError(error)) throw error;
       unavailableSince ||= Date.now();
       if (Date.now() - unavailableSince >= 30_000) throw aiReviewError("AI_STATE_UNAVAILABLE", t("持续无法确认助手状态，正在停止并恢复修改前版本"));
       updateStage?.(t("正在重连助手"), t("文稿仍受保护"));
@@ -10176,6 +9050,11 @@ async function renewAiReviewLock(aiLockToken) {
   });
 }
 
+/** A renewal answered 409 while the turn ran: the lease is gone, the pre-edit version stays in history. */
+function reportAiLockLost() {
+  showToast(aiLockLostStatus(), 7000);
+}
+
 async function stopAiReviewTurn(sessionId) {
   if (!sessionId) throw aiReviewError("AI_STOP_UNCONFIRMED", t("无法确认 AI 会话已停止"));
   // An explicit JSON body: the kernel guard rejects untyped mutations.
@@ -10226,19 +9105,11 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
   let turnMayHaveStarted = false;
   let restored = false;
   let releaseAiLock = false;
-  let keepAiLock = false;
-  let aiLockRenewTimer = 0;
-  let aiLockRenewUncertain = false;
   let applied = false;
   const reviewPagePaths = [];
-
-  const renewCurrentAiLock = async () => {
-    const renewed = await renewAiReviewLock(aiLockToken);
-    // A successful request re-establishes the server-side lease, so an earlier
-    // transient failure is no longer an uncertainty.
-    aiLockRenewUncertain = false;
-    return renewed;
-  };
+  // A successful renewal re-establishes the server-side lease, so an earlier
+  // transient failure is no longer an uncertainty.
+  const lease = createAiLockLifecycle(() => renewAiReviewLock(aiLockToken), reportAiLockLost);
   activeCommentReviewControl = cancelControl;
   setAiReviewTurnActive(true);
   showWorkChat({ focusComposer: false });
@@ -10298,11 +9169,7 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
         throw new Error(t("服务端没有返回可验证的批注范围，未提交"));
       }
     }
-    aiLockRenewTimer = window.setInterval(() => {
-      void renewCurrentAiLock().catch(() => {
-        aiLockRenewUncertain = true;
-      });
-    }, 25_000);
+    lease.start();
 
     const snapshot = await api("/api/versions", {
       method: "POST",
@@ -10410,7 +9277,7 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
       label: t(`{p0} 条批注 · {p1} 页`, { p0: lockedItems.length, p1: pages.length }),
     }, undefined, cancelControl);
 
-    await renewCurrentAiLock();
+    await lease.renew();
     const finished = await api("/api/reviews/ai-lock/batch/apply", {
       method: "POST",
       body: JSON.stringify({ project: currentProjectPath(), token: aiLockToken }),
@@ -10434,15 +9301,14 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
     if (turnMayHaveStarted && snapshotId) {
       try {
         await stopAiReviewTurn(sessionId);
-        await renewCurrentAiLock();
+        await lease.renew();
         await restoreAiReviewSnapshot(snapshotId, aiLockToken);
         restored = true;
         if (error instanceof Error) error.message = error.message.replace(t("正在恢复修改前版本"), t("已恢复修改前版本"));
         await reloadCommentsFromServer().catch(() => undefined);
         releaseAiLock = true;
       } catch (restoreError) {
-        keepAiLock = true;
-        aiLockRenewUncertain = true;
+        lease.hold();
         error = aiReviewError(
           "AI_STILL_LOCKED",
           t(`{p0}；{p1}。服务端保护状态不确定；未恢复版本，也未确认释放版本保护。本标签继续禁止写入。`, { p0: error instanceof Error ? error.message : String(error), p1: restoreError instanceof Error ? restoreError.message : String(restoreError) }),
@@ -10460,7 +9326,6 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
       }).catch(() => undefined);
       aiLockToken = "";
       releaseAiLock = true;
-      keepAiLock = false;
     }
     if (releaseAiLock && aiLockToken) {
       // Keep the comments actionable: a cancelled turn clears the running flag,
@@ -10479,17 +9344,15 @@ async function startCommentBatchReview(comments, { brief = "", onAccepted } = {}
     }
     throw error;
   } finally {
-    if (aiLockRenewTimer) {
-      window.clearInterval(aiLockRenewTimer);
-      aiLockRenewTimer = 0;
-    }
-    if (keepAiLock) {
+    // A held lease keeps this tab write-locked; its renewal still stops here.
+    lease.stop();
+    if (lease.held) {
       renderComments();
       showToast(t("AI 修改尚未完成安全收尾；本标签继续禁止写入。"), 7000);
     }
     if (activeCommentReviewControl === cancelControl) activeCommentReviewControl = null;
-    setAiReviewTurnActive(keepAiLock);
-    if (!keepAiLock) {
+    setAiReviewTurnActive(lease.held);
+    if (!lease.held) {
       try {
         await reloadCommentsFromServer();
       } catch {
@@ -10657,7 +9520,7 @@ const recoverWorkspaceEdit = createWorkspaceEditRecovery({
     const control = activeWorkspaceReviewControl;
     if (control?.settled && control.aiLockToken === token) {
       activeWorkspaceReviewControl = null;
-      workAgentSubmitPending = false;
+      setSubmitPending(false);
       aiReviewLiveLabel = "";
       setAiReviewTurnActive(false);
     }
@@ -10689,7 +9552,7 @@ async function resumePendingWorkspaceEdit(activity) {
       const result = await executeWorkAgentEdit(pendingText, pendingTarget, [], control, pending);
       Object.assign(receipt, {snapshotId: result.snapshotId, snapshotLabel: result.snapshotLabel});
     } catch (error) { failAssistantSend(receipt, error); }
-    finally { workAgentSubmitPending = false; paintEditorGeneration(generationActivity); }
+    finally { setSubmitPending(false); paintEditorGeneration(generationActivity); }
   };
   if (navigator.locks) await navigator.locks.request(`slides.edit:${currentProjectPath()}`, {ifAvailable: true}, lock => lock ? resume() : undefined);
   else await resume();
@@ -10731,7 +9594,7 @@ async function executeWorkAgentEdit(
     if (!ok) throw aiReviewError("AI_USER_CANCELLED", t("已取消整稿重写"));
   }
   aiReviewLiveLabel = target.label;
-  const transactionId = `agent-chat-${globalThis.crypto?.randomUUID?.() || Date.now()}`;
+  const transactionId = `agent-chat-${resilience.safeRandomUUID()}`;
   let snapshotId = "";
   let snapshotLabel = "";
   let turnMayHaveStarted = false;
@@ -10739,20 +9602,13 @@ async function executeWorkAgentEdit(
   let sessionId = "";
   let aiLockToken = "";
   let releaseAiLock = false;
-  let keepAiLock = false;
-  let aiLockRenewTimer = 0;
-  let aiLockRenewUncertain = false;
   let failure = null;
   let result = null;
   const updateStage = (label, detail) => {
     control.stage = [label.replace(/^DSH Agent /, ""), detail].filter(Boolean).join(" · ");
     paintEditorGeneration(generationActivity);
   };
-  const renewCurrentAiLock = async () => {
-    const lock = await renewAiReviewLock(aiLockToken);
-    aiLockRenewUncertain = false;
-    return lock;
-  };
+  const lease = createAiLockLifecycle(() => renewAiReviewLock(aiLockToken), reportAiLockLost);
 
   activeWorkspaceReviewControl = control;
   control.settled = false;
@@ -10768,8 +9624,8 @@ async function executeWorkAgentEdit(
       before = recovery.before;
       activity = generationActivity;
       turnMayHaveStarted = true;
-      await renewCurrentAiLock();
-      aiLockRenewTimer = window.setInterval(() => { void renewCurrentAiLock().catch(() => { aiLockRenewUncertain = true; }); }, 25_000);
+      await lease.renew();
+      lease.start();
       updateStage(t("正在继续本次修改"), target.label);
     } else {
     updateStage(t("保护修改前版本"), target.label);
@@ -10838,11 +9694,7 @@ async function executeWorkAgentEdit(
       pageSha256: String(page.pageSha256).toLowerCase(),
     }));
     target.lockedTargetPages = targetPages;
-    aiLockRenewTimer = window.setInterval(() => {
-      void renewCurrentAiLock().catch(() => {
-        aiLockRenewUncertain = true;
-      });
-    }, 25_000);
+    lease.start();
 
     const snapshot = await api("/api/versions", {
       method: "POST",
@@ -10888,7 +9740,7 @@ async function executeWorkAgentEdit(
     }
     // The persisted acknowledgement owns this request; stop remains available
     // while the rest of the turn runs, and new typing stays in the composer.
-    workAgentSubmitPending = false;
+    setSubmitPending(false);
     paintEditorGeneration(generationActivity);
 
     if (control.cancelRequested) throw aiReviewError("AI_USER_CANCELLED", t("已取消这次 Agent 修改"));
@@ -10896,7 +9748,7 @@ async function executeWorkAgentEdit(
 
     }
     const turnResult = await waitForAiReviewTurn(sessionId, before, target, updateStage, control);
-    await renewCurrentAiLock();
+    await lease.renew();
     const verified = await api("/api/reviews/ai-lock/verify", {
       method: "POST",
       body: JSON.stringify({ token: aiLockToken }),
@@ -10932,21 +9784,19 @@ async function executeWorkAgentEdit(
     if (turnMayHaveStarted && snapshotId) {
       try {
         await stopAiReviewTurn(sessionId);
-        await renewCurrentAiLock();
+        await lease.renew();
         await restoreAiReviewSnapshot(snapshotId, aiLockToken);
         restored = true;
         releaseAiLock = true;
       } catch (restoreError) {
-        keepAiLock = true;
-        aiLockRenewUncertain = true;
+        lease.hold();
         error = aiReviewError(
           "AI_STILL_LOCKED",
           t(`{p0}；{p1}。服务端保护状态不确定；未恢复版本，也未确认释放版本保护。本标签继续禁止写入。`, { p0: error instanceof Error ? error.message : String(error), p1: restoreError instanceof Error ? restoreError.message : String(restoreError) }),
         );
       }
     } else if (turnMayHaveStarted) {
-      keepAiLock = true;
-      aiLockRenewUncertain = true;
+      lease.hold();
     } else {
       releaseAiLock = true;
     }
@@ -10955,38 +9805,34 @@ async function executeWorkAgentEdit(
       `${error instanceof Error ? error.message : String(error)}${restored ? t("；已自动恢复到修改前版本") : ""}`,
     );
   } finally {
-    if (aiLockToken && releaseAiLock && !keepAiLock) {
+    if (aiLockToken && releaseAiLock && !lease.held) {
       try {
-        await renewCurrentAiLock();
-        if (aiLockRenewTimer) {
-          window.clearInterval(aiLockRenewTimer);
-          aiLockRenewTimer = 0;
-        }
+        await lease.renew();
+        lease.stop();
         await api("/api/reviews/ai-lock", {
           method: "DELETE",
           body: JSON.stringify({ token: aiLockToken }),
         });
       } catch {
-        keepAiLock = true;
-        aiLockRenewUncertain = true;
+        lease.hold();
         failure = aiReviewError("AI_STILL_LOCKED", t("Agent 修改已结束，但版本保护的释放结果不确定；本标签继续禁止写入。"));
       }
     }
-    if (aiLockRenewTimer) window.clearInterval(aiLockRenewTimer);
+    lease.stop();
     control.aiLockToken = aiLockToken;
     control.settled = true;
-    if (keepAiLock) {
+    if (lease.held) {
       showToast(
-        aiLockRenewUncertain
+        lease.uncertain
           ? t("Agent 版本保护状态不确定；本标签继续禁止写入，请检查生成历程。")
           : t("Agent 修改尚未安全收尾；本标签继续禁止写入。"),
         7000,
       );
     }
-    if (!keepAiLock) clearPendingWorkspaceEdit(aiLockToken);
-    if (!keepAiLock && activeWorkspaceReviewControl === control) activeWorkspaceReviewControl = null;
-    setAiReviewTurnActive(keepAiLock);
-    if (!keepAiLock) aiReviewLiveLabel = "";
+    if (!lease.held) clearPendingWorkspaceEdit(aiLockToken);
+    if (!lease.held && activeWorkspaceReviewControl === control) activeWorkspaceReviewControl = null;
+    setAiReviewTurnActive(lease.held);
+    if (!lease.held) aiReviewLiveLabel = "";
   }
 
   if (failure) throw failure;
@@ -11029,9 +9875,11 @@ async function paintAssistantModel(activity) {
     if ([...select.options].some((option) => option.value === value)) select.value = value;
     select.dataset.loaded = "true";
     select.title = t("选择下一条消息使用的模型");
+    agentAttachments.refreshVision();
   } catch { select.title = t("模型列表暂时不可用；仍使用当前会话模型"); }
   finally { assistantModelPainting = false; }
 }
+$("assistant-model")?.addEventListener("change", () => agentAttachments.refreshVision());
 function assistantModelSelection() {
   const select = $("assistant-model");
   if (!generationRoster || !select?.value) return undefined;
@@ -11065,7 +9913,7 @@ function beginAssistantSend(text, existingReceipt) {
     paintEditorGeneration(generationActivity);
     return existingReceipt;
   }
-  const requestId = crypto.randomUUID();
+  const requestId = resilience.safeRandomUUID();
   const message = { id: `local:${requestId}`, clientRequestId: requestId, at: new Date().toISOString(), text, mode: "discuss", localPending: true };
   const receipt = { project: currentProjectPath(), message, requestText: text, clientRequestId: message.id.slice(6) };
   workspaceEditReceipts.set(message.id, receipt);
@@ -11093,7 +9941,7 @@ function failAssistantSend(receipt, error, uncertain = false) {
 }
 
 async function submitAssistantConversation(text, intent, receipt) {
-  workAgentSubmitPending = true;
+  setSubmitPending(true);
   let dispatched = false;
   try {
     await settlePendingEdits();
@@ -11114,24 +9962,83 @@ async function submitAssistantConversation(text, intent, receipt) {
     if (!response.ok || !result.ok) { dispatched = false; throw new Error(result.error || t("助手没有接下这条消息")); }
     acceptAssistantSend(receipt, result.userMessage);
     await consumePendingAgentAttachments(attachments);
-    workAgentSubmitPending = false;
+    setSubmitPending(false);
     await pollGenerationActivity();
   } catch (error) {
     failAssistantSend(receipt, error, dispatched);
     if (!dispatched) assistantTurnPending = false;
     else void pollGenerationActivity();
-  } finally { workAgentSubmitPending = false; paintEditorGeneration(generationActivity); }
+  } finally { setSubmitPending(false); paintEditorGeneration(generationActivity); }
+}
+
+/**
+ * A pending clarifying question claims the composer text as its answer.
+ * @returns {Promise<boolean>} true when the submit was routed to the question
+ */
+async function answerPendingQuestionFromComposer() {
+  const pendingQuestion = lastGenerationState?.questions?.find((question) => question.status === "pending");
+  const answerText = $("work-brief")?.value.trim();
+  if (!(pendingQuestion && answerText)) return false;
+  const card = [...$("editor-generation-event-list").children].find(
+    (item) => item.dataset.processKey === `question:${pendingQuestion.id}`,
+  );
+  if (await card?.__question.answerText(answerText)) acknowledgeAssistantDraft(answerText);
+  return true;
+}
+
+/** While generation holds the canvas, an empty composer stops and text steers. */
+async function steerLockedGenerationFromComposer() {
+  const steer = $("work-brief")?.value.trim();
+  const sessionId = liveGenerationSessionId();
+  if (!steer) {
+    const control = activeWorkspaceReviewControl || activeCommentReviewControl;
+    if (control) {
+      if (control.cancelRequested) return;
+      control.cancelRequested = true;
+      paintEditorGeneration(generationActivity);
+      showToast(t("正在停止 Agent 修改…"), 4000);
+      return;
+    }
+    void stopLiveGeneration();
+    return;
+  }
+  if (!sessionId) return;
+  try {
+    const response = await fetch(`/slides/sessions/${encodeURIComponent(sessionId)}/turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: steer, steer: true }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result?.ok !== true) {
+      throw new Error(result?.error || t("纠偏没有被当前生成会话接受"));
+    }
+    acknowledgeAssistantDraft(steer);
+    void pollGenerationActivity();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 5000);
+  }
+}
+
+/** During a locked AI review turn, an empty composer requests a stop. */
+function handleLockedReviewSubmit() {
+  const reviewControl = activeWorkspaceReviewControl || activeCommentReviewControl;
+  const typed = Boolean($("work-brief")?.value.trim());
+  if (reviewControl && !typed) {
+    // An empty composer during a locked review turn means "stop", the same
+    // contract the generation flow already uses.
+    if (reviewControl.cancelRequested) return;
+    reviewControl.cancelRequested = true;
+    paintEditorGeneration(generationActivity);
+    showToast(t("正在停止 Agent 修改；确认停止后会恢复修改前版本。"), 5000);
+    return;
+  }
+  showToast(t("Agent 正在修改并保护版本；完成或回滚后再发起新的请求。"));
 }
 
 $("work-form")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const pendingQuestion = lastGenerationState?.questions?.find(question => question.status === "pending");
-  const answerText = $("work-brief")?.value.trim();
-  if (pendingQuestion && answerText) {
-    const card = [...$("editor-generation-event-list").children].find(item => item.dataset.processKey === `question:${pendingQuestion.id}`);
-    if (await card?.__question.answerText(answerText)) acknowledgeAssistantDraft(answerText);
-    return;
-  }
+  if (await answerPendingQuestionFromComposer()) return;
   if (assistantTurnPending || generationActivity?.phase === "discussing") {
     if (!$("work-brief")?.value.trim()) await stopLiveGeneration();
     else showToast(t("助手正在回复，完成后可以继续发送；输入的内容会保留。"));
@@ -11143,59 +10050,20 @@ $("work-form")?.addEventListener("submit", async (ev) => {
     if (await submitCommentBatch()) return;
   }
   if (generationInteractionLocked()) {
-    const steer = $("work-brief")?.value.trim();
-    const sessionId = liveGenerationSessionId();
-    if (!steer) {
-      const control = activeWorkspaceReviewControl || activeCommentReviewControl;
-      if (control) {
-        if (control.cancelRequested) return;
-        control.cancelRequested = true;
-        paintEditorGeneration(generationActivity);
-        showToast(t("正在停止 Agent 修改…"), 4000);
-        return;
-      }
-      void stopLiveGeneration();
-      return;
-    }
-    if (!sessionId) return;
-    try {
-      const response = await fetch(`/slides/sessions/${encodeURIComponent(sessionId)}/turn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: steer, steer: true }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result?.ok !== true) {
-        throw new Error(result?.error || t("纠偏没有被当前生成会话接受"));
-      }
-      acknowledgeAssistantDraft(steer);
-      void pollGenerationActivity();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 5000);
-    }
+    await steerLockedGenerationFromComposer();
     return;
   }
   if (aiReviewTurnActive) {
-    const reviewControl = activeWorkspaceReviewControl || activeCommentReviewControl;
-    const typed = Boolean($("work-brief")?.value.trim());
-    if (reviewControl && !typed) {
-      // An empty composer during a locked review turn means "stop", the same
-      // contract the generation flow already uses.
-      if (reviewControl.cancelRequested) return;
-      reviewControl.cancelRequested = true;
-      paintEditorGeneration(generationActivity);
-      showToast(t("正在停止 Agent 修改；确认停止后会恢复修改前版本。"), 5000);
-      return;
-    }
-    showToast(t("Agent 正在修改并保护版本；完成或回滚后再发起新的请求。"));
+    handleLockedReviewSubmit();
     return;
   }
   if (workAgentSubmitPending) {
     showToast(t("正在准备上一条 Agent 请求。"));
     return;
   }
-  if (agentAttachmentUploadActive) {
-    showToast(t("附件仍在上传，请稍候再发送。"), 5000);
+  const attachmentBlock = agentAttachments.gate();
+  if (attachmentBlock) {
+    showToast(attachmentBlock, 5000);
     return;
   }
   // A resumable generation turns the shared composer into the steer input:
@@ -11215,7 +10083,7 @@ async function dispatchAssistantRequest(text, existingReceipt) {
   let submittedContext;
   const notice = $("assistant-feedback");
   const sendButton = document.querySelector("#work-form .composer-send");
-  workAgentSubmitPending = true;
+  setSubmitPending(true);
   notice.hidden = true;
   const receipt = beginAssistantSend(text, existingReceipt);
   if ($("work-form").contains(document.activeElement)) $("work-brief").focus({ preventScroll: true });
@@ -11238,7 +10106,7 @@ async function dispatchAssistantRequest(text, existingReceipt) {
     failAssistantSend(receipt, error);
     return;
   } finally {
-    workAgentSubmitPending = false;
+    setSubmitPending(false);
     sendButton.disabled = false;
     paintEditorGeneration(generationActivity);
   }
@@ -11253,11 +10121,11 @@ async function dispatchAssistantRequest(text, existingReceipt) {
     failAssistantSend(receipt, requestedTarget.error);
     return;
   }
-  workAgentSubmitPending = true;
+  setSubmitPending(true);
   try {
     await settlePendingEdits();
   } catch (e) {
-    workAgentSubmitPending = false;
+    setSubmitPending(false);
     failAssistantSend(receipt, t(`保存当前编辑失败：{p0}`, { p0: e instanceof Error ? e.message : String(e) }));
     return;
   }
@@ -11274,7 +10142,7 @@ async function dispatchAssistantRequest(text, existingReceipt) {
     failAssistantSend(receipt, error);
   } finally {
     setPendingAgentAttachmentsBusy(false);
-    workAgentSubmitPending = false;
+    setSubmitPending(false);
     paintEditorGeneration(generationActivity);
   }
 }

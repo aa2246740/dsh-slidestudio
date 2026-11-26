@@ -1,0 +1,71 @@
+pageType: content
+background:
+  type: solid
+  color: "#FFFFFF"
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 40
+      - 30
+      - 880
+      - 50
+    content:
+      text: 图片裁剪与图片填充
+      fontSize: 24
+      bold: true
+      color: "#111111"
+      align:
+        - left
+        - middle
+  - elementId: pic-path-clip
+    elementType: image
+    src: media/photo.png
+    bounds:
+      - 60
+      - 140
+      - 260
+      - 220
+    cropShape:
+      shapeName: custom
+      geometry:
+        viewBox:
+          - 100
+          - 100
+        path: M 50 0 L 100 100 L 0 100 Z
+  - elementId: pic-ellipse
+    elementType: image
+    src: media/photo.png
+    bounds:
+      - 350
+      - 140
+      - 220
+      - 220
+    cropShape:
+      shapeName: ellipse
+  - elementId: shape-image-fill
+    elementType: shape
+    shapeName: rect
+    bounds:
+      - 620
+      - 140
+      - 280
+      - 220
+    fill:
+      type: image
+      src: media/photo.png
+      mode: tile
+  - elementId: caption
+    elementType: text
+    bounds:
+      - 60
+      - 400
+      - 840
+      - 40
+    content:
+      text: 左：自定义路径裁剪；中：椭圆裁剪；右：图片填充的矩形。
+      fontSize: 16
+      color: "#444444"
+      align:
+        - left
+        - middle

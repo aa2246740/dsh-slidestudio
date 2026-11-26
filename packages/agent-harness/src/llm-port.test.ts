@@ -15,33 +15,22 @@ import {
 
 describe("llm-port URL + config", () => {
   it("appends /v1/chat/completions for a bare host", () => {
-    assert.equal(
-      chatCompletionsUrl("http://127.0.0.1:11434"),
-      "http://127.0.0.1:11434/v1/chat/completions",
-    );
+    assert.equal(chatCompletionsUrl("http://127.0.0.1:11434"), "http://127.0.0.1:11434/v1/chat/completions");
   });
 
   it("does not double /v1 when the base already ends with /v1", () => {
-    assert.equal(
-      chatCompletionsUrl("https://gateway.example/v1/"),
-      "https://gateway.example/v1/chat/completions",
-    );
+    assert.equal(chatCompletionsUrl("https://gateway.example/v1/"), "https://gateway.example/v1/chat/completions");
   });
 
   it("uses /openai/chat/completions for Gemini-style compat bases", () => {
     assert.equal(
-      chatCompletionsUrl(
-        "https://generativelanguage.googleapis.com/v1beta/openai/",
-      ),
+      chatCompletionsUrl("https://generativelanguage.googleapis.com/v1beta/openai/"),
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     );
   });
 
   it("keeps a full chat/completions URL", () => {
-    assert.equal(
-      chatCompletionsUrl("https://x.example/v1/chat/completions"),
-      "https://x.example/v1/chat/completions",
-    );
+    assert.equal(chatCompletionsUrl("https://x.example/v1/chat/completions"), "https://x.example/v1/chat/completions");
   });
 
   it("normalizeToolCalls accepts OpenAI and legacy function_call shapes", () => {
@@ -50,13 +39,12 @@ describe("llm-port URL + config", () => {
         id: "call_1",
         type: "function",
         extra_content: { google: { thought_signature: "sig" } },
-        function: { name: "read_playbook", arguments: "{\"section\":\"category\"}" },
+        function: { name: "read_playbook", arguments: '{"section":"category"}' },
       },
     ]);
     assert.equal(openai[0]?.function.name, "read_playbook");
     assert.equal(
-      (openai[0]?.extra_content as { google?: { thought_signature?: string } })?.google
-        ?.thought_signature,
+      (openai[0]?.extra_content as { google?: { thought_signature?: string } })?.google?.thought_signature,
       "sig",
     );
     const legacy = normalizeToolCalls({ name: "think", arguments: "{}" });
@@ -72,10 +60,7 @@ describe("llm-port URL + config", () => {
       model: "gemini-2.5-flash",
     });
     assert.ok(cfg);
-    assert.equal(
-      cfg.baseUrl,
-      "https://generativelanguage.googleapis.com/v1beta/openai",
-    );
+    assert.equal(cfg.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
     assert.equal(cfg.apiKey, "k");
     assert.equal(cfg.model, "gemini-2.5-flash");
   });
@@ -95,7 +80,7 @@ describe("llm-port URL + config", () => {
                   {
                     id: "call_1",
                     type: "function",
-                    function: { name: "think", arguments: "{\"summary\":\"x\",\"detail\":\"y\"}" },
+                    function: { name: "think", arguments: '{"summary":"x","detail":"y"}' },
                   },
                 ],
               },
@@ -177,7 +162,14 @@ describe("llm-port URL + config", () => {
           }
           return new Response(
             JSON.stringify({
-              choices: [{ message: { content: "", tool_calls: [{ id: "c1", function: { name: "think", arguments: "{}" } }] } }],
+              choices: [
+                {
+                  message: {
+                    content: "",
+                    tool_calls: [{ id: "c1", function: { name: "think", arguments: "{}" } }],
+                  },
+                },
+              ],
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
@@ -205,17 +197,18 @@ describe("llm-port URL + config", () => {
         }) as typeof fetch,
       },
     );
-    await assert.rejects(
-      () => port.completeTurn!([{ role: "user", content: "hi" }]),
-      /LLM HTTP 400/,
-    );
+    await assert.rejects(() => port.completeTurn!([{ role: "user", content: "hi" }]), /LLM HTTP 400/);
     assert.equal(hits, 1);
   });
 
   it("exhausts 429 retries then throws", async () => {
     let hits = 0;
     const port = createLlmPort(
-      { baseUrl: "http://127.0.0.1:9", model: "local", retry: { maxRetries: 2, initialDelayMs: 10 } },
+      {
+        baseUrl: "http://127.0.0.1:9",
+        model: "local",
+        retry: { maxRetries: 2, initialDelayMs: 10 },
+      },
       {
         random: () => 0,
         sleep: async () => undefined,

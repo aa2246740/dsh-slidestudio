@@ -436,7 +436,10 @@ const BROWSER_DIR_NAME = ${JSON.stringify(opts.browserDirName)};
 const root = fileURLToPath(new URL(".", import.meta.url));
 const MODULE_DIR = ${moduleDirExpr};
 const BROWSERS_DIR = ${browsersDirExpr};
-const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_DIR;
+const pinnedChromiumRoot = join(BROWSERS_DIR, BROWSER_DIR_NAME);
+const browsersPath = existsSync(pinnedChromiumRoot)
+  ? BROWSERS_DIR
+  : process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_DIR;
 const chromiumRoot = join(browsersPath, BROWSER_DIR_NAME);
 const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");

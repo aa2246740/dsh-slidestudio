@@ -10,6 +10,7 @@ dsh-slidestudio/lib/
 packages/dsh-slides-client/lib/
 output/
 fixtures/
+test-fixtures/
 .dsh/
 .runtime/
 .local/

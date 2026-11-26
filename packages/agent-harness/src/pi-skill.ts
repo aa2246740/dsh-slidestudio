@@ -10,37 +10,26 @@ import { resolveSkillRoot } from "./playbook.js";
 export const HOST_SKILL_NAME = "open-slidestudio";
 
 export function resolveHostSkillDir(start = process.cwd()): string {
-  const fromModule = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "skills",
-    HOST_SKILL_NAME,
-  );
+  const fromModule = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skills", HOST_SKILL_NAME);
   if (fs.existsSync(path.join(fromModule, "SKILL.md"))) return fromModule;
 
   let dir = path.resolve(start);
   for (let i = 0; i < 10; i++) {
-    const candidate = path.join(
-      dir,
-      "packages",
-      "agent-harness",
-      "skills",
-      HOST_SKILL_NAME,
-    );
+    const candidate = path.join(dir, "packages", "agent-harness", "skills", HOST_SKILL_NAME);
     if (fs.existsSync(path.join(candidate, "SKILL.md"))) return candidate;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error(
-    `host skill not found (expected packages/agent-harness/skills/${HOST_SKILL_NAME})`,
-  );
+  throw new Error(`host skill not found (expected packages/agent-harness/skills/${HOST_SKILL_NAME})`);
 }
 
-export function resolvePiSkillDirs(opts: {
-  skillRoot?: string;
-  cwd?: string;
-} = {}): { host: string; vendor: string } {
+export function resolvePiSkillDirs(
+  opts: {
+    skillRoot?: string;
+    cwd?: string;
+  } = {},
+): { host: string; vendor: string } {
   return {
     host: resolveHostSkillDir(opts.cwd),
     vendor: opts.skillRoot ?? resolveSkillRoot(opts.cwd),

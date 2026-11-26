@@ -1,18 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createEmptyProject, listComposedPage, loadProject, saveProject, titleOnlyCoverPage } from "@open-slidestudio/pptd-v2";
+import {
+  createEmptyProject,
+  listComposedPage,
+  loadProject,
+  saveProject,
+  titleOnlyCoverPage,
+} from "@open-slidestudio/pptd-v2";
 import { exportProjectToPptx } from "./export-pptd.js";
 import { mapChartElement } from "./chart-map.js";
 import type { ChartElement } from "@open-slidestudio/pptd-v2";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function projectWithCover(dir: string, title: string) {
   const project = createEmptyProject(dir, { title });
@@ -21,17 +25,38 @@ function projectWithCover(dir: string, title: string) {
   return project;
 }
 
+/** Chromatic = saturation at least 0.12 with lightness between 0.10 and 0.92 (palette rule). */
+function isChromaticHex(hex: string): boolean {
+  const [r, g, b] = [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255);
+  const max = Math.max(r!, g!, b!);
+  const min = Math.min(r!, g!, b!);
+  const lightness = (max + min) / 2;
+  const delta = max - min;
+  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
+  return saturation >= 0.12 && lightness >= 0.1 && lightness <= 0.92;
+}
+
 describe("export-native", () => {
   it("preserves action-card icons as distinct editable outlines, including regular and brand faces", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-icon-outlines-"));
     try {
       const project = projectWithCover(dir, "Icon fidelity");
-      const names = ["fas:box-open", "fas:arrow-right", "fas:layer-group", "fas:arrows-rotate", "far:heart", "fab:github"];
+      const names = [
+        "fas:box-open",
+        "fas:arrow-right",
+        "fas:layer-group",
+        "fas:arrows-rotate",
+        "far:heart",
+        "fab:github",
+      ];
       project.pages[0]!.page.elements = names.map((iconName, index) => ({
-        elementId: `icon-${index}`, elementType: "icon", iconName,
+        elementId: `icon-${index}`,
+        elementType: "icon",
+        iconName,
         bounds: [40 + index * 100, 100, 80, 80],
         fill: { type: "solid", color: "#123456" },
-        rotation: 15, flipH: true,
+        rotation: 15,
+        flipH: true,
       }));
       const result = await exportProjectToPptx(project);
       assert.equal(result.report.ok, true);
@@ -47,20 +72,32 @@ describe("export-native", () => {
       assert.match(xml, /flipH="1"/);
       assert.match(xml, /rot="900000"/);
       assert.match(xml, /123456/);
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("fails export for an unknown icon instead of silently replacing its meaning", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-icon-missing-"));
     try {
       const project = projectWithCover(dir, "Missing icon");
-      project.pages[0]!.page.elements = [{ elementId: "unknown", elementType: "icon", iconName: "fas:does-not-exist", bounds: [20, 20, 40, 40] }];
+      project.pages[0]!.page.elements = [
+        {
+          elementId: "unknown",
+          elementType: "icon",
+          iconName: "fas:does-not-exist",
+          bounds: [20, 20, 40, 40],
+        },
+      ];
       const result = await exportProjectToPptx(project);
       assert.equal(result.report.ok, false);
       assert.equal(result.report.degradations[0]?.kind, "error");
       assert.match(result.report.degradations[0]!.reason, /Unsupported icon/);
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
+
   it("exports PPTD text boxes without PowerPoint default insets", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-text-inset-"));
     const project = projectWithCover(dir, "文本框边距");
@@ -91,11 +128,7 @@ describe("export-native", () => {
     assert.match(bodyPr, /tIns="0"/);
     assert.match(bodyPr, /bIns="0"/);
     assert.match(xml, /<a:normAutofit\/>/);
-    assert.match(
-      xml,
-      /<a:rPr[^>]*sz="2100"[^>]*>/,
-      "PPTD CSS px must export as 0.75pt, so 28px becomes 21pt",
-    );
+    assert.match(xml, /<a:rPr[^>]*sz="2100"[^>]*>/, "PPTD CSS px must export as 0.75pt, so 28px becomes 21pt");
   });
 
   it("maps the PPTD CSS line box and preserves LF as pre-wrap soft breaks", async () => {
@@ -120,11 +153,7 @@ describe("export-native", () => {
     assert.match(xml, /<a:t>第二行<\/a:t>/);
     assert.match(xml, /<a:br\/>/);
     assert.equal((xml.match(/<a:p>/g) ?? []).length, 1);
-    assert.match(
-      xml,
-      /<a:spcPts val="2430"\/>/,
-      "24px × 1.35 must become an absolute 24.3pt line box",
-    );
+    assert.match(xml, /<a:spcPts val="2430"\/>/, "24px × 1.35 must become an absolute 24.3pt line box");
   });
 
   it("exports empty project to valid pptx zip", async () => {
@@ -208,9 +237,7 @@ describe("export-native", () => {
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
 
-    const imagePages = project.pages.filter(
-      (lp) => (lp.page.background as { type?: string })?.type === "image",
-    );
+    const imagePages = project.pages.filter((lp) => (lp.page.background as { type?: string })?.type === "image");
     assert.equal(imagePages.length, 8);
 
     for (let i = 0; i < project.pages.length; i += 1) {
@@ -227,9 +254,7 @@ describe("export-native", () => {
       const embed = bgXml.match(/r:embed="(rId\d+)"/)?.[1];
       assert.match(bgXml, /<a:blipFill/, `slide ${i + 1} must keep the photo as p:bg`);
       assert.ok(embed, `slide ${i + 1} background rId`);
-      const target = rels.match(
-        new RegExp(`Id="${embed}"[^>]*Target="([^"]+)"`),
-      )?.[1];
+      const target = rels.match(new RegExp(`Id="${embed}"[^>]*Target="([^"]+)"`))?.[1];
       assert.ok(target, `slide ${i + 1} background target`);
       const mediaPath = target.replace(/^\.\.\//, "ppt/");
       const packed = zip.file(mediaPath);
@@ -251,10 +276,7 @@ describe("export-native", () => {
         /<a:solidFill>\s*<a:srgbClr val="000000"><a:alpha val="9[0-9]{4}"\/>/,
         `slide ${i + 1} overlay must not collapse to near-opaque black over the photo`,
       );
-      assert.ok(
-        (overlay.match(/<a:gs /g) ?? []).length >= 2,
-        `slide ${i + 1} overlay needs the authored stops`,
-      );
+      assert.ok((overlay.match(/<a:gs /g) ?? []).length >= 2, `slide ${i + 1} overlay needs the authored stops`);
     }
   });
 
@@ -353,6 +375,53 @@ describe("export-native", () => {
     assert.doesNotMatch(pic, /<a:stretch>\s*<a:fillRect\/>/);
   });
 
+  it("packs images extracted from a DOCX and a PDF byte-for-byte as editable pictures", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-embedded-image-"));
+    const project = projectWithCover(dir, "内嵌图片");
+    const mediaDir = path.join(dir, "media");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    // What the intake stores for a picture taken out of a DOCX (PNG) and out of a PDF (JPEG).
+    const fromDocx = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAkklEQVQImQXBaWEBABiA4S+AIwAWgAnA3gBGgNkCOAJgARwBHAF2BBgrgD/vTxRAARRwPE8YmMYnLCJYww9sE37iCGf4i/+4xh0eCS94xxTm8BlfsIrvhC3s4RCn+IMLXOGW8IBnvGESs1jAMr4S1rGJXRzgBL9xjkvCDe7xhFdMYAbzWCKs4Bs2sIN9HOMX/vEAIeNgId/hEKsAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const fromPdf = Buffer.from(
+      "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAcEAACAwEBAQEAAAAAAAAAAAABAgMEEQAhFDH/xAAUAQEAAAAAAAAAAAAAAAAAAAAG/8QAGxEAAgMAAwAAAAAAAAAAAAAAAQIAAzER0eH/2gAMAwEAAhEDEQA/AKEtatTvxPRgr/PMuhIY42CMPCMVJSB+HWb0k4MHOc4UFFihm32MAgsRWbejxP/Z",
+      "base64",
+    );
+    fs.writeFileSync(path.join(mediaDir, "material-docx0001.png"), fromDocx);
+    fs.writeFileSync(path.join(mediaDir, "material-pdf00001.jpg"), fromPdf);
+    project.pages[0]!.page.elements = [
+      {
+        elementId: "docx-picture",
+        elementType: "image",
+        src: "media/material-docx0001.png",
+        bounds: [40, 80, 300, 200],
+        fit: { mode: "cover" },
+      },
+      {
+        elementId: "pdf-picture",
+        elementType: "image",
+        src: "media/material-pdf00001.jpg",
+        bounds: [400, 80, 300, 200],
+        fit: { mode: "cover" },
+      },
+    ];
+    saveProject(project);
+    const result = await exportProjectToPptx(project);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(result.data);
+    const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
+    assert.equal((xml?.match(/<p:pic>/g) ?? []).length, 2, "both stay editable picture objects");
+    const sha = (bytes: Uint8Array) => crypto.createHash("sha256").update(bytes).digest("hex");
+    const packed = new Set<string>();
+    for (const name of Object.keys(zip.files).filter((n) => n.startsWith("ppt/media/"))) {
+      packed.add(sha(await zip.file(name)!.async("uint8array")));
+    }
+    assert.ok(packed.has(sha(fromDocx)), "the DOCX picture is packed unchanged");
+    assert.ok(packed.has(sha(fromPdf)), "the PDF picture is packed unchanged");
+  });
+
   it("maps bar colors and Y-max the same way the canvas paints", () => {
     const el = {
       elementId: "c1",
@@ -379,9 +448,9 @@ describe("export-native", () => {
     const model = mapChartElement(el);
     assert.equal(model.valueMax, 5);
     assert.deepEqual(model.series[0]!.values, [3, 4, 5]);
-    // Single-series vertical bars: the canvas paints one swatch per category,
-    // so the export model mirrors that same per-category palette.
-    assert.deepEqual(model.colors, ["#123456", "#F59E0B", "#10B981"]);
+    // A single series fill is that series' color on every category. The default
+    // palette is only for charts that never named a fill.
+    assert.deepEqual(model.colors, ["#123456", "#123456", "#123456"]);
     assert.equal(model.perCategoryColors, true);
     assert.equal(model.barDir, "col");
     assert.equal(model.showLegend, false);
@@ -398,7 +467,11 @@ describe("export-native", () => {
         background: { type: "solid", color: "#123456" },
         data: {
           cols: ["类目", "数值"],
-          rows: [["A", 3], ["B", 5], ["C", 2]],
+          rows: [
+            ["A", 3],
+            ["B", 5],
+            ["C", 2],
+          ],
         },
         series: [{ type: "bar", name: "数值", encode: { x: "类目", y: "数值" } }],
         legend: true,
@@ -450,9 +523,7 @@ describe("export-native", () => {
           ["华南", 2829],
         ],
       },
-      series: [
-        { type: "bar", name: "金额", encode: { x: "金额", y: "区域" } },
-      ],
+      series: [{ type: "bar", name: "金额", encode: { x: "金额", y: "区域" } }],
       legend: false,
     } as ChartElement;
 
@@ -478,9 +549,7 @@ describe("export-native", () => {
             ["华南", 2829],
           ],
         },
-        series: [
-          { type: "bar", name: "金额", encode: { x: "金额", y: "区域" } },
-        ],
+        series: [{ type: "bar", name: "金额", encode: { x: "金额", y: "区域" } }],
       },
     ];
     saveProject(project);
@@ -488,9 +557,7 @@ describe("export-native", () => {
     const result = await exportProjectToPptx(project);
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartName = Object.keys(zip.files).find((name) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(name),
-    );
+    const chartName = Object.keys(zip.files).find((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name));
     assert.ok(chartName);
     const xml = await zip.file(chartName)!.async("string");
     assert.match(xml, /<c:barDir val="bar"\/>/);
@@ -577,9 +644,7 @@ describe("export-native", () => {
     const result = await exportProjectToPptx(project);
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartName = Object.keys(zip.files).find((n) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(n),
-    );
+    const chartName = Object.keys(zip.files).find((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n));
     assert.ok(chartName);
     const xml = await zip.file(chartName)!.async("string");
     // 9px tick labels → 6.75pt → sz="675"; never the pptxgenjs 12pt default.
@@ -621,9 +686,7 @@ describe("export-native", () => {
     const result = await exportProjectToPptx(project);
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartName = Object.keys(zip.files).find((n) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(n),
-    );
+    const chartName = Object.keys(zip.files).find((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n));
     assert.ok(chartName);
     const xml = await zip.file(chartName)!.async("string");
     const min = Number(xml.match(/<c:min val="(-?[\d.]+)"/)?.[1]);
@@ -644,14 +707,8 @@ describe("export-native", () => {
         columnWidths: [1, 1],
         rowHeights: [1, 1],
         rows: [
-          [
-            { text: "表头A" },
-            { text: "表头B" },
-          ],
-          [
-            { text: "值1" },
-            { text: "值2" },
-          ],
+          [{ text: "表头A" }, { text: "表头B" }],
+          [{ text: "值1" }, { text: "值2" }],
         ],
       },
     ];
@@ -673,6 +730,48 @@ describe("export-native", () => {
     assert.match(xml, /F3F4F6/, "header row fills #f3f4f6 by default");
     // 4px/6px cell padding in EMU: marT/marB=38100, marL/marR=57150.
     assert.match(xml, /marT="38100"|marR="57150"/);
+  });
+
+  it("table rules stay neutral under an adopted accent theme", async () => {
+    // Regression: the cool grey D1D5DB (saturation 0.122) reached palette-adopted decks.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-table-palette-"));
+    const project = projectWithCover(dir, "配色表格");
+    project.presentation.theme = {
+      ...project.presentation.theme,
+      neutralChrome: true,
+      colors: { ...project.presentation.theme?.colors, primary: "#C00000", accent1: "#C00000" },
+    };
+    project.pages[0]!.page.elements = [
+      {
+        elementId: "t1",
+        elementType: "table",
+        bounds: [40, 40, 500, 160],
+        columnWidths: [1, 1],
+        rowHeights: [1, 1],
+        rows: [
+          [
+            { text: "表头A", color: "#C00000" },
+            { text: "表头B", color: "#C00000" },
+          ],
+          [
+            { text: "值1", color: "#C00000" },
+            { text: "值2", color: "#C00000" },
+          ],
+        ],
+      },
+    ];
+    saveProject(project);
+    const result = await exportProjectToPptx(project);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(result.data);
+    const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
+    assert.ok(xml);
+    const colours = new Set(
+      [...xml.matchAll(/srgbClr val="([0-9A-Fa-f]{6})"/g)].map((match) => match[1]!.toUpperCase()),
+    );
+    assert.ok(colours.has("CCCCCC"), "table rules use the neutral grey");
+    const outside = [...colours].filter((hex) => hex !== "C00000" && isChromaticHex(hex));
+    assert.deepEqual(outside, [], "no chromatic slide colour outside the adopted accent");
   });
 
   it("charSpacing maps CSS px to OOXML 1/100pt exactly (×75)", async () => {
@@ -731,9 +830,7 @@ describe("export-native", () => {
     assert.ok(result.report.editDataCharts.ok.includes("member-combo"));
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartName = Object.keys(zip.files).find((name) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(name),
-    );
+    const chartName = Object.keys(zip.files).find((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name));
     assert.ok(chartName);
     const xml = await zip.file(chartName)!.async("string");
     assert.match(xml, /<c:barChart>/);
@@ -778,9 +875,7 @@ describe("export-native", () => {
     const result = await exportProjectToPptx(project);
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartName = Object.keys(zip.files).find((name) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(name),
-    );
+    const chartName = Object.keys(zip.files).find((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name));
     assert.ok(chartName);
     const xml = await zip.file(chartName)!.async("string");
     const lineXml = xml.match(/<c:lineChart>[\s\S]*?<\/c:lineChart>/)?.[0] ?? "";
@@ -816,9 +911,9 @@ describe("export-native", () => {
     assert.ok(chartName, "chart part present");
     const xml = await zip.file(chartName)!.async("string");
     assert.match(xml, /2563EB/i);
-    // Single-series palette still spreads per-category on the canvas, so the
-    // exported chart keeps palette colors rather than dropping them.
-    assert.match(xml, /F59E0B|10B981/i);
+    // The named series fill is the only bar color. Default amber/green swatches
+    // must not appear beside it.
+    assert.doesNotMatch(xml, /F59E0B|10B981/i);
     assert.match(xml, /<c:max val="5"\/>/);
     assert.match(xml, /<c:barDir val="col"\/>/);
     assert.match(xml, /<c:dLblPos val="outEnd"\/>/);
@@ -854,9 +949,7 @@ describe("export-native", () => {
     const result = await exportProjectToPptx(project);
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
-    const chartParts = Object.keys(zip.files).filter((name) =>
-      /^ppt\/charts\/chart\d+\.xml$/.test(name),
-    );
+    const chartParts = Object.keys(zip.files).filter((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name));
     const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string");
 
     assert.deepEqual(chartParts, []);
@@ -949,302 +1042,12 @@ describe("export-native", () => {
       1,
       "one semantic scatter series must not become one OOXML series per point",
     );
-    assert.doesNotMatch(
-      scatterXml,
-      /爆品缺货|华北同店/,
-      "point labels belong on the slide, not in chart series names",
-    );
+    assert.doesNotMatch(scatterXml, /爆品缺货|华北同店/, "point labels belong on the slide, not in chart series names");
     const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string");
     assert.ok(slideXml);
     assert.match(slideXml, /爆品缺货/);
     assert.match(slideXml, /<a:bodyPr[^>]*wrap="none"/);
     assert.match(slideXml, /prst="roundRect"/);
     assert.doesNotMatch(slideXml, /prst="star5"/);
-  });
-
-  it("uses the exported first gradient stop and backplates scatter labels on a dark surface", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-dark-specialized-chart-"));
-    const project = projectWithCover(dir, "深色图表配色");
-    project.pages[0]!.page.background = {
-      type: "gradient",
-      gradientType: "linear",
-      stops: [
-        { position: 0, color: "#07111F" },
-        { position: 1, color: "#DCE8F5" },
-      ],
-    };
-    project.pages[0]!.page.elements = [
-      {
-        elementId: "wf-dark",
-        elementType: "chart",
-        bounds: [20, 28, 430, 260],
-        title: "现金桥",
-        axis: { x: "阶段", y: "金额" },
-        data: {
-          cols: ["阶段", "金额", "总计"],
-          rows: [
-            ["期初", 120, true],
-            ["流入", 60, false],
-            ["流出", -35, false],
-            ["期末", 145, true],
-          ],
-        },
-        series: [{ type: "waterfall", encode: { x: "阶段", y: "金额", isTotal: "总计" } }],
-        legend: false,
-      },
-      {
-        elementId: "scatter-dark",
-        elementType: "chart",
-        bounds: [490, 28, 430, 300],
-        title: "风险矩阵",
-        axis: { x: "可能性", y: "影响" },
-        data: {
-          cols: ["风险", "可能性", "影响"],
-          rows: [
-            ["供应", 4, 5],
-            ["价格", 3, 4],
-          ],
-        },
-        series: [{ type: "scatter", encode: { x: "可能性", y: "影响" }, fill: "#38BDF8" }],
-        legend: false,
-      },
-    ];
-    saveProject(project);
-
-    const result = await exportProjectToPptx(project);
-    const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(result.data);
-    const chartParts = await Promise.all(
-      Object.keys(zip.files)
-        .filter((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name))
-        .map((name) => zip.file(name)!.async("string")),
-    );
-    const chartXml = chartParts.join("\n");
-    const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string");
-
-    assert.equal(result.report.ok, true);
-    assert.match(chartXml, /<c:barChart>/);
-    assert.match(chartXml, /<c:scatterChart>/);
-    assert.match(chartXml, /<a:srgbClr val="CBD5E1"\/>/);
-    assert.match(chartXml, /<a:srgbClr val="475569"\/>/);
-    assert.doesNotMatch(
-      chartXml,
-      /<a:srgbClr val="000000"\/>/,
-      "specialized chart axis and title text must not fall back to black on navy",
-    );
-    assert.ok(slideXml);
-    assert.match(slideXml, /<a:srgbClr val="CBD5E1"\/>/);
-    assert.doesNotMatch(slideXml, /<a:srgbClr val="0B1F3A"\/>/);
-    assert.ok(
-      (slideXml.match(/prst="roundRect"/g) ?? []).length >= 2,
-      "each scatter label needs a readable export backplate",
-    );
-    assert.match(
-      slideXml,
-      /<a:srgbClr val="F8FAFC"/,
-      "labels receive a light backplate when dark ink is more readable",
-    );
-    assert.match(
-      slideXml,
-      /<a:srgbClr val="0F172A"/,
-      "label foreground is recomputed against the quadrant's effective color",
-    );
-  });
-
-  it("does not export a missing-fill ellipse as opaque white over title text", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-missing-fill-"));
-    const project = projectWithCover(dir, "门店深度复盘");
-    project.pages[0]!.page.elements = [
-      {
-        elementId: "bg",
-        elementType: "shape",
-        shapeName: "rect",
-        bounds: [0, 0, 960, 540],
-        fill: { type: "solid", color: "#08151C" },
-      },
-      {
-        elementId: "bg_glow",
-        elementType: "shape",
-        shapeName: "ellipse",
-        bounds: [80, 240, 480, 220],
-        opacity: 0.3,
-      },
-      {
-        elementId: "title",
-        elementType: "text",
-        bounds: [60, 360, 800, 50],
-        content: { text: "门店深度复盘", fontSize: 34, color: "#FFFFFF", bold: true },
-      },
-    ];
-    saveProject(project);
-
-    const result = await exportProjectToPptx(project);
-    const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(result.data);
-    const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
-    assert.ok(xml);
-    assert.match(xml, /门店深度复盘/);
-    assert.doesNotMatch(xml, /prst="ellipse"/);
-    const opaqueWhiteEllipse =
-      /prst="ellipse"[\s\S]{0,1200}?<a:solidFill>\s*<a:srgbClr val="FFFFFF"\s*\/>\s*<\/a:solidFill>/;
-    assert.doesNotMatch(xml, opaqueWhiteEllipse);
-  });
-
-  it("exports an explicit fill color and applies element opacity as transparency", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-fill-opacity-"));
-    const project = projectWithCover(dir, "填充透明度");
-    project.pages[0]!.page.elements = [
-      {
-        elementId: "mark",
-        elementType: "shape",
-        shapeName: "ellipse",
-        bounds: [100, 100, 200, 120],
-        opacity: 0.3,
-        fill: { type: "solid", color: "#A100FF" },
-      },
-      {
-        elementId: "title",
-        elementType: "text",
-        bounds: [40, 40, 400, 40],
-        content: { text: "可见标题", fontSize: 20, color: "#FFFFFF" },
-      },
-    ];
-    saveProject(project);
-
-    const result = await exportProjectToPptx(project);
-    const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(result.data);
-    const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
-    assert.ok(xml);
-    assert.match(xml, /prst="ellipse"/);
-    assert.match(xml, /srgbClr val="A100FF"/);
-    assert.match(xml, /<a:alpha val="30000"\/>/);
-  });
-
-  it("HEX8 text color exports RGB, not invented srgb 000000 from CSS rgba", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-hex8-text-"));
-    const project = projectWithCover(dir, "YU7 hex8");
-    project.pages[0]!.page.elements = [
-      {
-        elementId: "label",
-        elementType: "text",
-        bounds: [80, 80, 400, 80],
-        content: { text: "头身比", fontSize: 24, color: "#FFFFFFB3" },
-      },
-    ];
-    saveProject(project);
-    const result = await exportProjectToPptx(project);
-    assert.equal(result.report.nativeCoverage, 1);
-    const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(result.data);
-    const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
-    assert.ok(xml);
-    assert.match(xml, /srgbClr val="FFFFFF"/i);
-    assert.doesNotMatch(xml, /srgbClr val="000000"/i);
-  });
-
-  it("unprefixed YAML hex never exports as invented srgb 000000", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exp-unprefixed-hex-"));
-    const project = projectWithCover(dir, "个人答辩");
-    project.pages[0]!.page.elements = [
-      {
-        elementId: "bg",
-        elementType: "shape",
-        shapeName: "rect",
-        bounds: [0, 0, 960, 540],
-        fill: { type: "solid", color: "0E0807" },
-      },
-      {
-        elementId: "recap",
-        elementType: "text",
-        bounds: [60, 120, 840, 80],
-        content: { text: "审议请求", fontSize: 24, color: "E8DED7" },
-      },
-    ];
-    saveProject(project);
-    try {
-      const result = await exportProjectToPptx(project);
-      const { default: JSZip } = await import("jszip");
-      const zip = await JSZip.loadAsync(result.data);
-      const xml = await zip.file("ppt/slides/slide1.xml")?.async("string");
-      assert.ok(xml);
-      assert.match(xml, /srgbClr val="0E0807"/i);
-      assert.match(xml, /srgbClr val="E8DED7"/i);
-      const inventedBlackFromUnprefixed =
-        /srgbClr val="000000"[\s\S]{0,200}审议请求|审议请求[\s\S]{0,400}srgbClr val="000000"/;
-      assert.doesNotMatch(xml, inventedBlackFromUnprefixed);
-    } catch (error) {
-      assert.match(String(error), /must not become #000000|InvalidPptdColor|#RRGGBB/);
-    }
-  });
-
-  describe("validateExportReport", () => {
-    const baseValidReport = {
-      ok: true,
-      slideCount: 4,
-      nativeCoverage: 1,
-      degradations: [],
-      editDataCharts: { ok: ["chart1"], failed: [] },
-      editableLines: [],
-      bytes: 12345,
-    };
-
-    it("accepts a clean report with ok=true and positive bytes", async () => {
-      const { validateExportReport } = await import("./export-pptd.js");
-      const validation = validateExportReport(baseValidReport);
-      assert.equal(validation.ok, true);
-    });
-
-    it("rejects when ok is false", async () => {
-      const { validateExportReport } = await import("./export-pptd.js");
-      const validation = validateExportReport({ ...baseValidReport, ok: false });
-      assert.equal(validation.ok, false);
-      assert.match(validation.reason, /report\.ok is not true/);
-    });
-
-    it("rejects hard degradations: missing-image, chart-export-failed, full-page raster", async () => {
-      const { validateExportReport } = await import("./export-pptd.js");
-      const r1 = validateExportReport({
-        ...baseValidReport,
-        degradations: [{ slideIndex: 0, kind: "missing-image", reason: "image not found" }],
-      });
-      assert.equal(r1.ok, false);
-      assert.match(r1.reason, /missing-image/);
-
-      const r2 = validateExportReport({
-        ...baseValidReport,
-        degradations: [{ slideIndex: 1, kind: "full-page-raster", reason: "fallback" }],
-      });
-      assert.equal(r2.ok, false);
-      assert.match(r2.reason, /full-page-raster/);
-
-      const r3 = validateExportReport({
-        ...baseValidReport,
-        degradations: [{ slideIndex: 2, kind: "shape-fallback", reason: "full-page screenshot slide used" }],
-      });
-      assert.equal(r3.ok, false);
-      assert.match(r3.reason, /screenshot slide/);
-    });
-
-    it("rejects failed editDataCharts", async () => {
-      const { validateExportReport } = await import("./export-pptd.js");
-      const validation = validateExportReport({
-        ...baseValidReport,
-        editDataCharts: { ok: [], failed: ["chart-fail"] },
-      });
-      assert.equal(validation.ok, false);
-      assert.match(validation.reason, /failed editDataCharts/);
-    });
-
-    it("rejects zero or missing bytes and invalid slideCount", async () => {
-      const { validateExportReport } = await import("./export-pptd.js");
-      const r1 = validateExportReport({ ...baseValidReport, bytes: 0 });
-      assert.equal(r1.ok, false);
-      assert.match(r1.reason, /bytes/);
-
-      const r2 = validateExportReport({ ...baseValidReport, slideCount: 0 });
-      assert.equal(r2.ok, false);
-      assert.match(r2.reason, /slideCount/);
-    });
   });
 });

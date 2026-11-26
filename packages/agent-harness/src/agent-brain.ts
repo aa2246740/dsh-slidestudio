@@ -6,11 +6,7 @@
 import type { PptdProject } from "@open-slidestudio/pptd-v2";
 import { runAgentLoop, type AgentToolTrace } from "./agent-runtime.js";
 import { deterministicDeck } from "./compose-ir.js";
-import {
-  formatPauseMessage,
-  type AgentCheckpoint,
-  type AgentPause,
-} from "./generate-checkpoint.js";
+import { formatPauseMessage, type AgentCheckpoint, type AgentPause } from "./generate-checkpoint.js";
 import type { CapabilityCard } from "./capability-card.js";
 import type { ImagePort } from "./image-port.js";
 import type { ImageSearchPort } from "./image-search-port.js";
@@ -19,12 +15,7 @@ import type { PageRasterPort } from "./page-raster.js";
 import type { ResearchPort } from "./research-port.js";
 import { materializeDeck } from "./materialize.js";
 import { applySkillDeck, type SkillDeckInput } from "./skill-pages.js";
-import {
-  DEFAULT_CATEGORY,
-  DEFAULT_DESIGN_SYSTEM,
-  loadPlaybook,
-  type PlaybookBundle,
-} from "./playbook.js";
+import { DEFAULT_CATEGORY, DEFAULT_DESIGN_SYSTEM, loadPlaybook, type PlaybookBundle } from "./playbook.js";
 import type { ToolStep } from "./harness-types.js";
 import { planFromDeck, thinkAboutBrief, type ReasonBlock } from "./reason.js";
 
@@ -74,12 +65,7 @@ export function createAgentBrain(opts: AgentBrainOptions): AgentBrain {
   let fallbackReason: string | undefined;
   let traces: AgentToolTrace[] = [];
   let pause: AgentPause | undefined;
-  let cachedDeck = deterministicDeck(
-    "pending",
-    playbook.designSystemId,
-    opts.referenceText,
-    playbook.categoryId,
-  );
+  let cachedDeck = deterministicDeck("pending", playbook.designSystemId, opts.referenceText, playbook.categoryId);
   let cachedSkill: SkillDeckInput | undefined;
 
   const apply = (project: PptdProject) => {
@@ -90,11 +76,7 @@ export function createAgentBrain(opts: AgentBrainOptions): AgentBrain {
     materializeDeck(project, cachedDeck, playbook.palette);
   };
 
-  const loop = async (
-    brief: string,
-    onTrace?: (t: AgentToolTrace) => void | Promise<void>,
-    projectRoot?: string,
-  ) => {
+  const loop = async (brief: string, onTrace?: (t: AgentToolTrace) => void | Promise<void>, projectRoot?: string) => {
     const result = await runAgentLoop({
       brief,
       playbook,
@@ -170,29 +152,33 @@ export function createAgentBrain(opts: AgentBrainOptions): AgentBrain {
           });
         }
       }
-      const result = await loop(hooks.brief, async (trace) => {
-        const step: ToolStep = {
-          tool: asToolName(trace.tool),
-          label: trace.label,
-          status: "running",
-          summary: trace.summary,
-        };
-        hooks.emit(step);
-        if (hooks.streamDetail && trace.detail) {
-          await hooks.streamDetail(trace.detail, (partial) => {
-            step.status = "running";
-            step.detail = partial;
+      const result = await loop(
+        hooks.brief,
+        async (trace) => {
+          const step: ToolStep = {
+            tool: asToolName(trace.tool),
+            label: trace.label,
+            status: "running",
+            summary: trace.summary,
+          };
+          hooks.emit(step);
+          if (hooks.streamDetail && trace.detail) {
+            await hooks.streamDetail(trace.detail, (partial) => {
+              step.status = "running";
+              step.detail = partial;
+              hooks.emitUpdate(step);
+            });
+          } else {
+            step.detail = trace.detail;
             hooks.emitUpdate(step);
-          });
-        } else {
+          }
+          step.status = trace.ok ? "completed" : "failed";
+          step.summary = trace.summary;
           step.detail = trace.detail;
           hooks.emitUpdate(step);
-        }
-        step.status = trace.ok ? "completed" : "failed";
-        step.summary = trace.summary;
-        step.detail = trace.detail;
-        hooks.emitUpdate(step);
-      }, hooks.project.rootDir);
+        },
+        hooks.project.rootDir,
+      );
       if (result.source === "paused") {
         hooks.emit({
           tool: "wait",

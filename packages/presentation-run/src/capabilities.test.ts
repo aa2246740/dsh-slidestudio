@@ -59,6 +59,7 @@ describe("inspectCapabilities SSOT", () => {
       "disabled",
     );
   });
+
   it("opens hosted Grok research, image search, image generate, and main-model vision when raster is ready", () => {
     const env = {
       SLIDESTUDIO_EDITOR_URL: "http://127.0.0.1:55200",
@@ -149,7 +150,7 @@ describe("inspectCapabilities SSOT", () => {
         SLIDESTUDIO_IMAGE: "1",
         SLIDESTUDIO_IMAGE_BASE_URL: "https://api.x.ai/v1",
         SLIDESTUDIO_IMAGE_MODEL: "grok-imagine-image-2.0",
-        SLIDESTUDIO_IMAGE_API_KEY: "xai-token-not-minimax",
+        SLIDESTUDIO_IMAGE_API_KEY: "fixture-xai-token-not-minimax",
       },
       providerId: "minimax-cn",
       ready: true,

@@ -2,26 +2,21 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  exportProjectToPptx,
-  validateExportReport,
-  type ExportResult,
-} from "@open-slidestudio/exporter-native";
-import {
-  calculateMaterialFingerprint,
-  loadProject,
-  withProjectWriteLock,
-} from "@open-slidestudio/pptd-v2";
+import { exportProjectToPptx, validateExportReport, type ExportResult } from "@open-slidestudio/exporter-native";
+import { calculateMaterialFingerprint, loadProject, withProjectWriteLock } from "@open-slidestudio/pptd-v2";
 import { inspectRunLedger, readRunLedger, recordExportSucceeded } from "./domain/run-ledger.js";
 import { writeFileAtomic, writeJsonAtomic } from "./domain/atomic-file.js";
-import type { CommandContext, ExecutionDelivery } from "./types.js";
+import type { CommandContext, ExecutionDelivery, WriteAuthorityRunner } from "./types.js";
+import { runWithWriteAuthority } from "./write-authority.js";
 
 function sha256(bytes: Buffer): string {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
 export function readVerifiedDelivery(root: string): ExecutionDelivery | null {
-  const fact = readRunLedger(root)?.facts.filter((row) => row.type === "export.succeeded").at(-1);
+  const fact = readRunLedger(root)
+    ?.facts.filter((row) => row.type === "export.succeeded")
+    .at(-1);
   if (!fact || fact.type !== "export.succeeded") return null;
   const artifact = path.join(root, fact.artifactPath);
   const report = path.join(root, fact.reportPath);
@@ -60,9 +55,48 @@ function copyRegularFile(src: string, dest: string): void {
   fs.copyFileSync(src, dest);
 }
 
+/**
+ * Copies the deck, pages and media into `snapDir`. A failed copy removes the
+ * partial snapshot before the error propagates, so nothing stays in the temp root.
+ */
+function copyExportSnapshot(root: string, snapDir: string): void {
+  try {
+    fs.mkdirSync(snapDir, { recursive: true });
+    copyRegularFile(path.join(root, "deck.pptd"), path.join(snapDir, "deck.pptd"));
+
+    const pagesDir = path.join(root, "pages");
+    const snapPagesDir = path.join(snapDir, "pages");
+    fs.mkdirSync(snapPagesDir, { recursive: true });
+    if (fs.existsSync(pagesDir)) {
+      for (const file of fs.readdirSync(pagesDir)) {
+        if (file.endsWith(".page")) {
+          copyRegularFile(path.join(pagesDir, file), path.join(snapPagesDir, file));
+        }
+      }
+    }
+
+    const mediaDir = path.join(root, "media");
+    const snapMediaDir = path.join(snapDir, "media");
+    fs.mkdirSync(snapMediaDir, { recursive: true });
+    if (fs.existsSync(mediaDir)) {
+      for (const file of fs.readdirSync(mediaDir)) {
+        const srcPath = path.join(mediaDir, file);
+        if (fs.lstatSync(srcPath).isFile() && !fs.lstatSync(srcPath).isSymbolicLink()) {
+          copyRegularFile(srcPath, path.join(snapMediaDir, file));
+        }
+      }
+    }
+  } catch (error) {
+    fs.rmSync(snapDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function exportEditablePptx(
   projectRoot: string,
-  context?: CommandContext | { toolCallId?: string; contextEpochId?: string; sessionId?: string },
+  context?:
+    | CommandContext
+    | { toolCallId?: string; contextEpochId?: string; sessionId?: string; runAuthorizedWrite?: WriteAuthorityRunner },
 ): Promise<{
   ok: boolean;
   summary: string;
@@ -99,38 +133,10 @@ export async function exportEditablePptx(
     const initialFingerprint = calculateMaterialFingerprint(root);
     const opId = `exp-${crypto.randomUUID()}`;
     const snapDir = path.join(os.tmpdir(), `pptd-export-snap-${opId}`);
-    fs.mkdirSync(snapDir, { recursive: true });
-
-    // Copy deck.pptd
-    copyRegularFile(path.join(root, "deck.pptd"), path.join(snapDir, "deck.pptd"));
-
-    // Copy pages
-    const pagesDir = path.join(root, "pages");
-    const snapPagesDir = path.join(snapDir, "pages");
-    fs.mkdirSync(snapPagesDir, { recursive: true });
-    if (fs.existsSync(pagesDir)) {
-      for (const file of fs.readdirSync(pagesDir)) {
-        if (file.endsWith(".page")) {
-          copyRegularFile(path.join(pagesDir, file), path.join(snapPagesDir, file));
-        }
-      }
-    }
-
-    // Copy media
-    const mediaDir = path.join(root, "media");
-    const snapMediaDir = path.join(snapDir, "media");
-    fs.mkdirSync(snapMediaDir, { recursive: true });
-    if (fs.existsSync(mediaDir)) {
-      for (const file of fs.readdirSync(mediaDir)) {
-        const srcPath = path.join(mediaDir, file);
-        if (fs.lstatSync(srcPath).isFile() && !fs.lstatSync(srcPath).isSymbolicLink()) {
-          copyRegularFile(srcPath, path.join(snapMediaDir, file));
-        }
-      }
-    }
+    copyExportSnapshot(root, snapDir);
 
     const title = project.presentation.title ?? "deck";
-    const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_+|_+$/g, "") || "deck"}.pptx`;
+    const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, "_")}.pptx`;
     return {
       ok: true,
       snapDir,
@@ -190,117 +196,120 @@ export async function exportEditablePptx(
       }
     | { ok: false; summary: string; detail: string; payload: Record<string, unknown> };
 
-  const publish: PublishResult = withProjectWriteLock(root, () => {
-    const currentFingerprint = calculateMaterialFingerprint(root);
-    if (currentFingerprint !== prep.initialFingerprint) {
-      return {
-        ok: false,
-        summary: "document modified during export",
-        detail: "material fingerprint mismatch: document was modified while exporter was running",
-        payload: { error: "material_fingerprint_mismatch" },
+  const authorizedPublish = runWithWriteAuthority(root, context?.runAuthorizedWrite, (): PublishResult =>
+    withProjectWriteLock(root, () => {
+      const currentFingerprint = calculateMaterialFingerprint(root);
+      if (currentFingerprint !== prep.initialFingerprint) {
+        return {
+          ok: false,
+          summary: "document modified during export",
+          detail: "material fingerprint mismatch: document was modified while exporter was running",
+          payload: { error: "material_fingerprint_mismatch" },
+        };
+      }
+
+      const dest = path.join(root, "_agent", "export", prep.opId);
+      fs.mkdirSync(dest, { recursive: true });
+      const file = path.join(dest, prep.filename);
+      writeFileAtomic(file, exportResult.data);
+      const relativeArtifact = path.relative(root, file);
+
+      const artifactBytes = exportResult.data.byteLength;
+      const artifactSha256 = sha256(exportResult.data);
+
+      const marker = path.join(dest, "export-report.json");
+      const relativeReport = path.relative(root, marker);
+      const reportData = {
+        ...exportResult.report,
+        src: relativeArtifact,
+        artifactSha256,
+        materialFingerprint: currentFingerprint,
       };
-    }
-
-    const dest = path.join(root, "_agent", "export", prep.opId);
-    fs.mkdirSync(dest, { recursive: true });
-    const file = path.join(dest, prep.filename);
-    writeFileAtomic(file, exportResult.data);
-    const relativeArtifact = path.relative(root, file);
-
-    const artifactBytes = exportResult.data.byteLength;
-    const artifactSha256 = sha256(exportResult.data);
-
-    const marker = path.join(dest, "export-report.json");
-    const relativeReport = path.relative(root, marker);
-    const reportData = {
-      ...exportResult.report,
-      src: relativeArtifact,
-      artifactSha256,
-      materialFingerprint: currentFingerprint,
-    };
-    const reportContent = `${JSON.stringify(reportData, null, 2)}\n`;
-    writeFileAtomic(marker, reportContent);
-    const reportSha256 = sha256(Buffer.from(reportContent, "utf8"));
-    const onDiskArtifact = fs.readFileSync(file);
-    const onDiskReport = fs.readFileSync(marker);
-    if (onDiskArtifact.length === 0 || sha256(onDiskArtifact) !== artifactSha256) {
-      return {
-        ok: false,
-        summary: "published artifact missing",
-        detail: `artifact ${relativeArtifact} does not match the just-written bytes`,
-        payload: { error: "published_artifact_missing" },
+      const reportContent = `${JSON.stringify(reportData, null, 2)}\n`;
+      writeFileAtomic(marker, reportContent);
+      const reportSha256 = sha256(Buffer.from(reportContent, "utf8"));
+      const onDiskArtifact = fs.readFileSync(file);
+      const onDiskReport = fs.readFileSync(marker);
+      if (onDiskArtifact.length === 0 || sha256(onDiskArtifact) !== artifactSha256) {
+        return {
+          ok: false,
+          summary: "published artifact missing",
+          detail: `artifact ${relativeArtifact} does not match the just-written bytes`,
+          payload: { error: "published_artifact_missing" },
+        };
+      }
+      if (onDiskReport.length === 0 || sha256(onDiskReport) !== reportSha256) {
+        return {
+          ok: false,
+          summary: "published report missing",
+          detail: `report ${relativeReport} does not match the just-written bytes`,
+          payload: { error: "published_report_missing" },
+        };
+      }
+      if (!validateExportReport(JSON.parse(onDiskReport.toString("utf8"))).ok) {
+        return {
+          ok: false,
+          summary: "published report invalid",
+          detail: "re-read export report failed shared acceptance",
+          payload: { error: "published_report_invalid" },
+        };
+      }
+      const receipt = {
+        opId: prep.opId,
+        artifactPath: relativeArtifact,
+        artifactSha256,
+        artifactBytes,
+        reportPath: relativeReport,
+        reportSha256,
+        slideCount: exportResult.report.slideCount,
+        inputFingerprint: currentFingerprint,
       };
-    }
-    if (onDiskReport.length === 0 || sha256(onDiskReport) !== reportSha256) {
-      return {
-        ok: false,
-        summary: "published report missing",
-        detail: `report ${relativeReport} does not match the just-written bytes`,
-        payload: { error: "published_report_missing" },
-      };
-    }
-    if (!validateExportReport(JSON.parse(onDiskReport.toString("utf8"))).ok) {
-      return {
-        ok: false,
-        summary: "published report invalid",
-        detail: "re-read export report failed shared acceptance",
-        payload: { error: "published_report_invalid" },
-      };
-    }
-    const receipt = {
-      opId: prep.opId,
-      artifactPath: relativeArtifact,
-      artifactSha256,
-      artifactBytes,
-      reportPath: relativeReport,
-      reportSha256,
-      slideCount: exportResult.report.slideCount,
-      inputFingerprint: currentFingerprint,
-    };
-    writeJsonAtomic(path.join(dest, "receipt.json"), receipt);
-    writeJsonAtomic(path.join(root, "_agent", "export", "current.json"), receipt);
+      writeJsonAtomic(path.join(dest, "receipt.json"), receipt);
+      writeJsonAtomic(path.join(root, "_agent", "export", "current.json"), receipt);
 
-    // Record export fact in ledger
-    const ledger = readRunLedger(root);
-    if (ledger) {
-      const toolCallId =
-        context && "toolCallId" in context && typeof context.toolCallId === "string" && context.toolCallId
-          ? context.toolCallId
-          : prep.opId;
-      const contextEpochId =
-        context && "contextEpochId" in context && typeof context.contextEpochId === "string" && context.contextEpochId
-          ? context.contextEpochId
-          : "";
-      recordExportSucceeded(
-        root,
-        {
-          commandId: toolCallId,
-          contextEpochId,
-        },
-        {
-          commandId: toolCallId,
-          artifactPath: relativeArtifact,
-          artifactSha256,
-          artifactBytes,
-          reportPath: relativeReport,
-          reportSha256,
-          slideCount: exportResult.report.slideCount,
-          materialFingerprint: currentFingerprint,
-          producer: "agent-tool",
-        },
-      );
-    }
+      // Record export fact in ledger
+      const ledger = readRunLedger(root);
+      if (ledger) {
+        const toolCallId =
+          context && "toolCallId" in context && typeof context.toolCallId === "string" && context.toolCallId
+            ? context.toolCallId
+            : prep.opId;
+        const contextEpochId =
+          context && "contextEpochId" in context && typeof context.contextEpochId === "string" && context.contextEpochId
+            ? context.contextEpochId
+            : "";
+        recordExportSucceeded(
+          root,
+          {
+            commandId: toolCallId,
+            contextEpochId,
+          },
+          {
+            commandId: toolCallId,
+            artifactPath: relativeArtifact,
+            artifactSha256,
+            artifactBytes,
+            reportPath: relativeReport,
+            reportSha256,
+            slideCount: exportResult.report.slideCount,
+            materialFingerprint: currentFingerprint,
+            producer: "agent-tool",
+          },
+        );
+      }
 
-    return {
-      ok: true,
-      relativeArtifact,
-      relativeReport,
-      artifactSha256,
-      reportSha256,
-      artifactBytes,
-      materialFingerprint: currentFingerprint,
-    };
-  });
+      return {
+        ok: true,
+        relativeArtifact,
+        relativeReport,
+        artifactSha256,
+        reportSha256,
+        artifactBytes,
+        materialFingerprint: currentFingerprint,
+      };
+    }),
+  );
+  const publish: PublishResult = authorizedPublish.ok ? authorizedPublish.value : authorizedPublish;
 
   if (!publish.ok) {
     return {

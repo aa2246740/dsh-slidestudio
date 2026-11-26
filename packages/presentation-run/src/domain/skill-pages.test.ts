@@ -24,7 +24,11 @@ describe("OpenKimi nested chart dialect", () => {
       ],
     });
     const chart = page?.elements.find((el) => el.elementType === "chart") as
-      | { elementType: "chart"; data: { cols: string[]; rows: unknown[] }; series: Array<{ type?: string }> }
+      | {
+          elementType: "chart";
+          data: { cols: string[]; rows: unknown[] };
+          series: Array<{ type?: string }>;
+        }
       | undefined;
     assert.equal(chart?.elementType, "chart");
     assert.deepEqual(chart?.data.cols, ["年份", "规模"]);
@@ -54,7 +58,7 @@ describe("canonical write_page text style", () => {
             bold: false,
             lineHeight: 1.18,
             letterSpacing: 0.5,
-            align: "[\"right\",\"middle\"]",
+            align: '["right","middle"]',
             wrap: false,
           },
         },
@@ -95,8 +99,7 @@ describe("canonical write_page text style", () => {
     });
     assert.ok(page);
     const number = page.elements[0] as
-      | { elementType?: string; content?: { text?: string; color?: string; fontSize?: number } }
-      | undefined;
+      { elementType?: string; content?: { text?: string; color?: string; fontSize?: number } } | undefined;
     assert.equal(number?.elementType, "text");
     assert.equal(number?.content?.text, "1");
     assert.equal(number?.content?.color, "#A95228");

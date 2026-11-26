@@ -1,11 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {
-  ooxmlPresetNames,
-  ooxmlShapePath,
-  ooxmlShapeGeometry,
-} from "./ooxml-geom.js";
+import { ooxmlPresetNames, ooxmlShapePath, ooxmlShapeGeometry } from "./ooxml-geom.js";
 import { SHAPE_CATALOG } from "./shape-catalog.js";
 import { shapePath } from "./shape-path.js";
 
@@ -60,10 +56,7 @@ describe("OOXML preset geometry", () => {
   });
 
   it("ahLst count matches XML including polar handles", () => {
-    const xml = fs.readFileSync(
-      new URL("../src/data/presetShapeDefinitions.xml", import.meta.url),
-      "utf8",
-    );
+    const xml = fs.readFileSync(new URL("../src/data/presetShapeDefinitions.xml", import.meta.url), "utf8");
     const countAh = (name: string) => {
       const block = xml.match(new RegExp(`<${name}>[\\s\\S]*?</${name}>`))?.[0] ?? "";
       return [...block.matchAll(/<(ahXY|ahPolar)\b/g)].length;

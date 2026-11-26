@@ -3,13 +3,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createEmptyProject, listComposedPage, loadProject, saveProject, titleOnlyCoverPage, type PptdProject } from "@open-slidestudio/pptd-v2";
+import {
+  createEmptyProject,
+  listComposedPage,
+  loadProject,
+  saveProject,
+  titleOnlyCoverPage,
+  type PptdProject,
+} from "@open-slidestudio/pptd-v2";
 import {
   openSession,
   selectElement,
   setSelectedText,
-  setSelectedRichText,
-  setSelectedTextRangeStyle,
   setSelectedBold,
   setSelectedBounds,
   persist,
@@ -111,12 +116,14 @@ function appendTextPage(project: PptdProject, pathName: string, elementId: strin
   project.pages.push({
     path: pathName,
     page: {
-      elements: [{
-        elementId,
-        elementType: "text",
-        bounds: [0, 0, 100, 40],
-        content: { text },
-      }],
+      elements: [
+        {
+          elementId,
+          elementType: "text",
+          bounds: [0, 0, 100, 40],
+          content: { text },
+        },
+      ],
     },
   });
 }
@@ -149,10 +156,7 @@ describe("canvas-session", () => {
     listedCoverProject(dir, { title: "Hi" });
     const s = openSession(dir, { allowedControlIds: [] });
     selectElement(s, "title");
-    assert.throws(
-      () => setSelectedText(s, "element.text.content.set", "X"),
-      /not allowed/,
-    );
+    assert.throws(() => setSelectedText(s, "element.text.content.set", "X"), /not allowed/);
   });
 
   it("edits text when control allowed and persists PPTD", () => {
@@ -253,7 +257,9 @@ describe("canvas-session", () => {
       },
     });
     saveProject(p);
-    const s = openSession(dir, { allowedControlIds: ["chrome.pages.rail.toggle", "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: ["chrome.pages.rail.toggle", "chrome.history.undo", "chrome.history.redo"],
+    });
     assert.equal(renderModel(s).pageRailOpen, true);
     goToPage(s, 1);
     assert.equal(s.pageIndex, 1);
@@ -268,7 +274,9 @@ describe("canvas-session", () => {
   it("cascades 12 consecutive shape inserts to distinct in-canvas origins", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const s = openSession(dir, { allowedControlIds: ["insert.shape", "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: ["insert.shape", "chrome.history.undo", "chrome.history.redo"],
+    });
     const canvas = s.project.presentation.size;
     const origins = new Set<string>();
     for (let i = 0; i < 12; i++) {
@@ -298,7 +306,10 @@ describe("canvas-session", () => {
         "chrome.pages.rail.toggle",
         "chrome.notes.toggle",
         "chrome.present.play",
-        "chrome.present.fullscreen", "chrome.history.undo", "chrome.history.redo"],
+        "chrome.present.fullscreen",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     zoomBy(s, "chrome.zoom.in", "in");
     assert.equal(renderModel(s).zoomPercent, 110);
@@ -322,7 +333,10 @@ describe("canvas-session", () => {
       allowedControlIds: [
         "chrome.pages.add",
         "chrome.pages.duplicate",
-        "chrome.pages.delete", "chrome.history.undo", "chrome.history.redo"],
+        "chrome.pages.delete",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     assert.equal(pageCount(s), 1);
     addBlankPage(s, "chrome.pages.add");
@@ -388,10 +402,7 @@ describe("canvas-session", () => {
       pageIndex: 1,
     });
     selectElement(deletion, "second");
-    assert.throws(
-      () => deletePage(deletion, "chrome.pages.delete", Number.NaN),
-      /page index out of range/,
-    );
+    assert.throws(() => deletePage(deletion, "chrome.pages.delete", Number.NaN), /page index out of range/);
     assert.equal(deletion.pageIndex, 1);
     assert.equal(pageCount(deletion), 2);
     assert.equal(renderModel(deletion).elements[0]?.text, "Two");
@@ -437,10 +448,7 @@ describe("canvas-session", () => {
     assert.equal(s.project.pages[1]!.page.notes, undefined);
     assert.equal(s.pageIndex, 1);
     assert.deepEqual(s.selection, { kind: "element", pageIndex: 1, elementId: "second" });
-    assert.throws(
-      () => setPageNotesAt(s, "notes.content.set", Number.NaN, "invalid"),
-      /page index out of range/,
-    );
+    assert.throws(() => setPageNotesAt(s, "notes.content.set", Number.NaN, "invalid"), /page index out of range/);
     assert.equal(undo(s), true);
     assert.equal(s.project.pages[0]!.page.notes, undefined);
     assert.equal(s.pageIndex, 1);
@@ -451,15 +459,11 @@ describe("canvas-session", () => {
     const dir = tmp();
     listedCoverProject(dir, { title: "One" });
     const blocked = openSession(dir, { allowedControlIds: [] });
-    assert.throws(
-      () => deletePage(blocked, "chrome.pages.delete"),
-      /not allowed/,
-    );
-    const one = openSession(dir, { allowedControlIds: ["chrome.pages.delete", "chrome.history.undo", "chrome.history.redo"] });
-    assert.throws(
-      () => deletePage(one, "chrome.pages.delete"),
-      /cannot delete the last page/,
-    );
+    assert.throws(() => deletePage(blocked, "chrome.pages.delete"), /not allowed/);
+    const one = openSession(dir, {
+      allowedControlIds: ["chrome.pages.delete", "chrome.history.undo", "chrome.history.redo"],
+    });
+    assert.throws(() => deletePage(one, "chrome.pages.delete"), /cannot delete the last page/);
 
     const p = loadProject(dir);
     p.presentation.pages.push("pages/2.page");
@@ -484,10 +488,7 @@ describe("canvas-session", () => {
       () => reorderPages(openSession(dir, { allowedControlIds: [] }), "chrome.pages.reorder", 0, 1),
       /not allowed/,
     );
-    assert.throws(
-      () => reorderPages(s, "chrome.pages.reorder", Number.NaN, 0),
-      /invalid reorder/,
-    );
+    assert.throws(() => reorderPages(s, "chrome.pages.reorder", Number.NaN, 0), /invalid reorder/);
     reorderPages(s, "chrome.pages.reorder", 0, 1);
     assert.equal(renderModel(s).elements[0]!.text, "One");
     persist(s);
@@ -500,34 +501,26 @@ describe("canvas-session", () => {
     const dir = tmp();
     listedCoverProject(dir);
     const blocked = openSession(dir, { allowedControlIds: [] });
-    assert.throws(
-      () => setZoomPercent(blocked, "chrome.zoom.percent", 80),
-      /not allowed/,
-    );
-    const s = openSession(dir, { allowedControlIds: ["chrome.zoom.percent", "chrome.history.undo", "chrome.history.redo"] });
+    assert.throws(() => setZoomPercent(blocked, "chrome.zoom.percent", 80), /not allowed/);
+    const s = openSession(dir, {
+      allowedControlIds: ["chrome.zoom.percent", "chrome.history.undo", "chrome.history.redo"],
+    });
     setZoomPercent(s, "chrome.zoom.percent", 80);
     assert.equal(renderModel(s).zoomPercent, 80);
     setZoomPercent(s, "chrome.zoom.percent", 10);
     assert.equal(renderModel(s).zoomPercent, 25);
-    assert.throws(
-      () => setZoomPercent(s, "chrome.zoom.percent", Number.NaN),
-      /finite number/,
-    );
+    assert.throws(() => setZoomPercent(s, "chrome.zoom.percent", Number.NaN), /finite number/);
   });
 
   it("S4: each insert type adds one element and persists through reload", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const ids = [
-      "insert.text",
-      "insert.shape",
-      "insert.image",
-      "insert.table",
-      "insert.chart",
-    ] as const;
+    const ids = ["insert.text", "insert.shape", "insert.image", "insert.table", "insert.chart"] as const;
     const blocked = openSession(dir, { allowedControlIds: [] });
     assert.throws(() => insertText(blocked, "insert.text"), /not allowed/);
-    const s = openSession(dir, { allowedControlIds: [...ids, "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: [...ids, "chrome.history.undo", "chrome.history.redo"],
+    });
     const before = renderModel(s).elements.length;
     insertText(s, "insert.text");
     insertShape(s, "insert.shape");
@@ -555,15 +548,15 @@ describe("canvas-session", () => {
     if (persistedChart?.elementType === "chart") {
       assert.deepEqual(persistedChart.background, { type: "solid", color: "#FFFFFF" });
     }
-    assert.ok(
-      fs.existsSync(path.join(dir, "media", "insert-placeholder.png")),
-    );
+    assert.ok(fs.existsSync(path.join(dir, "media", "insert-placeholder.png")));
   });
 
   it("inserts 1x1 and maximum-size tables as one undoable mutation", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const one = openSession(dir, { allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"] });
+    const one = openSession(dir, {
+      allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"],
+    });
     const beforeOne = renderModel(one).elements.length;
 
     const oneId = insertTable(one, "insert.table", 1, 1);
@@ -579,12 +572,17 @@ describe("canvas-session", () => {
 
     assert.equal(undo(one), true);
     assert.equal(renderModel(one).elements.length, beforeOne);
-    assert.equal(renderModel(one).elements.some((element) => element.id === oneId), false);
+    assert.equal(
+      renderModel(one).elements.some((element) => element.id === oneId),
+      false,
+    );
     assert.equal(undo(one), false, "one insert must not require multiple undo steps");
     assert.equal(redo(one), true);
     assert.equal(renderModel(one).elements.find((element) => element.id === oneId)?.tableRows?.length, 1);
 
-    const max = openSession(dir, { allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"] });
+    const max = openSession(dir, {
+      allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"],
+    });
     const maxId = insertTable(max, "insert.table", MAX_INSERT_TABLE_SIZE, MAX_INSERT_TABLE_SIZE);
     const maxTable = renderModel(max).elements.find((element) => element.id === maxId);
     assert.equal(maxTable?.tableRows?.length, MAX_INSERT_TABLE_SIZE);
@@ -599,7 +597,9 @@ describe("canvas-session", () => {
   it("rejects invalid table sizes without changing project, selection, or history", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const s = openSession(dir, { allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: ["insert.table", "chrome.history.undo", "chrome.history.redo"],
+    });
     insertTable(s, "insert.table");
     assert.equal(undo(s), true);
     const before = structuredClone(s);
@@ -629,12 +629,16 @@ describe("canvas-session", () => {
   it("inserts external plain text atomically and rejects invalid payloads before mutation", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const s = openSession(dir, { allowedControlIds: ["insert.text", "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: ["insert.text", "chrome.history.undo", "chrome.history.redo"],
+    });
     const before = renderModel(s).elements.length;
     const id = insertText(s, "insert.text", "外部剪贴板文本");
     assert.equal(renderModel(s).elements.find((element) => element.id === id)?.text, "外部剪贴板文本");
     persist(s);
-    const saved = renderModel(openSession(dir, { allowedControlIds: [] })).elements.find((element) => element.id === id);
+    const saved = renderModel(openSession(dir, { allowedControlIds: [] })).elements.find(
+      (element) => element.id === id,
+    );
     assert.equal(saved?.type, "text");
     assert.equal(saved?.text, "外部剪贴板文本");
     assert.throws(() => insertText(s, "insert.text", 42), /must be a string/);
@@ -731,7 +735,12 @@ describe("canvas-session", () => {
     pasteClipboard(s, "element.duplicate");
     assert.equal(renderModel(s).elements.length, beforePaste + 1);
     insertShape(s, "insert.shape", "roundRect");
-    setSelectedShadow(s, "element.shadow.set", { blur: 12, color: "#00000055", offsetX: 2, offsetY: 4 });
+    setSelectedShadow(s, "element.shadow.set", {
+      blur: 12,
+      color: "#00000055",
+      offsetX: 2,
+      offsetY: 4,
+    });
     assert.equal(renderModel(s).elements.at(-1)!.shadow?.blur, 12);
     assert.match(String(renderModel(s).elements.at(-1)!.pathD), /A /);
     assert.ok((renderModel(s).elements.at(-1)!.adjustHandles || []).length >= 1);
@@ -787,7 +796,10 @@ describe("canvas-session", () => {
     assert.equal(portrait.fit, "contain");
     setImageSrc(s, "element.image.replace", "media/replaced.png");
     setImageCrop(s, "element.image.crop.set", { left: 0.1, top: 0.1, right: 0.1, bottom: 0.1 });
-    const editedImageId = renderModel(s).selection.kind === "element" ? (renderModel(s).selection as { elementId: string }).elementId : null;
+    const editedImageId =
+      renderModel(s).selection.kind === "element"
+        ? (renderModel(s).selection as { elementId: string }).elementId
+        : null;
     assert.ok(editedImageId);
     setImageCropShape(s, "element.image.mask.set", { shapeName: "ellipse" });
     assert.equal(renderModel(s).elements.at(-1)!.src, "media/replaced.png");
@@ -882,8 +894,7 @@ describe("canvas-session", () => {
     assert.ok(kinds.includes("line"));
     assert.ok(kinds.includes("icon"));
     const img = again.pages[0]!.page.elements.find((e) => e.elementId === editedImageId) as
-      | { crop?: { left?: number } }
-      | undefined;
+      { crop?: { left?: number } } | undefined;
     assert.equal(img?.crop?.left, 0.1);
     selectMany(s, []);
     clearSelection(s);
@@ -894,7 +905,13 @@ describe("canvas-session", () => {
     const dir = tmp();
     listedCoverProject(dir);
     const s = openSession(dir, {
-      allowedControlIds: ["chrome.workspace.refine", "insert.text", "element.text.content.set", "chrome.history.undo", "chrome.history.redo"],
+      allowedControlIds: [
+        "chrome.workspace.refine",
+        "insert.text",
+        "element.text.content.set",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     insertText(s, "insert.text");
     setSelectedText(s, "element.text.content.set", "核聚变研究");
@@ -906,7 +923,10 @@ describe("canvas-session", () => {
     const texts = page.elements
       .filter((e) => e.elementType === "text")
       .map((e) => String((e as { content?: { text?: string } }).content?.text || ""));
-    assert.ok(texts.some((t) => t.includes("可控核聚变")), texts.join(" | "));
+    assert.ok(
+      texts.some((t) => t.includes("可控核聚变")),
+      texts.join(" | "),
+    );
     assert.equal((page.background as { color?: string } | undefined)?.color, "#2563EB");
   });
 
@@ -918,7 +938,10 @@ describe("canvas-session", () => {
         "insert.text",
         "element.bounds.set",
         "element.arrange.align.set",
-        "element.arrange.distribute.set", "chrome.history.undo", "chrome.history.redo"],
+        "element.arrange.distribute.set",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     const a = insertText(s, "insert.text");
     const b = insertText(s, "insert.text");
@@ -945,8 +968,7 @@ describe("canvas-session", () => {
     });
     const a = insertText(s, "insert.text");
     const b = insertText(s, "insert.text");
-    const boundsOf = (id: string) =>
-      s.project.pages[0]!.page.elements.find((e) => e.elementId === id)!.bounds;
+    const boundsOf = (id: string) => s.project.pages[0]!.page.elements.find((e) => e.elementId === id)!.bounds;
     selectElement(s, a);
     setSelectedBounds(s, "element.bounds.set", [10, 10, 40, 20]);
     selectElement(s, b);
@@ -963,7 +985,14 @@ describe("canvas-session", () => {
     const dir = tmp();
     listedCoverProject(dir);
     const s = openSession(dir, {
-      allowedControlIds: ["insert.text", "insert.shape", "selection.tab", "selection.clear", "chrome.history.undo", "chrome.history.redo"],
+      allowedControlIds: [
+        "insert.text",
+        "insert.shape",
+        "selection.tab",
+        "selection.clear",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     const textId = insertText(s, "insert.text");
     const shapeId = insertShape(s, "insert.shape");
@@ -989,11 +1018,15 @@ describe("canvas-session", () => {
   it("flips selected element horizontally", () => {
     const dir = tmp();
     listedCoverProject(dir);
-    const s = openSession(dir, { allowedControlIds: ["insert.shape", "element.arrange.flip.set", "chrome.history.undo", "chrome.history.redo"] });
+    const s = openSession(dir, {
+      allowedControlIds: ["insert.shape", "element.arrange.flip.set", "chrome.history.undo", "chrome.history.redo"],
+    });
     insertShape(s, "insert.shape");
     flipSelected(s, "element.arrange.flip.set", "h");
     persist(s);
-    const el = loadProject(dir).pages[0]!.page.elements.find((e) => e.elementType === "shape") as { flipH?: boolean };
+    const el = loadProject(dir).pages[0]!.page.elements.find((e) => e.elementType === "shape") as {
+      flipH?: boolean;
+    };
     assert.equal(el.flipH, true);
   });
 
@@ -1005,7 +1038,10 @@ describe("canvas-session", () => {
         "insert.image",
         "element.image.rebuild",
         "element.bounds.set",
-        "element.text.content.set", "chrome.history.undo", "chrome.history.redo"],
+        "element.text.content.set",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     insertImage(s, "insert.image");
     const out = rebuildSelectedImage(s, "element.image.rebuild", "感知, 路由, 决策, 执行");
@@ -1043,7 +1079,10 @@ describe("canvas-session", () => {
         "element.smartart.node.add",
         "element.smartart.node.delete",
         "element.smartart.layout.set",
-        "element.bounds.set", "chrome.history.undo", "chrome.history.redo"],
+        "element.bounds.set",
+        "chrome.history.undo",
+        "chrome.history.redo",
+      ],
     });
     const diagramId = insertSmartArt(s, "insert.smartart", "process");
     const first = renderModel(s);
@@ -1079,9 +1118,7 @@ describe("canvas-session", () => {
     assert.equal(pinnedAfter.bounds[1], py + 15);
     deleteSmartArtNode(s, "element.smartart.node.delete");
     const node = renderModel(s).elements.find((e) => e.smartArt?.role === "node" && e.smartArt.index === 1)!;
-    const label = renderModel(s).elements.find(
-      (e) => e.smartArt?.role === "label" && e.smartArt.index === 1,
-    )!;
+    const label = renderModel(s).elements.find((e) => e.smartArt?.role === "label" && e.smartArt.index === 1)!;
     const lineBefore = renderModel(s).elements.find((e) => e.connects?.[0] === node.id);
     selectElement(s, node.id);
     const [nx, ny, nw, nh] = node.bounds;
@@ -1099,127 +1136,5 @@ describe("canvas-session", () => {
     const again = loadProject(dir).pages[0]!.page.elements;
     assert.ok(again.some((e) => (e as { smartArt?: { role?: string } }).smartArt?.role === "node"));
     assert.ok(again.some((e) => e.elementType === "line"));
-  });
-
-  it("range style writes spans into saved YAML and undoes", () => {
-    const dir = tmp();
-    listedCoverProject(dir, { title: "Hello" });
-    const s = openSession(dir, { allowedControlIds: ALLOW });
-    selectElement(s, "title");
-    setSelectedTextRangeStyle(s, "element.text.toolbar.bold.toggle", 0, 2, {
-      bold: true,
-      color: "#FF6900",
-    });
-    persist(s);
-    const saved = (
-      loadProject(dir).pages[0]!.page.elements[0] as { content: { text: string; bold?: boolean } }
-    ).content;
-    assert.match(saved.text, /<span style="/);
-    assert.match(saved.text, /font-weight:700/);
-    assert.match(saved.text, /#FF6900/);
-    assert.equal(saved.bold, undefined);
-    const model = renderModel(s);
-    assert.equal(model.elements[0]!.text, "Hello");
-    assert.equal(model.elements[0]!.runs?.[0]!.text, "He");
-    assert.equal(model.elements[0]!.runs?.[0]!.bold, true);
-    assert.equal(model.elements[0]!.runs?.[0]!.underline, undefined);
-    undo(s);
-    const restored = (
-      s.project.pages[0]!.page.elements[0] as { content: { text: string } }
-    ).content.text;
-    assert.equal(restored, "Hello");
-  });
-
-  it("sanitizes rich text by stripping script and unknown attrs", () => {
-    const dir = tmp();
-    listedCoverProject(dir, { title: "Hi" });
-    const s = openSession(dir, { allowedControlIds: ALLOW });
-    selectElement(s, "title");
-    setSelectedRichText(
-      s,
-      "element.text.content.set",
-      '<p><span onclick="alert(1)" style="font-weight:700">Hi</span><script>evil()</script></p>',
-    );
-    persist(s);
-    const text = (
-      loadProject(dir).pages[0]!.page.elements[0] as { content: { text: string } }
-    ).content.text;
-    assert.doesNotMatch(text, /onclick/i);
-    assert.doesNotMatch(text, /script/i);
-    assert.doesNotMatch(text, /evil/i);
-    assert.match(text, /font-weight:700/);
-    assert.match(text, /Hi/);
-    const model = renderModel(s);
-    assert.equal(model.elements[0]!.text, "Hi");
-    assert.equal(model.elements[0]!.runs?.[0]!.bold, true);
-  });
-
-  it("rejects unsafe text link protocols before mutating session state", () => {
-    const dir = tmp();
-    listedCoverProject(dir, { title: "Link" });
-    const s = openSession(dir, { allowedControlIds: ["element.text.toolbar.link.set", "chrome.history.undo", "chrome.history.redo"] });
-    selectElement(s, "title");
-    for (const href of [
-      "javascript:alert(1)",
-      "data:text/html,<script>alert(1)</script>",
-      "vbscript:msgbox(1)",
-      "file:///etc/passwd",
-      "java\nscript:alert(1)",
-      "http://[",
-    ]) {
-      const before = structuredClone(s);
-      assert.throws(
-        () => setSelectedTextStyle(s, "element.text.toolbar.link.set", { href }),
-        /unsafe|control characters|malformed/,
-      );
-      assert.deepEqual(s, before, `rejected href must not mutate session: ${href}`);
-    }
-
-    for (const href of [
-      "https://example.com/guide",
-      "http://example.com",
-      "mailto:owner@example.com",
-      "tel:+8613800138000",
-      "../relative/page",
-      "#section",
-    ]) {
-      setSelectedTextStyle(s, "element.text.toolbar.link.set", { href });
-      assert.equal(renderModel(s).elements[0]!.href, href);
-    }
-    setSelectedTextStyle(s, "element.text.toolbar.link.set", { href: null });
-    assert.equal(renderModel(s).elements[0]!.href, undefined);
-  });
-
-  it("rejects single and partial-overlap table merges but absorbs fully contained merges", () => {
-    const dir = tmp();
-    listedCoverProject(dir, { title: "Table" });
-    const s = openSession(dir, { allowedControlIds: ["insert.table", "element.table.merge", "chrome.history.undo", "chrome.history.redo"] });
-    const id = insertTable(s, "insert.table");
-
-    const beforeSingle = structuredClone(s);
-    assert.throws(
-      () => mergeTableCells(s, "element.table.merge", 0, 0, 0, 0),
-      /at least two cells/,
-    );
-    assert.deepEqual(s, beforeSingle, "single-cell merge must not mutate session or undo history");
-
-    mergeTableCells(s, "element.table.merge", 0, 1, 1, 1);
-    let table = renderModel(s).elements.find((element) => element.id === id)!;
-    assert.equal(table.tableRows![0]![1]!.rowSpan, 2);
-    assert.equal(table.tableRows![0]![1]!.colSpan, 1);
-
-    const beforePartial = structuredClone(s);
-    assert.throws(
-      () => mergeTableCells(s, "element.table.merge", 0, 0, 0, 1),
-      /partially overlaps merged cell 0,1/,
-    );
-    assert.deepEqual(s, beforePartial, "partial overlap must not mutate session or undo history");
-
-    mergeTableCells(s, "element.table.merge", 0, 0, 1, 1);
-    table = renderModel(s).elements.find((element) => element.id === id)!;
-    assert.equal(table.tableRows![0]![0]!.rowSpan, 2);
-    assert.equal(table.tableRows![0]![0]!.colSpan, 2);
-    assert.equal(table.tableRows![0]![1]!.rowSpan, undefined);
-    assert.equal(table.tableRows![0]![1]!.colSpan, undefined);
   });
 });

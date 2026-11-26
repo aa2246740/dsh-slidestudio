@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifyOpenKimiPack, resolveOpenKimiPresetDesignSourceId } from "./domain/openkimi-source-pack.js";
 import { resolveOpenKimiVisualRoot, verifyOpenKimiVisualPack } from "./domain/openkimi-visual-pack.js";
 
@@ -38,18 +39,23 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function resolveRepoRoot(start = process.cwd()): string {
   const envRoot = process.env.OPEN_SLIDESTUDIO_ROOT?.trim();
   const candidates = envRoot ? [envRoot] : [];
-  let dir = path.resolve(start);
-  for (let i = 0; i < 12; i += 1) {
-    candidates.push(dir);
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
+  const addAncestors = (origin: string) => {
+    let dir = path.resolve(origin);
+    for (let i = 0; i < 12; i += 1) {
+      candidates.push(dir);
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  };
+  addAncestors(start);
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  if (path.resolve(start) !== path.resolve(moduleDir)) addAncestors(moduleDir);
   const marker = path.join("packages", "agent-harness", "reference", "openkimi-source-manifest.v1.json");
   for (const candidate of candidates) {
     if (fs.existsSync(path.join(candidate, marker))) return path.resolve(candidate);
   }
-  throw new Error(`DSH SlideStudio repo root not found (looked for ${marker})`);
+  throw new Error(`Open SlideStudio repo root not found (looked for ${marker})`);
 }
 
 function sourceManifestPath(repoRoot: string): string {
@@ -186,11 +192,19 @@ export function buildCatalogDto(repoRoot = resolveRepoRoot()): CatalogDto {
     const source = sourcePack.entriesById.get(designSourceId);
     if (!source) throw new Error(`missing exact design source for ${id}`);
     return {
-      id, label: id, category: id.split("/")[0]!, designSourceId, designHash: source.sha256,
-      previews: [{
-        sourceId: visual.sourceId, hash: visual.sha256,
-        url: `/slides/catalog/previews/${encodeURIComponent(visual.sourceId)}`, order: 0,
-      }],
+      id,
+      label: id,
+      category: id.split("/")[0]!,
+      designSourceId,
+      designHash: source.sha256,
+      previews: [
+        {
+          sourceId: visual.sourceId,
+          hash: visual.sha256,
+          url: `/slides/catalog/previews/${encodeURIComponent(visual.sourceId)}`,
+          order: 0,
+        },
+      ],
     };
   });
 
@@ -210,7 +224,13 @@ export function buildCatalogDto(repoRoot = resolveRepoRoot()): CatalogDto {
 export function resolveCatalogPreviewFile(
   sourceId: string,
   repoRoot = resolveRepoRoot(),
-): { filePath: string; bytes: Buffer; mediaType: string; byteLength: number; sha256: string } | null {
+): {
+  filePath: string;
+  bytes: Buffer;
+  mediaType: string;
+  byteLength: number;
+  sha256: string;
+} | null {
   const visualRaw = JSON.parse(fs.readFileSync(visualManifestPath(repoRoot), "utf8")) as {
     files: Array<{
       sourceId: string;
@@ -227,7 +247,8 @@ export function resolveCatalogPreviewFile(
   const root = resolveOpenKimiVisualRoot(repoRoot);
   const filePath = path.resolve(root, entry.relativePath);
   const relative = path.relative(root, filePath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("preview path is outside the visual pack");
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+    throw new Error("preview path is outside the visual pack");
   const stat = fs.lstatSync(filePath);
   const realRelative = path.relative(fs.realpathSync(root), fs.realpathSync(filePath));
   if (!stat.isFile() || stat.isSymbolicLink() || realRelative.startsWith("..") || path.isAbsolute(realRelative)) {

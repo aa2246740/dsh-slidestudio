@@ -5,6 +5,7 @@ import { XAI_API_BASE } from "./domain/grok-hosted.js";
 import { writeFileAtomic } from "./domain/atomic-file.js";
 import { imageConfigFromEnv, imageConfigured } from "./domain/image-port.js";
 import { rasterRuntimeReady } from "./domain/page-raster.js";
+import { materialCapabilityEntries } from "./domain/material-pack.js";
 import type {
   CapabilitySnapshot,
   CapabilityVia,
@@ -58,10 +59,14 @@ function flag(configured: boolean, via: CapabilityVia) {
 
 function visionNote(mode: VisionMode, reason?: CapabilitySnapshot["vision"]["unavailableReason"]): string {
   if (mode === "none") {
-    if (reason === "disabled") return "Visual review is disabled by SLIDESTUDIO_LLM_IMAGE=0. Run deterministic render_page and review_pages checks; do not claim a visual-review pass.";
-    if (reason === "raster-unavailable") return "Page rendering is unavailable: configure the pinned Playwright runtime and editor connection. The selected model may accept images, but no page PNG can be delivered. Do not blame the model or retry visual review until rendering is ready.";
-    if (reason === "provider-unavailable") return "The selected model route is not ready. Connect this provider in DSH settings before visual review.";
-    if (reason === "model-input-unsupported") return "DSH does not declare image input for this exact provider/model. Use deterministic render_page and review_pages checks, then compose and export. Do not call review_page or claim visual inspection.";
+    if (reason === "disabled")
+      return "Visual review is disabled by SLIDESTUDIO_LLM_IMAGE=0. Run deterministic render_page and review_pages checks; do not claim a visual-review pass.";
+    if (reason === "raster-unavailable")
+      return "Page rendering is unavailable: configure the pinned Playwright runtime and editor connection. The selected model may accept images, but no page PNG can be delivered. Do not blame the model or retry visual review until rendering is ready.";
+    if (reason === "provider-unavailable")
+      return "The selected model route is not ready. Connect this provider in DSH settings before visual review.";
+    if (reason === "model-input-unsupported")
+      return "DSH does not declare image input for this exact provider/model. Use deterministic render_page and review_pages checks, then compose and export. Do not call review_page or claim visual inspection.";
     return "No vision reviewer is configured, or page rasters cannot be produced. Do not claim a visual-review pass.";
   }
   if (mode === "main-model") {
@@ -77,38 +82,34 @@ export function inspectCapabilities(
   const env = input.env ?? process.env;
   const grokHosted = input.ready === true && input.providerId === GROK_PROVIDER_ID;
   const visionOff = env.SLIDESTUDIO_LLM_IMAGE === "0";
-  const rasterReady =
-    input.rasterReady ?? (editorConfigured(env) && rasterRuntimeReady(env));
+  const rasterReady = input.rasterReady ?? (editorConfigured(env) && rasterRuntimeReady(env));
   const via: CapabilityVia = grokHosted ? "pi-xai-hosted" : "env";
   const modelAcceptsImages = input.modelInputModalities?.includes("image") === true;
 
   const native = grokHosted ? false : input.nativeSearch === true;
-  const research = grokHosted
-    ? flag(true, "pi-xai-hosted")
-    : native
-      ? flag(true, "native")
-      : flag(false, "env");
+  const research = grokHosted ? flag(true, "pi-xai-hosted") : native ? flag(true, "native") : flag(false, "env");
   const imageSearch = grokHosted
     ? flag(true, "pi-xai-hosted")
     : flag(Boolean(env.SLIDESTUDIO_IMAGE_SEARCH_URL?.trim()), "env");
   const imageGenerate = grokHosted
     ? flag(true, "pi-xai-hosted")
-    : flag(
-        !envLooksLikeGrokImagine(env) && imageConfigured(imageConfigFromEnv(env)),
-        "env",
-      );
+    : flag(!envLooksLikeGrokImagine(env) && imageConfigured(imageConfigFromEnv(env)), "env");
 
   let visionMode: VisionMode = "none";
   if (!visionOff) {
     if (input.ready && modelAcceptsImages && rasterReady) visionMode = "main-model";
     else if (!grokHosted && env.SLIDESTUDIO_VISION_REVIEWER?.trim()) visionMode = "reviewer";
   }
-  const unavailableReason: CapabilitySnapshot["vision"]["unavailableReason"] = visionMode !== "none"
-    ? undefined
-    : visionOff ? "disabled"
-      : !rasterReady ? "raster-unavailable"
-        : !input.ready ? "provider-unavailable"
-          : "model-input-unsupported";
+  const unavailableReason: CapabilitySnapshot["vision"]["unavailableReason"] =
+    visionMode !== "none"
+      ? undefined
+      : visionOff
+        ? "disabled"
+        : !rasterReady
+          ? "raster-unavailable"
+          : !input.ready
+            ? "provider-unavailable"
+            : "model-input-unsupported";
 
   return {
     research,
@@ -151,13 +152,23 @@ function readBindingProvider(projectRoot: string): PersistedProviderCapability |
       providerId: parsed.provider.providerId,
       modelId: parsed.provider.modelId,
       ready: parsed.provider.ready === true,
-      modelInputModalities: normalizeModelInputModalities(
-        parsed.provider.modelInputModalities,
-      ),
+      modelInputModalities: normalizeModelInputModalities(parsed.provider.modelInputModalities),
     };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The route the project binding records: the provider and model its Agent was
+ * last built on. Undefined when the binding is missing or names no model.
+ */
+export function projectBoundProvider(
+  projectRoot: string,
+): { readonly providerId: string; readonly modelId: string } | undefined {
+  const provider = readBindingProvider(projectRoot);
+  if (!provider?.providerId || !provider.modelId) return undefined;
+  return { providerId: provider.providerId, modelId: provider.modelId };
 }
 
 export function inspectProjectCapabilities(
@@ -165,13 +176,21 @@ export function inspectProjectCapabilities(
   env: NodeJS.ProcessEnv = process.env,
 ): CapabilitySnapshot {
   const provider = readBindingProvider(projectRoot);
-  return inspectCapabilities({
+  const snapshot = inspectCapabilities({
     env,
     providerId: provider?.providerId,
     modelId: provider?.modelId,
     ready: provider?.ready === true,
     modelInputModalities: provider?.modelInputModalities,
   });
+  // Project-scoped snapshot: uploaded reference materials materialized into
+  // `_agent/materials/` ride the same capability object the model sees.
+  // `viewable` keys on the selected model's declared image input, not on the
+  // raster runtime that vision.mode additionally requires.
+  return {
+    ...snapshot,
+    materials: materialCapabilityEntries(projectRoot, snapshot.vision.modelAcceptsImages === true),
+  };
 }
 
 /**
@@ -197,11 +216,8 @@ export function persistPresentationRunProvider(
     return false;
   }
   const current =
-    rec.provider && typeof rec.provider === "object"
-      ? (rec.provider as PersistedProviderCapability)
-      : undefined;
-  const sameRoute =
-    current?.providerId === provider.providerId && current?.modelId === provider.modelId;
+    rec.provider && typeof rec.provider === "object" ? (rec.provider as PersistedProviderCapability) : undefined;
+  const sameRoute = current?.providerId === provider.providerId && current?.modelId === provider.modelId;
   const next: PersistedProviderCapability = {
     ...(sameRoute ? current : {}),
     providerId: provider.providerId,
@@ -230,9 +246,7 @@ export function visualReviewIsClaimable(
   return inspectCapabilities(envOrInput).vision.mode !== "none";
 }
 
-export function hostedProduceToolNames(
-  snapshot: CapabilitySnapshot,
-): readonly string[] {
+export function hostedProduceToolNames(snapshot: CapabilitySnapshot): readonly string[] {
   const names: string[] = [];
   if (snapshot.imageSearch.configured) names.push("search_image");
   if (snapshot.imageGenerate.configured) names.push("generate_image");

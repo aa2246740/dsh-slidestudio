@@ -156,6 +156,54 @@ describe("rendered text contrast", () => {
   });
 });
 
+describe("rendered bounds of template components", () => {
+  const node = (
+    id: string,
+    layoutRole: "decoration" | "content",
+    left: number,
+  ): RenderedLayoutSnapshot["nodes"][number] => ({
+    id,
+    type: "shape",
+    layoutRole,
+    inherited: id.startsWith("lyt-"),
+    left,
+    top: 0,
+    right: left + 60,
+    bottom: 50,
+    scrollWidth: 60,
+    clientWidth: 60,
+    scrollHeight: 50,
+    clientHeight: 50,
+  });
+  const report = (...nodes: RenderedLayoutSnapshot["nodes"]) =>
+    assessRenderedLayout({ slideWidth: 960, slideHeight: 540, fontsReady: true, nodes });
+
+  it("lets an expanded template component keep its bleed, on a page and as a layout copy", () => {
+    const issues = report(
+      node("tpl-cover-page-1-e1", "decoration", -12),
+      node("lyt-body-tpl-body-header-e2", "decoration", -12),
+      node("mst-main-tpl-frame-e1", "decoration", -12),
+    ).hardIssues;
+    assert.deepEqual(issues, []);
+  });
+
+  it("still reports a hand-drawn element or a non-decoration element that leaves the slide", () => {
+    const issues = report(
+      node("body-logo-corner", "decoration", -12),
+      node("lyt-body-tpl-body-header-e2", "content", -12),
+      node("lyt-body-logo", "decoration", -12),
+    ).hardIssues;
+    assert.deepEqual(
+      issues.map((issue) => [issue.kind, issue.elementId]),
+      [
+        ["element-outside-slide", "body-logo-corner"],
+        ["element-outside-slide", "lyt-body-tpl-body-header-e2"],
+        ["element-outside-slide", "lyt-body-logo"],
+      ],
+    );
+  });
+});
+
 type SyntheticPage = RasterPage & {
   setContent: (html: string) => Promise<void>;
 };
@@ -172,9 +220,7 @@ describe("rendered text contrast DOM sampler", () => {
     const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
     const repo = path.resolve(pkg, "../..");
     const runtimePath = pinnedPlaywrightRuntimePath({ OPEN_SLIDESTUDIO_ROOT: repo }, { repoRoot: repo });
-    // Any resolved source is fine (repo, managed, codex or machine install);
-    // it only has to be a real pinned runtime the DOM sampler can launch.
-    assert.equal(rasterRuntimeReady({ OPEN_SLIDESTUDIO_ROOT: repo }, runtimePath), true);
+    assert.equal(rasterRuntimeReady({}, runtimePath), true);
     const runtime = (await import(pathToFileURL(runtimePath).href)) as {
       verifyPinnedRuntime: () => {
         playwrightVersion: string;
@@ -183,8 +229,8 @@ describe("rendered text contrast DOM sampler", () => {
       launchPinnedChromium: () => Promise<SyntheticBrowser>;
     };
     const pin = runtime.verifyPinnedRuntime();
-    assert.ok(pin.playwrightVersion);
-    assert.ok(pin.chromiumRevision);
+    assert.equal(pin.playwrightVersion, "1.61.1");
+    assert.equal(pin.chromiumRevision, "1228");
     browser = await runtime.launchPinnedChromium();
   });
 
@@ -277,7 +323,12 @@ describe("rendered text contrast DOM sampler", () => {
         const slide = document.getElementById("slide")!;
         const rect = slide.getBoundingClientRect();
         const parent = slide.parentElement!.getBoundingClientRect();
-        return { width: rect.width, height: rect.height, parentWidth: parent.width, parentHeight: parent.height };
+        return {
+          width: rect.width,
+          height: rect.height,
+          parentWidth: parent.width,
+          parentHeight: parent.height,
+        };
       });
       assert.deepEqual(dimensions, {
         width: 960,
@@ -409,6 +460,36 @@ describe("rendered text contrast DOM sampler", () => {
         (issue) => String(issue.kind) === "line-text-intersection" && issue.elementId === "crossing-rule,crossed-label",
       ),
       JSON.stringify(crossing.hardIssues),
+    );
+  });
+
+  it("skips overflow on a layout copy the page cannot fix, but keeps its overlap and the page's own overflow", async () => {
+    const copy = await sample(
+      `
+      <div class="el text" data-id="lyt-body-title" data-inherited="layout" style="left:80px;top:80px;width:200px;height:20px;color:#111">版式文字很长很长，在这个窄框里必然溢出</div>
+      <div class="el text" data-id="own-title" style="left:120px;top:90px;width:300px;height:40px;color:#111">页面标题</div>
+    `,
+      "#FFFFFF",
+    );
+    assert.equal(
+      copy.hardIssues.some((issue) => String(issue.kind).startsWith("text-overflow")),
+      false,
+      JSON.stringify(copy.hardIssues),
+    );
+    assert.ok(
+      copy.hardIssues.some(
+        (issue) => issue.kind === "text-collision" && issue.elementId === "lyt-body-title,own-title",
+      ),
+      JSON.stringify(copy.hardIssues),
+    );
+
+    const own = await sample(
+      `<div class="el text" data-id="own-long" style="left:80px;top:80px;width:200px;height:20px;color:#111">页面自己的文字很长很长，在这个窄框里必然溢出</div>`,
+      "#FFFFFF",
+    );
+    assert.ok(
+      own.hardIssues.some((issue) => issue.kind === "text-overflow-y" && issue.elementId === "own-long"),
+      JSON.stringify(own.hardIssues),
     );
   });
 });

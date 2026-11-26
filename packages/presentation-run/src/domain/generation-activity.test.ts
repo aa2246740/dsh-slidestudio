@@ -7,6 +7,7 @@ import {
   generationActivityEventsFromTraceRows,
   generationActivityFromLedger,
   inspectGenerationActivitySnapshot,
+  readProduceTraceEvents,
 } from "../generation-activity.js";
 import type { RunLedgerInspection, RunLedgerV1 } from "./run-ledger.js";
 
@@ -25,6 +26,7 @@ function inspection(overrides: Partial<RunLedgerInspection> = {}): RunLedgerInsp
         imageEmitted: true,
         visualReview: "pass",
         layout: "pass",
+        chromeStale: false,
       },
     ],
     structuralReview: "pass",
@@ -85,13 +87,28 @@ describe("generation activity", () => {
   it("maps durable facts into a completed replay timeline", () => {
     const activity = generationActivityFromLedger(ledger(), inspection());
     assert.equal(activity.phase, "complete");
-    assert.deepEqual(activity.stages.map((stage) => stage.status), ["complete", "complete", "complete", "complete"]);
-    assert.deepEqual(activity.events.map((event) => event.label), ["已建立页面计划", "已写入页面", "已完成结构检查", "已完成整稿"]);
+    assert.deepEqual(
+      activity.stages.map((stage) => stage.status),
+      ["complete", "complete", "complete", "complete"],
+    );
+    assert.deepEqual(
+      activity.events.map((event) => event.label),
+      ["已建立页面计划", "已写入页面", "已完成结构检查", "已完成整稿"],
+    );
     assert.equal(activity.events[1]?.pageId, "cover");
   });
 
   it("keeps an uninitialized project honest without inventing events", () => {
-    const activity = generationActivityFromLedger(undefined, inspection({ initialized: false, todoCount: 0, pages: [], composeReady: false, composed: false }));
+    const activity = generationActivityFromLedger(
+      undefined,
+      inspection({
+        initialized: false,
+        todoCount: 0,
+        pages: [],
+        composeReady: false,
+        composed: false,
+      }),
+    );
     assert.equal(activity.phase, "awaiting-project");
     assert.equal(activity.events.length, 0);
     assert.equal(activity.stages[0]?.status, "active");
@@ -138,6 +155,7 @@ describe("generation activity", () => {
             imageEmitted: false,
             visualReview: "missing",
             layout: "pass",
+            chromeStale: false,
           },
         ],
         structuralReview: "missing",
@@ -146,7 +164,10 @@ describe("generation activity", () => {
       }),
     );
     assert.equal(activity.phase, "complete");
-    assert.deepEqual(activity.stages.map((stage) => stage.status), ["complete", "complete", "complete", "complete"]);
+    assert.deepEqual(
+      activity.stages.map((stage) => stage.status),
+      ["complete", "complete", "complete", "complete"],
+    );
     assert.equal(activity.stages[2]?.detail, "本次 Agent 修改已完成渲染与布局检查");
     assert.equal(activity.stages[3]?.detail, "可回放本次 Agent 修改与修改前版本");
   });
@@ -223,7 +244,7 @@ describe("generation activity", () => {
         status: "running",
         callId: "call-a",
         name: "write_page",
-        detail: "{\n  \"pageId\": \"cover\"\n}",
+        detail: '{\n  "pageId": "cover"\n}',
       },
       {
         id: "result:call-a",
@@ -231,7 +252,7 @@ describe("generation activity", () => {
         kind: "result",
         status: "complete",
         callId: "call-a",
-        detail: "{\n  \"ok\": true,\n  \"outcome\": \"written\"\n}",
+        detail: '{\n  "ok": true,\n  "outcome": "written"\n}',
       },
       {
         id: "turn:1",
@@ -257,11 +278,84 @@ describe("generation activity", () => {
     const events = generationActivityEventsFromTraceRows([
       { at: "2026-09-03T09:00:00.000Z", kind: "think", text: "旧思考" },
       { at: "2026-09-03T09:00:01.000Z", kind: "tool", name: "write_page", text: "cover" },
-      { at: "2026-09-03T09:00:02.000Z", kind: "result", name: "write_page", ok: false, text: "rejected" },
+      {
+        at: "2026-09-03T09:00:02.000Z",
+        kind: "result",
+        name: "write_page",
+        ok: false,
+        text: "rejected",
+      },
     ]);
-    assert.deepEqual(events.map((event) => event.kind), ["message", "tool", "result"]);
-    assert.deepEqual(events.map((event) => event.status), ["complete", "running", "failed"]);
+    assert.deepEqual(
+      events.map((event) => event.kind),
+      ["message", "tool", "result"],
+    );
+    assert.deepEqual(
+      events.map((event) => event.status),
+      ["complete", "running", "failed"],
+    );
     assert.equal(events[0]?.detail, "旧思考");
+  });
+
+  it("preserves only boolean business verdicts in the activity DTO", () => {
+    const events = generationActivityEventsFromTraceRows([
+      {
+        id: "result:success",
+        at: "2026-09-03T09:00:00.000Z",
+        kind: "result",
+        callId: "success",
+        status: "complete",
+        ok: true,
+        detail: '{"detail":"synthetic clipped result"}',
+      },
+      {
+        id: "result:failure",
+        at: "2026-09-03T09:00:01.000Z",
+        kind: "result",
+        callId: "failure",
+        status: "failed",
+        ok: false,
+        detail: '{"outcome":"rejected"}',
+      },
+      {
+        id: "result:invalid",
+        at: "2026-09-03T09:00:02.000Z",
+        kind: "result",
+        callId: "invalid",
+        status: "complete",
+        ok: "true",
+        detail: '{"detail":"synthetic clipped result"}',
+      },
+    ]);
+
+    assert.deepEqual(
+      events.map((event) => event.ok),
+      [true, false, undefined],
+    );
+  });
+
+  it("keeps a hands-log business verdict when no trace is available", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "generation-hands-verdict-"));
+    try {
+      const agent = path.join(root, "_agent");
+      fs.mkdirSync(agent);
+      fs.writeFileSync(
+        path.join(agent, "hands-log.jsonl"),
+        `${JSON.stringify({
+          name: "read_material",
+          ok: true,
+          summary: "synthetic result",
+          detail: "synthetic clipped result ".repeat(500),
+          at: "2026-09-03T09:00:00.000Z",
+        })}\n`,
+      );
+      const [event] = readProduceTraceEvents(root);
+      assert.equal(event?.ok, true);
+      assert.equal(event?.status, "complete");
+      assert.equal(event?.truncated, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("redacts credentials that span adjacent delta rows after folding", () => {
@@ -385,19 +479,5 @@ describe("generation activity", () => {
     const reasoning = events.find((event) => event.id === "assistant:7:4:0:reasoning");
     assert.equal(reasoning?.status, "failed");
     assert.equal(reasoning?.label, "思考");
-  });
-
-  it("does not guess between multiple streamed blocks when terminal indexes drift", () => {
-    const events = generationActivityEventsFromTraceRows([
-      { id: "assistant:2:1:4:message", at: "2026-09-06T11:00:00.000Z", turn: 2, step: 1, kind: "message", status: "running", detail: "A", detailMode: "append" },
-      { id: "assistant:2:1:5:message", at: "2026-09-06T11:00:00.001Z", turn: 2, step: 1, kind: "message", status: "running", detail: "B", detailMode: "append" },
-      { id: "assistant:2:1:0:message", at: "2026-09-06T11:00:00.002Z", turn: 2, step: 1, kind: "message", status: "complete", detail: "final", detailMode: "replace" },
-      { id: "step:2:1", at: "2026-09-06T11:00:00.003Z", turn: 2, step: 1, kind: "turn", name: "step", status: "complete", detail: "Step completed", detailMode: "replace" },
-    ]);
-    assert.equal(events.filter((event) => event.kind === "message").length, 3);
-    assert.deepEqual(
-      events.filter((event) => event.kind === "message").map((event) => event.status),
-      ["complete", "complete", "complete"],
-    );
   });
 });

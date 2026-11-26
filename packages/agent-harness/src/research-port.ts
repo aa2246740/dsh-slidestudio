@@ -20,9 +20,7 @@ export type ResearchPortConfig = {
   timeoutMs?: number;
 };
 
-export function researchConfigFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): ResearchPortConfig | undefined {
+export function researchConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ResearchPortConfig | undefined {
   const url = env.SLIDESTUDIO_RESEARCH_URL?.trim();
   if (!url) return undefined;
   return {
@@ -50,10 +48,7 @@ export function parseResearchHit(raw: unknown): ResearchResult | undefined {
         .slice(0, 8)
     : [];
   const gap = typeof o.gap === "string" && o.gap.trim() ? o.gap.trim() : undefined;
-  const note =
-    typeof o.note === "string" && o.note.trim()
-      ? o.note.trim()
-      : "内网检索，不是公网。";
+  const note = typeof o.note === "string" && o.note.trim() ? o.note.trim() : "内网检索，不是公网。";
   if (!facts.length && !gap) return undefined;
   return {
     source: facts.length ? "intranet" : "none",

@@ -1,17 +1,33 @@
+import type { DesignDirective } from "@open-slidestudio/slides-tools";
+
+export type {
+  DesignDirective,
+  SliceRuntimePayload,
+  WritePageDecision,
+  WritePageOutcome,
+} from "@open-slidestudio/slides-tools";
+
 export const SLICE_TOOL_NAMES = [
   "open_project",
   "inspect_capabilities",
   "list_references",
   "read_reference",
+  "list_materials",
+  "read_material",
+  "view_material",
+  "record_material_notes",
+  "query_material",
   "commit_design",
   "write_todo",
   "read_page",
   "edit_elements",
   "edit_page_background",
+  "batch_remove_footers",
   "delete_pages",
   "reorder_pages",
   "update_deck",
   "write_page",
+  "write_layout",
   "render_page",
   "review_page",
   "review_pages",
@@ -23,10 +39,6 @@ export const SLICE_TOOL_NAMES = [
 ] as const;
 
 export type SliceToolName = (typeof SLICE_TOOL_NAMES)[number];
-
-export type DesignDirective =
-  | { readonly kind: "self-directed" }
-  | { readonly kind: "explicit-style"; readonly designSystemId: string };
 
 export type SliceSessionBinding = {
   readonly version: 1;
@@ -80,60 +92,4 @@ export type SliceSessionSnapshot = {
   readonly project: ProjectSummary;
   readonly phase: SlicePhase;
   readonly rateLimitWait?: RateLimitWait;
-};
-
-type WritePageRenderEvidence = {
-  readonly layoutStatus?: "pass" | "fail" | "unavailable";
-  readonly layoutIssues?: readonly unknown[];
-  readonly renderNote?: string;
-};
-
-export type WritePageOutcome =
-  | ({
-      readonly outcome: "written";
-      readonly pageId: string;
-      readonly revision: number;
-      readonly pageSha256: string;
-      readonly fontNotes?: readonly string[];
-    } & WritePageRenderEvidence)
-  | ({
-      readonly outcome: "skipped-identical";
-      readonly pageId: string;
-      readonly revision: number;
-      readonly pageSha256: string;
-    } & WritePageRenderEvidence)
-  | ({
-      readonly outcome: "replayed";
-      readonly pageId: string;
-      readonly revision: number;
-      readonly pageSha256: string;
-    } & WritePageRenderEvidence)
-  | {
-      readonly outcome: "conflict";
-      readonly toolCallId: string;
-      readonly detail: string;
-    }
-  | {
-      readonly outcome: "revise-requires-change";
-      readonly pageId: string;
-      readonly revision: number;
-      readonly pageSha256: string;
-    }
-  | {
-      readonly outcome: "rejected";
-      readonly detail: string;
-      readonly error?: string;
-      readonly painted?: false;
-    };
-
-export type WritePageDecision =
-  | { readonly action: "write"; readonly pageId: string; readonly pageSha256: string }
-  | { readonly action: "skip"; readonly outcome: Extract<WritePageOutcome, { outcome: "skipped-identical" }> }
-  | { readonly action: "reject"; readonly outcome: Extract<WritePageOutcome, { outcome: "revise-requires-change" | "rejected" }> };
-
-export type SliceRuntimePayload = {
-  readonly brief: string;
-  readonly design: DesignDirective;
-  readonly editorBaseUrl: string;
-  readonly strictExecution: true;
 };

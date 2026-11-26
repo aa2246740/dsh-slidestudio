@@ -1,0 +1,52 @@
+{
+  "id": "theme.layout.rename",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "重命名版式",
+  "description": "Rail tools for the layout being edited: 重命名 opens a name field (24 characters at most). An empty name is refused in the editor with 版式名称不能为空 and sends nothing.",
+  "kimiUi": {
+    "controlLabel": "重命名",
+    "location": "左侧「母版与版式」列表，当前版式下方",
+    "appearsWhen": "on a layout surface (not the master)"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Entered first with 编辑版式 on page 5 (正文)."
+  },
+  "action": {
+    "type": "type-text",
+    "steps": ["点击「重命名」", "输入新名称，点击「保存」", "名称为空时显示「版式名称不能为空」，不发送命令"],
+    "input": {
+      "maxLength": 24
+    }
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "layoutRename changes the layout's name in the PPTD document"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": true,
+    "commandHint": "layoutRename"
+  },
+  "test": {
+    "id": "EO-LAYOUT-006",
+    "automated": true,
+    "selfTestChecklist": ["rename refuses an empty name, then sends the new one"]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

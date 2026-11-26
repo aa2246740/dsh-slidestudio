@@ -4,20 +4,9 @@ import path from "node:path";
 
 export const OPENKIMI_VISUAL_MANIFEST_VERSION = "openkimi-visual-manifest-v1";
 
-const VISUAL_ROOT_REL = path.join(
-  "vendor",
-  "open-kimi-ppt",
-  "git-pre-wipe",
-  "docs",
-  "themes",
-);
+const VISUAL_ROOT_REL = path.join("vendor", "open-kimi-ppt", "git-pre-wipe", "docs", "themes");
 
-const MANIFEST_REL = path.join(
-  "packages",
-  "agent-harness",
-  "reference",
-  "openkimi-visual-manifest.v1.json",
-);
+const MANIFEST_REL = path.join("packages", "agent-harness", "reference", "openkimi-visual-manifest.v1.json");
 
 export type OpenKimiVisualManifestEntry = Readonly<{
   sourceId: string;
@@ -84,9 +73,7 @@ export function verifyOpenKimiVisualPack(
   options: VerifyOpenKimiVisualPackOptions = {},
 ): VerifiedOpenKimiVisualPack {
   const sourceRoot = path.resolve(options.sourceRoot ?? resolveOpenKimiVisualRoot(repoRoot));
-  const manifestPath = path.resolve(
-    options.manifestPath ?? resolveOpenKimiVisualManifestPath(repoRoot),
-  );
+  const manifestPath = path.resolve(options.manifestPath ?? resolveOpenKimiVisualManifestPath(repoRoot));
   const manifest = loadOpenKimiVisualManifest(manifestPath);
   const entriesById = new Map<string, OpenKimiVisualManifestEntry>();
   const entriesByDesignSystemId = new Map<string, OpenKimiVisualManifestEntry>();
@@ -97,9 +84,7 @@ export function verifyOpenKimiVisualPack(
       throw new OpenKimiVisualPackError(`duplicate visual source id: ${entry.sourceId}`);
     }
     if (entriesByDesignSystemId.has(entry.designSystemId)) {
-      throw new OpenKimiVisualPackError(
-        `duplicate visual design system: ${entry.designSystemId}`,
-      );
+      throw new OpenKimiVisualPackError(`duplicate visual design system: ${entry.designSystemId}`);
     }
     entriesById.set(entry.sourceId, entry);
     entriesByDesignSystemId.set(entry.designSystemId, entry);
@@ -131,10 +116,7 @@ export function resolveOpenKimiDesignPreview(
   return entry;
 }
 
-export function readOpenKimiVisualBytes(
-  pack: VerifiedOpenKimiVisualPack,
-  sourceId: string,
-): Buffer {
+export function readOpenKimiVisualBytes(pack: VerifiedOpenKimiVisualPack, sourceId: string): Buffer {
   assertCurrentPaths(pack);
   const entry = pack.entriesById.get(sourceId);
   if (!entry) throw new OpenKimiVisualPackError(`unknown visual source id: ${sourceId}`);
@@ -203,10 +185,7 @@ function verifyEntryShape(entry: OpenKimiVisualManifestEntry): void {
   }
 }
 
-function verifyEntryBytes(
-  sourceRoot: string,
-  entry: OpenKimiVisualManifestEntry,
-): Buffer {
+function verifyEntryBytes(sourceRoot: string, entry: OpenKimiVisualManifestEntry): Buffer {
   const bytes = readVisualFile(sourceRoot, entry.relativePath);
   if (bytes.length !== entry.byteLength) {
     throw new OpenKimiVisualPackError(`visual byte length mismatch: ${entry.relativePath}`);

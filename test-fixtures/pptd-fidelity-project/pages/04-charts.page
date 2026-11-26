@@ -1,0 +1,150 @@
+pageType: content
+background:
+  type: solid
+  color: "#FFFFFF"
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 40
+      - 30
+      - 880
+      - 50
+    content:
+      text: 图表类型：雷达、堆叠、百分比堆叠、环形、渐变系列、堆叠柱线组合
+      fontSize: 24
+      bold: true
+      color: "#111111"
+      align:
+        - left
+        - middle
+  - elementId: chart-radar
+    elementType: chart
+    bounds:
+      - 40
+      - 90
+      - 280
+      - 200
+    title: 雷达图
+    data: &a1
+      cols:
+        - 类别
+        - 甲
+        - 乙
+      rows:
+        - - 一月
+          - 30
+          - 20
+        - - 二月
+          - 40
+          - 25
+        - - 三月
+          - 50
+          - 30
+    series:
+      - type: radar
+        encode:
+          x: 类别
+  - elementId: chart-stacked
+    elementType: chart
+    bounds:
+      - 340
+      - 90
+      - 280
+      - 200
+    title: 堆叠柱图
+    data: *a1
+    series:
+      - type: bar
+        name: 甲
+        encode:
+          x: 类别
+          y: 甲
+      - type: bar
+        name: 乙
+        encode:
+          x: 类别
+          y: 乙
+    grouping: stacked
+  - elementId: chart-percent-stacked
+    elementType: chart
+    bounds:
+      - 640
+      - 90
+      - 280
+      - 200
+    title: 百分比堆叠柱图
+    data: *a1
+    series:
+      - type: bar
+        name: 甲
+        encode:
+          x: 类别
+          y: 甲
+      - type: bar
+        name: 乙
+        encode:
+          x: 类别
+          y: 乙
+    grouping: percentStacked
+  - elementId: chart-doughnut
+    elementType: chart
+    bounds:
+      - 40
+      - 310
+      - 280
+      - 200
+    title: 环形图
+    data: *a1
+    series:
+      - type: doughnut
+        name: 甲
+        encode:
+          x: 类别
+          y: 甲
+  - elementId: chart-gradient-series
+    elementType: chart
+    bounds:
+      - 340
+      - 310
+      - 280
+      - 200
+    title: 渐变系列柱图
+    data: *a1
+    series:
+      - type: bar
+        name: 甲
+        encode:
+          x: 类别
+          y: 甲
+        fill:
+          type: gradient
+          gradientType: linear
+          angle: 90
+          stops:
+            - position: 0
+              color: "#2563EB"
+            - position: 1
+              color: "#10B981"
+              alpha: 0.5
+  - elementId: chart-stacked-combo
+    elementType: chart
+    bounds:
+      - 640
+      - 310
+      - 280
+      - 200
+    title: 堆叠柱线组合图
+    data: *a1
+    series:
+      - type: bar
+        name: 甲
+        encode:
+          x: 类别
+          y: 甲
+      - type: line
+        name: 乙
+        encode:
+          x: 类别
+          y: 乙
+    grouping: stacked

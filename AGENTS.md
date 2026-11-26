@@ -51,7 +51,7 @@ Choose the smallest relevant check before running broader gates:
 | Native package suite                      | `npm run test:native`                                                                           |
 | Editor/server and DOM tests               | `npm test -w @open-slidestudio/native-web`                                                      |
 | Editor control inventory                  | `npm run oracle:validate`                                                                       |
-| Production boundaries                     | `npm run verify:no-fake-path && npm run verify:no-kimi-runtime`                                 |
+| Production boundaries                     | `npm run verify:no-fake-path && npm run verify:no-kimi-runtime && npm run verify:no-intranet`   |
 
 Package TypeScript tests compile themselves; build native dependencies before
 editor tests. Use scratch projects for mutation tests. Tests use `*.test.ts`,
@@ -104,6 +104,9 @@ For plugin packaging or a real Harness integration, read `INSTALL-DSH.md`.
 - `packages/project-store` — versions on PPTD dirs
 - `packages/exporter-native` — offline hybrid PPTX
 - `packages/canvas-session` — session + dead-button gate
+- `packages/slides-tools` — host-agnostic canonical tool contract + project writer lease (no host SDK deps; see `docs/architecture/slides-tools.md`)
+- `packages/slides-runtime` — the single host-neutral core agent loop on `@earendil-works/pi-agent-core@1.6.1` + `pi-ai@1.6.1`: `LlmPort` (`PiAiLlmPort`; `DshLlmPort` lives in `dsh-slides-host`), context budget, guards, session log, single-writer lease (see `docs/architecture/slides-runtime.md`, ADR-0012)
+- `packages/slides-mcp` — host-agnostic MCP server (stdio + loopback HTTP) over the canonical slide tools; external-agent skill in `skills/slidestudio/SKILL.md` (see `docs/architecture/slides-mcp.md`)
 - `packages/agent-harness` — offline generate tools timeline
 - `docs/wayfinder/`, `docs/editor-oracle/`, `docs/specs/` — law
 - `vendor/open-kimi-ppt/` — pinned skill note

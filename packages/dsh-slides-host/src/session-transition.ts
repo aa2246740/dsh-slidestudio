@@ -5,7 +5,16 @@ import type { SliceError } from "./protocol.js";
 import { readAgentError, recordAgentError } from "./agent-fault.js";
 
 const ATTEMPT_REL = path.join("_agent", "attempt.v1.json");
-const locks = new Map<string, Promise<void>>();
+
+export type SessionTransitionPriority = "user" | "auto";
+
+type TransitionQueue = {
+  running: boolean;
+  readonly user: Array<() => void>;
+  readonly auto: Array<() => void>;
+};
+
+const queues = new Map<string, TransitionQueue>();
 
 export class SessionTransitionConflict extends Error {
   readonly status = 409 as const;
@@ -86,7 +95,7 @@ export function parseExpectedAttemptId(raw: unknown): string | undefined {
 
 export function assertExpectedAttempt(projectRoot: string | undefined, expected?: string): void {
   if (!expected) return;
-  const current = projectRoot ? readAttempt(projectRoot)?.attemptId ?? null : null;
+  const current = projectRoot ? (readAttempt(projectRoot)?.attemptId ?? null) : null;
   if (current !== expected) {
     throw new SessionTransitionConflict(
       "attempt_conflict",
@@ -95,20 +104,44 @@ export function assertExpectedAttempt(projectRoot: string | undefined, expected?
   }
 }
 
-export async function withSessionTransition<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
-  const previous = locks.get(sessionId) ?? Promise.resolve();
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const queued = previous.then(() => held);
-  locks.set(sessionId, queued);
-  await previous;
+function drainTransitionQueue(sessionId: string, queue: TransitionQueue): void {
+  const next = queue.user.shift() ?? queue.auto.shift();
+  if (next) {
+    next();
+    return;
+  }
+  queue.running = false;
+  if (queues.get(sessionId) === queue) queues.delete(sessionId);
+}
+
+/**
+ * Serialize per-session state transitions. Explicit user actions (`priority: "user"`,
+ * the default) are dequeued ahead of automatic background recovery (`priority: "auto"`),
+ * so a user `/model` or `/turn` request overtakes a queued 429 retry without needing to
+ * mutate recovery state before validating preconditions inside the lock.
+ */
+export async function withSessionTransition<T>(
+  sessionId: string,
+  work: () => Promise<T>,
+  options: { readonly priority?: SessionTransitionPriority } = {},
+): Promise<T> {
+  let queue = queues.get(sessionId);
+  if (!queue) {
+    queue = { running: false, user: [], auto: [] };
+    queues.set(sessionId, queue);
+  }
+  const priority = options.priority ?? "user";
+  if (queue.running) {
+    await new Promise<void>((resolve) => {
+      (priority === "auto" ? queue!.auto : queue!.user).push(resolve);
+    });
+  } else {
+    queue.running = true;
+  }
   try {
     return await work();
   } finally {
-    release();
-    if (locks.get(sessionId) === queued) locks.delete(sessionId);
+    drainTransitionQueue(sessionId, queue);
   }
 }
 

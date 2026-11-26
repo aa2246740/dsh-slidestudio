@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   codexPlaywrightRuntimeFile,
   discoverMachinePlaywright,
@@ -220,6 +221,59 @@ describe("playwrightRuntimeSource", () => {
     assert.ok(src.includes(`MODULE_DIR = ${JSON.stringify(path.resolve("/opt/x/node_modules"))}`));
     assert.ok(src.includes(`BROWSERS_DIR = ${JSON.stringify(path.resolve("/opt/x/ms-playwright"))}`));
     assert.match(src, /BROWSER_DIR_NAME = "chromium_headless_shell-1228"/);
+    assert.match(src, /pinnedChromiumRoot = join\(BROWSERS_DIR, BROWSER_DIR_NAME\)/);
+    assert.match(src, /existsSync\(pinnedChromiumRoot\)/);
+    assert.match(src, /process\.env\.PLAYWRIGHT_BROWSERS_PATH \|\| BROWSERS_DIR/);
+    assert.doesNotMatch(src, /const browsersPath = process\.env\.PLAYWRIGHT_BROWSERS_PATH \|\| BROWSERS_DIR/);
+  });
+
+  it("prefers the local pinned browser directory over PLAYWRIGHT_BROWSERS_PATH", async () => {
+    const dir = tmpdir("local-precedence");
+    const browserDir = path.join(dir, "browsers", "chromium_headless_shell-1228");
+    fs.mkdirSync(browserDir, { recursive: true });
+    fs.writeFileSync(path.join(browserDir, "chrome-headless-shell"), "#!/bin/sh\n");
+    const file = path.join(dir, "runtime.mjs");
+    fs.writeFileSync(
+      file,
+      playwrightRuntimeSource({
+        version: "1.61.1",
+        revision: "1228",
+        browserDirName: "chromium_headless_shell-1228",
+      }),
+    );
+    const hostBrowsers = tmpdir("host-browsers");
+    const previous = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.PLAYWRIGHT_BROWSERS_PATH = hostBrowsers;
+    try {
+      const loaded = await import(`${pathToFileURL(file).href}?local=${Date.now()}`);
+      assert.equal(fs.realpathSync(loaded.pinnedRuntime.browsersPath), fs.realpathSync(path.join(dir, "browsers")));
+    } finally {
+      if (previous === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = previous;
+    }
+  });
+
+  it("uses PLAYWRIGHT_BROWSERS_PATH when the local pinned directory is absent", async () => {
+    const dir = tmpdir("env-precedence");
+    const file = path.join(dir, "runtime.mjs");
+    fs.writeFileSync(
+      file,
+      playwrightRuntimeSource({
+        version: "1.61.1",
+        revision: "1228",
+        browserDirName: "chromium_headless_shell-1228",
+      }),
+    );
+    const hostBrowsers = tmpdir("host-browsers-only");
+    const previous = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.PLAYWRIGHT_BROWSERS_PATH = hostBrowsers;
+    try {
+      const loaded = await import(`${pathToFileURL(file).href}?env=${Date.now()}`);
+      assert.equal(loaded.pinnedRuntime.browsersPath, hostBrowsers);
+    } finally {
+      if (previous === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = previous;
+    }
   });
 });
 

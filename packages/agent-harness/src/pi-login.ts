@@ -4,13 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import {
-  listPiStoredAuth,
-  piAuthPath,
-  productPiAuth,
-  resolvePiAuth,
-  type PiAuthStatus,
-} from "./pi-auth.js";
+import { listPiStoredAuth, piAuthPath, productPiAuth, resolvePiAuth, type PiAuthStatus } from "./pi-auth.js";
 import { findPiSdkRoot } from "./pi-available.js";
 
 export type PiLoginMethod = "api_key" | "oauth";
@@ -76,9 +70,19 @@ export const PI_LOGIN_PROVIDERS: readonly PiLoginProvider[] = [
   },
   { id: "deepseek", name: "DeepSeek", methods: ["api_key"], note: "DeepSeek API key。" },
   { id: "moonshotai", name: "Moonshot AI", methods: ["api_key"], note: "Moonshot API key。" },
-  { id: "moonshotai-cn", name: "Moonshot AI 中国", methods: ["api_key"], note: "Moonshot 中国区 API key。" },
+  {
+    id: "moonshotai-cn",
+    name: "Moonshot AI 中国",
+    methods: ["api_key"],
+    note: "Moonshot 中国区 API key。",
+  },
   { id: "minimax", name: "MiniMax", methods: ["api_key"], note: "MiniMax API key。" },
-  { id: "minimax-cn", name: "MiniMax 中国", methods: ["api_key"], note: "MiniMax 中国区 API key。" },
+  {
+    id: "minimax-cn",
+    name: "MiniMax 中国",
+    methods: ["api_key"],
+    note: "MiniMax 中国区 API key。",
+  },
   { id: "nvidia", name: "NVIDIA NIM", methods: ["api_key"], note: "NVIDIA API key。" },
   { id: "mistral", name: "Mistral", methods: ["api_key"], note: "Mistral API key。" },
   { id: "groq", name: "Groq", methods: ["api_key"], note: "Groq API key。" },
@@ -89,9 +93,7 @@ export const PI_LOGIN_PROVIDERS: readonly PiLoginProvider[] = [
 
 const STORED_PROVIDER_NAMES: Record<string, string> = {};
 
-export function listPiLoginProviders(
-  env: NodeJS.ProcessEnv = process.env,
-): PiLoginProvider[] {
+export function listPiLoginProviders(env: NodeJS.ProcessEnv = process.env): PiLoginProvider[] {
   const rows = PI_LOGIN_PROVIDERS.map((row) => ({ ...row, methods: [...row.methods] }));
   const known = new Set(rows.map((row) => row.id));
   for (const stored of listPiStoredAuth(env)) {
@@ -126,11 +128,7 @@ function writeAuthFile(file: string, data: Record<string, unknown>): void {
   });
 }
 
-export function savePiApiKey(
-  providerId: string,
-  key: string,
-  env: NodeJS.ProcessEnv = process.env,
-): PiAuthStatus {
+export function savePiApiKey(providerId: string, key: string, env: NodeJS.ProcessEnv = process.env): PiAuthStatus {
   const id = providerId.trim();
   const offer = PI_LOGIN_PROVIDERS.find((row) => row.id === id);
   if (!offer) throw new Error(`unknown Pi provider: ${id}`);
@@ -146,10 +144,7 @@ export function savePiApiKey(
   return resolvePiAuth(env);
 }
 
-export function logoutPiProvider(
-  providerId: string,
-  env: NodeJS.ProcessEnv = process.env,
-): PiAuthStatus {
+export function logoutPiProvider(providerId: string, env: NodeJS.ProcessEnv = process.env): PiAuthStatus {
   const id = providerId.trim();
   const file = piAuthPath(env);
   const data = readAuthFile(file);

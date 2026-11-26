@@ -129,13 +129,19 @@ describe("design contract", () => {
         layoutFamily: index < 4 ? "cover" : "chart-led",
       })),
     };
-    assert.throws(() => commit(fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-")), lowVariety), /at least 4 layout families|more than 2 adjacent/);
+    assert.throws(
+      () => commit(fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-")), lowVariety),
+      /at least 4 layout families|more than 2 adjacent/,
+    );
 
     const badOverride = {
       ...draft(),
       userOverrides: [{ quote: "紫色霓虹", effect: "使用紫色" }],
     };
-    assert.throws(() => commit(fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-")), badOverride), /verbatim brief quote/);
+    assert.throws(
+      () => commit(fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-")), badOverride),
+      /verbatim brief quote/,
+    );
 
     const renderable = { ...draft(), elements: [{ bounds: [0, 0, 1, 1] }] };
     assert.throws(() => commit(fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-")), renderable), /renderable field/);
@@ -145,10 +151,7 @@ describe("design contract", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "oss-design-contract-"));
     const contract = commit(root);
     assert.throws(
-      () =>
-        assertTodoMatchesDesignContract(contract, [
-          { pageId: "page-99", title: "错", layoutFamily: "cover" },
-        ]),
+      () => assertTodoMatchesDesignContract(contract, [{ pageId: "page-99", title: "错", layoutFamily: "cover" }]),
       /todo has 1 items|must be/,
     );
     assert.throws(

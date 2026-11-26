@@ -135,10 +135,7 @@ describe("RunLedger", () => {
       verdict: "revise",
       issues: ["footer collision"],
     });
-    assert.throws(
-      () => recordPageRevision(root, context, "page-01", { text: "a" }),
-      /must change/,
-    );
+    assert.throws(() => recordPageRevision(root, context, "page-01", { text: "a" }), /must change/);
   });
 
   it("does not let a visual pass hide a rendered layout failure", () => {
@@ -214,16 +211,11 @@ describe("RunLedger", () => {
     const ledger = JSON.parse(fs.readFileSync(ledgerFile, "utf8")) as {
       facts: Array<Record<string, unknown>>;
     };
-    const reviewFact = ledger.facts.find(
-      (fact) => fact.type === "deck.structural-review-recorded",
-    );
+    const reviewFact = ledger.facts.find((fact) => fact.type === "deck.structural-review-recorded");
     assert.equal(reviewFact?.reviewGateVersion, STRUCTURAL_REVIEW_GATE_VERSION);
     delete reviewFact!.reviewGateVersion;
     fs.writeFileSync(ledgerFile, `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
-    assert.equal(
-      inspectRunLedger(root, context.contextEpochId).structuralReview,
-      "missing",
-    );
+    assert.equal(inspectRunLedger(root, context.contextEpochId).structuralReview, "missing");
   });
 
   it("hashes object keys deterministically", () => {
@@ -372,7 +364,11 @@ describe("RunLedger", () => {
     recordCompose(root, context, "taste deck");
     assert.equal(inspectRunLedger(root, context.contextEpochId).composed, true);
 
-    recordPageRevision(root, context, "page-02", { id: "page-02", pageType: "chart-led", changed: true });
+    recordPageRevision(root, context, "page-02", {
+      id: "page-02",
+      pageType: "chart-led",
+      changed: true,
+    });
     const stale = inspectRunLedger(root, context.contextEpochId);
     assert.equal(stale.deckOverview, "missing");
     assert.equal(stale.deckTasteReview, "missing");
@@ -390,10 +386,7 @@ describe("plan to pages identity gate", () => {
     recordPageRevision(root, context, "a", { id: "a" });
     recordPageRevision(root, context, "b", { id: "b" });
     const blockers = inspectRunLedger(root, context.contextEpochId).composeBlockers;
-    assert.ok(
-      !blockers.some((blocker) => /missing pages|not in todo/.test(blocker)),
-      blockers.join("; "),
-    );
+    assert.ok(!blockers.some((blocker) => /missing pages|not in todo/.test(blocker)), blockers.join("; "));
   });
 
   it("same count with different identity still blocks", () => {
@@ -423,23 +416,14 @@ describe("plan to pages identity gate", () => {
     recordPageRevision(root, context, "c", { id: "c" });
     const blockers = inspectRunLedger(root, context.contextEpochId).composeBlockers;
     assert.ok(
-      blockers.some((blocker) =>
-        /todo has 2 pages but 3 current page revisions exist/.test(blocker),
-      ),
+      blockers.some((blocker) => /todo has 2 pages but 3 current page revisions exist/.test(blocker)),
       blockers.join("; "),
     );
   });
 });
 
 function tasteDraft(): DesignContractDraft {
-  const layouts = [
-    "cover",
-    "chart-led",
-    "table-led",
-    "editorial-asymmetric",
-    "decision",
-    "conclusion",
-  ] as const;
+  const layouts = ["cover", "chart-led", "table-led", "editorial-asymmetric", "decision", "conclusion"] as const;
   return {
     audience: "董事会",
     scene: "月度经营会",

@@ -1,31 +1,21 @@
 /**
  * Checked, byte-exact access to the pinned OpenKimi source pack.
  *
- * This module deliberately exposes source bytes and UTF-8 text without a
  * prompt-sized excerpt layer. The manifest is the integrity boundary; it is
  * generated from every regular file in the pinned vendor directory.
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { OpenKimiSourcePackError, assertSamePaths } from "./openkimi-source-pack-paths.js";
+export { OpenKimiSourcePackError };
 
 export const OPENKIMI_SOURCE_MANIFEST_VERSION = "openkimi-source-manifest-v1";
 export const OPENKIMI_SOURCE_CHUNK_BYTES = 12 * 1024;
 
-const VENDOR_RELATIVE_ROOT = path.join(
-  "vendor",
-  "open-kimi-ppt",
-  "skill-1.2.0",
-  "skills",
-  "open-kimi-ppt",
-);
+const VENDOR_RELATIVE_ROOT = path.join("vendor", "open-kimi-ppt", "skill-1.2.0", "skills", "open-kimi-ppt");
 
-const MANIFEST_RELATIVE_PATH = path.join(
-  "packages",
-  "agent-harness",
-  "reference",
-  "openkimi-source-manifest.v1.json",
-);
+const MANIFEST_RELATIVE_PATH = path.join("packages", "agent-harness", "reference", "openkimi-source-manifest.v1.json");
 
 const BASELINE_SOURCE_PATHS = {
   skill: "SKILL.md",
@@ -80,12 +70,7 @@ export type DesignDirection =
   | Readonly<{ kind: "user-design" }>
   | Readonly<{ kind: "preset"; sourceId: string }>;
 
-export type SourceRequirementKind =
-  | "skill"
-  | "pptd"
-  | "categories"
-  | "scenario"
-  | "preset-design";
+export type SourceRequirementKind = "skill" | "pptd" | "categories" | "scenario" | "preset-design";
 
 export type SourceRequirement = Readonly<{
   kind: SourceRequirementKind;
@@ -103,10 +88,6 @@ export type VerifyOpenKimiPackOptions = Readonly<{
   sourceRoot?: string;
   manifestPath?: string;
 }>;
-
-export class OpenKimiSourcePackError extends Error {
-  override readonly name = "OpenKimiSourcePackError";
-}
 
 export function openKimiSourceId(relativePath: string): string {
   return `openkimi:${assertSafeRelativePath(relativePath)}`;
@@ -158,14 +139,9 @@ export function verifyOpenKimiPack(repoRoot: string): VerifiedOpenKimiPack {
   return verifyOpenKimiPackAt(repoRoot);
 }
 
-export function verifyOpenKimiPackAt(
-  repoRoot: string,
-  options: VerifyOpenKimiPackOptions = {},
-): VerifiedOpenKimiPack {
+export function verifyOpenKimiPackAt(repoRoot: string, options: VerifyOpenKimiPackOptions = {}): VerifiedOpenKimiPack {
   const sourceRoot = path.resolve(options.sourceRoot ?? resolveOpenKimiSourceRoot(repoRoot));
-  const manifestPath = path.resolve(
-    options.manifestPath ?? resolveOpenKimiSourceManifestPath(repoRoot),
-  );
+  const manifestPath = path.resolve(options.manifestPath ?? resolveOpenKimiSourceManifestPath(repoRoot));
   const manifest = loadOpenKimiSourceManifest(manifestPath);
   verifyManifestShape(manifest);
   const entriesById = new Map<string, SourceManifestEntry>();
@@ -242,10 +218,7 @@ export function readOpenKimiSourceChunk(
 }
 
 /** Reassemble the checked chunks into byte-identical original file bytes. */
-export function readOpenKimiSourceBytes(
-  pack: VerifiedOpenKimiPack,
-  sourceId: string,
-): Buffer {
+export function readOpenKimiSourceBytes(pack: VerifiedOpenKimiPack, sourceId: string): Buffer {
   const entry = requireEntry(pack, sourceId);
   const parts = entry.chunks.map((chunk) => readOpenKimiSourceChunk(pack, sourceId, chunk.index).bytes);
   const bytes = Buffer.concat(parts);
@@ -271,9 +244,7 @@ export function listOpenKimiSourceRequirements(
   ];
   if (input.categoryId) {
     const categoryId = assertCategoryId(input.categoryId);
-    requirements.push(
-      requirementForPath(pack, "scenario", `reference/slides_categories/${categoryId}.md`),
-    );
+    requirements.push(requirementForPath(pack, "scenario", `reference/slides_categories/${categoryId}.md`));
   }
 
   if (input.designDirection.kind === "preset") {
@@ -288,25 +259,16 @@ export function listOpenKimiSourceRequirements(
   return requirements;
 }
 
-export function resolveOpenKimiScenarioSourceId(
-  pack: VerifiedOpenKimiPack,
-  categoryId: string,
-): string {
-  return requirementForPath(
-    pack,
-    "scenario",
-    `reference/slides_categories/${assertCategoryId(categoryId)}.md`,
-  ).sourceId;
+export function resolveOpenKimiScenarioSourceId(pack: VerifiedOpenKimiPack, categoryId: string): string {
+  return requirementForPath(pack, "scenario", `reference/slides_categories/${assertCategoryId(categoryId)}.md`)
+    .sourceId;
 }
 
 /**
  * Resolve an explicit design preset to its source id. This accepts the
  * canonical group/slug id used by the host or an existing source id.
  */
-export function resolveOpenKimiPresetDesignSourceId(
-  pack: VerifiedOpenKimiPack,
-  preset: string,
-): string {
+export function resolveOpenKimiPresetDesignSourceId(pack: VerifiedOpenKimiPack, preset: string): string {
   if (pack.entriesById.has(preset)) {
     const entry = requireEntry(pack, preset);
     if (!isDesignPath(entry.relativePath)) {
@@ -341,10 +303,7 @@ function requirementForPath(
   return requirementForEntry(kind, entry);
 }
 
-function requirementForEntry(
-  kind: SourceRequirementKind,
-  entry: SourceManifestEntry,
-): SourceRequirement {
+function requirementForEntry(kind: SourceRequirementKind, entry: SourceManifestEntry): SourceRequirement {
   return {
     kind,
     sourceId: entry.sourceId,
@@ -434,17 +393,6 @@ function assertCurrentPackPaths(pack: VerifiedOpenKimiPack): void {
   assertSamePaths([...pack.entriesByPath.keys()].sort(), actualPaths, pack.sourceRoot);
 }
 
-function assertSamePaths(expected: readonly string[], actual: readonly string[], sourceRoot: string): void {
-  const missing = expected.filter((candidate) => !actual.includes(candidate));
-  const added = actual.filter((candidate) => !expected.includes(candidate));
-  if (missing.length > 0 || added.length > 0) {
-    const chunks: string[] = [];
-    if (missing.length > 0) chunks.push(`missing ${missing.join(", ")}`);
-    if (added.length > 0) chunks.push(`added ${added.join(", ")}`);
-    throw new OpenKimiSourcePackError(`source pack file set mismatch at ${sourceRoot}: ${chunks.join("; ")}`);
-  }
-}
-
 function listRegularRelativePaths(sourceRoot: string): string[] {
   const absoluteRoot = path.resolve(sourceRoot);
   const rootStat = lstat(absoluteRoot, "source root");
@@ -452,7 +400,9 @@ function listRegularRelativePaths(sourceRoot: string): string[] {
   const found: string[] = [];
 
   const walk = (directory: string, relativeDirectory: string): void => {
-    for (const child of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const child of fs
+      .readdirSync(directory, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
       const relativePath = relativeDirectory ? `${relativeDirectory}/${child.name}` : child.name;
       const absolutePath = resolveSourceFile(absoluteRoot, relativePath);
       const stat = lstat(absolutePath, relativePath);

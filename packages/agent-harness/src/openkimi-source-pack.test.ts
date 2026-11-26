@@ -33,10 +33,7 @@ describe("OpenKimi checked source pack", () => {
       }
     };
     walk(pack.sourceRoot);
-    assert.deepEqual(
-      [...pack.manifest.files.map((entry) => entry.relativePath)].sort(),
-      vendorFiles.sort(),
-    );
+    assert.deepEqual([...pack.manifest.files.map((entry) => entry.relativePath)].sort(), vendorFiles.sort());
 
     for (const entry of pack.manifest.files) {
       const sourcePath = path.join(pack.sourceRoot, ...entry.relativePath.split("/"));
@@ -59,10 +56,7 @@ describe("OpenKimi checked source pack", () => {
 
   it("resolves complete baseline source coverage and only adds an explicit preset", () => {
     const pack = verifyOpenKimiPack(findRepositoryRoot());
-    const presetSourceId = resolveOpenKimiPresetDesignSourceId(
-      pack,
-      "consulting/pine-green-strategy",
-    );
+    const presetSourceId = resolveOpenKimiPresetDesignSourceId(pack, "consulting/pine-green-strategy");
     const presetRequirements = listOpenKimiSourceRequirements(pack, {
       categoryId: "management-report",
       designDirection: { kind: "preset", sourceId: presetSourceId },
@@ -100,17 +94,11 @@ describe("OpenKimi checked source pack", () => {
     assert.doesNotThrow(() => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options));
 
     fs.writeFileSync(path.join(fixture.sourceRoot, "added.md"), "unexpected\n");
-    assert.throws(
-      () => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options),
-      /file set mismatch.*added/i,
-    );
+    assert.throws(() => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options), /file set mismatch.*added/i);
     fs.rmSync(path.join(fixture.sourceRoot, "added.md"));
 
     fs.rmSync(path.join(fixture.sourceRoot, "reference", "pptd.md"));
-    assert.throws(
-      () => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options),
-      /file set mismatch.*missing/i,
-    );
+    assert.throws(() => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options), /file set mismatch.*missing/i);
     fs.writeFileSync(path.join(fixture.sourceRoot, "reference", "pptd.md"), "pptd restored\n");
     assert.throws(
       () => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options),
@@ -119,10 +107,7 @@ describe("OpenKimi checked source pack", () => {
     fs.writeFileSync(path.join(fixture.sourceRoot, "reference", "pptd.md"), "pptd rules\n");
 
     fs.symlinkSync("SKILL.md", path.join(fixture.sourceRoot, "linked.md"));
-    assert.throws(
-      () => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options),
-      /symbolic links are forbidden/i,
-    );
+    assert.throws(() => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options), /symbolic links are forbidden/i);
     fs.unlinkSync(path.join(fixture.sourceRoot, "linked.md"));
 
     const manifest = JSON.parse(fs.readFileSync(fixture.manifestPath, "utf8")) as {
@@ -133,7 +118,8 @@ describe("OpenKimi checked source pack", () => {
     fs.writeFileSync(fixture.manifestPath, JSON.stringify(manifest));
     assert.throws(
       () => verifyOpenKimiPackAt(fixture.repoRoot, fixture.options),
-      (error: unknown) => error instanceof OpenKimiSourcePackError && /unsafe source relative path/i.test(error.message),
+      (error: unknown) =>
+        error instanceof OpenKimiSourcePackError && /unsafe source relative path/i.test(error.message),
     );
   });
 });
@@ -157,7 +143,7 @@ function createFixture(): {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openkimi-source-pack-"));
   const sourceRoot = path.join(repoRoot, "vendor-pack");
   fs.mkdirSync(path.join(sourceRoot, "reference", "slides_categories"), { recursive: true });
-  fs.mkdirSync(path.join(sourceRoot, "reference", "design_system", "consulting", "pine-green",), {
+  fs.mkdirSync(path.join(sourceRoot, "reference", "design_system", "consulting", "pine-green"), {
     recursive: true,
   });
   fs.writeFileSync(path.join(sourceRoot, "SKILL.md"), "skills 原文\n");

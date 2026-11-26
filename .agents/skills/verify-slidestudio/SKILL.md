@@ -32,11 +32,12 @@ Do not install a project-local browser or fall back to system Chrome.
 ## Work sidebar and Personal entry
 
 `features/work-session-entry.md` covers the Host-facing surface separately from the 28 editor
-features. Generation sessions are hidden from the Work sidebar (`origin: "subagent"` for new ones,
-archive + re-hide for legacy ones); project history lives in the Hub's `/api/projects` list, not in
-Work. Run `npm run test:client --prefix dsh-slidestudio` for the built client and
-`npm run test -w @open-slidestudio/dsh-slides-host` for the hide sweep, `LegacySessionHider` and
-input guards. The client fixture uses a real `SliceSessionStore.inspect()` payload, a mocked Host
+features. Since Phase 3B-2 (`ADR-0012`), generation runs inside `@open-slidestudio/slides-runtime`
+over the 4-service thin shell (`webServer`, `connection`, `llm`, `attachments`) and never creates
+DSH Work sidebar sessions; project history lives in the Hub's `/api/projects` list, not in Work.
+Run `npm run test:client --prefix dsh-slidestudio` for the built client and
+`npm test -w @open-slidestudio/dsh-slides-host` for the 4-service runtime E2E, session recovery,
+and input guards. The client fixture uses a real `SliceSessionStore.inspect()` payload, a mocked Host
 slot registry, and the shared pinned browser. It proves the composer takeover on the archived path
 and standalone routing, not native Host activation. Use native Codex CUA for the installed Desktop
 path; record its actual package and runtime separately. A successful install alone does not prove
@@ -47,7 +48,11 @@ with `pnpm --dir dsh-slidestudio install --ignore-workspace --frozen-lockfile
 --config.auto-install-peers=false` (its lockfile pins `autoInstallPeers: false`; `npm install`
 fails on the `link:` dep and the optional `dsh-personal` peer is not on npm).
 
-## Session-hiding probe
+## Legacy DSH-agent probes (retired after Phase 3B-2)
+
+Since Phase 3B-2 (`ADR-0012`), `dsh-slidestudio` runs on `@open-slidestudio/slides-runtime` over the 4-service thin shell (`webServer`, `connection`, `llm`, `attachments`) and no longer creates DSH Work sessions, registers a `slides` agent preset, or ships `session-workspace.js` / `agent-plane.js`. Both `scripts/session-hiding/` and `scripts/rc2-isolation/` are historical pre-cutover probes; verify the 4-service host contract offline with `npm test -w @open-slidestudio/dsh-slides-host` (`four-service.e2e.test.ts`).
+
+### Historical session-hiding probe (pre-Phase 3B-2)
 
 `scripts/session-hiding/` verifies the Work-sidebar hiding path end to end inside a real Host —
 the layer unit tests mock: service existence, durable session headers, the registry round-trip:
@@ -120,7 +125,7 @@ user's stack on 55200 (editor) and 13080 (kernel), or a `dsh-studio` on 3080.
 - A failing feature: read its `failure-N.png` and `commands.json` first. A wedged UI on a healthy
   server: rerun that feature alone; the deck is recreated each time.
 - Environment failures look like `Pinned Playwright runtime is unavailable`, `editor did not
-  become healthy` (see `server.log`), or a port clash. Product failures look like a failed
+become healthy` (see `server.log`), or a port clash. Product failures look like a failed
   `rec.check` with the page otherwise healthy.
 
 ## Feature map

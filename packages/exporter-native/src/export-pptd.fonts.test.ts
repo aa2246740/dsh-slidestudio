@@ -4,24 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createEmptyProject,
-  listComposedPage,
-  saveProject,
-  titleOnlyCoverPage,
-} from "@open-slidestudio/pptd-v2";
+import { createEmptyProject, listComposedPage, saveProject, titleOnlyCoverPage } from "@open-slidestudio/pptd-v2";
 import { exportProjectToPptx } from "./export-pptd.js";
-import {
-  buildEmbeddedFonts,
-  collectUsedText,
-  fsTypeRestricted,
-  sfntFsType,
-} from "./font-embed.js";
+import { buildEmbeddedFonts, collectUsedText, fsTypeRestricted, sfntFsType } from "./font-embed.js";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const FONTS_CSS = path.join(repoRoot, "apps/native-web/public/fonts.css");
 const FONTS_DIR = path.join(repoRoot, "apps/native-web/public/fonts");
 
@@ -111,24 +98,16 @@ describe("export-native embedded fonts", () => {
     const embedded = result.report.embeddedFonts ?? [];
     const faces = embedded.map((f) => f.typeface);
     assert.ok(faces.includes("MiSans"), `MiSans embedded: ${faces}`);
-    assert.ok(
-      faces.includes("Unna"),
-      `Unna embedded: ${faces}`,
-    );
+    assert.ok(faces.includes("Unna"), `Unna embedded: ${faces}`);
 
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
 
     const contentTypes = await zip.file("[Content_Types].xml")?.async("string");
     assert.ok(contentTypes);
-    assert.match(
-      contentTypes,
-      /<Default Extension="fntdata" ContentType="application\/x-fontdata"\/>/,
-    );
+    assert.match(contentTypes, /<Default Extension="fntdata" ContentType="application\/x-fontdata"\/>/);
 
-    const parts = Object.keys(zip.files).filter((n) =>
-      /^ppt\/fonts\/font\d+\.fntdata$/.test(n),
-    );
+    const parts = Object.keys(zip.files).filter((n) => /^ppt\/fonts\/font\d+\.fntdata$/.test(n));
     assert.equal(parts.length, embedded.length);
     const first = await zip.file("ppt/fonts/font1.fntdata")?.async("uint8array");
     assert.ok(first);
@@ -144,17 +123,12 @@ describe("export-native embedded fonts", () => {
     const lstPos = pres.indexOf("<p:embeddedFontLst>");
     const defaultStylePos = pres.indexOf("<p:defaultTextStyle");
     assert.ok(lstPos >= 0, "embeddedFontLst present");
-    assert.ok(
-      lstPos < defaultStylePos,
-      "embeddedFontLst must precede p:defaultTextStyle",
-    );
+    assert.ok(lstPos < defaultStylePos, "embeddedFontLst must precede p:defaultTextStyle");
     for (const face of faces) {
       assert.match(pres, new RegExp(`<p:font typeface="${face}"/>`));
     }
 
-    const rels = await zip
-      .file("ppt/_rels/presentation.xml.rels")
-      ?.async("string");
+    const rels = await zip.file("ppt/_rels/presentation.xml.rels")?.async("string");
     assert.ok(rels);
     const fontRels = rels.match(/relationships\/font/g) ?? [];
     assert.equal(fontRels.length, embedded.length);
@@ -162,15 +136,10 @@ describe("export-native embedded fonts", () => {
     // The embedded subset reparses and still covers the deck's CJK text.
     const { Font } = await import("fonteditor-core");
     const fontIndex = faces.indexOf("MiSans");
-    const misans = await zip
-      .file(`ppt/fonts/font${fontIndex + 1}.fntdata`)!
-      .async("uint8array");
+    const misans = await zip.file(`ppt/fonts/font${fontIndex + 1}.fntdata`)!.async("uint8array");
     const reparsed = Font.create(Buffer.from(misans), { type: "ttf" }).get();
     for (const ch of "门店深度复盘报告") {
-      assert.ok(
-        reparsed.cmap[ch.codePointAt(0)!],
-        `cmap covers U+${ch.codePointAt(0)!.toString(16)} (${ch})`,
-      );
+      assert.ok(reparsed.cmap[ch.codePointAt(0)!], `cmap covers U+${ch.codePointAt(0)!.toString(16)} (${ch})`);
     }
 
     // A CJK source is megabytes of woff2; the subset must be tiny.
@@ -252,13 +221,15 @@ describe("export-native embedded fonts", () => {
     });
     const embedded = result.report.embeddedFonts ?? [];
     const faces = embedded.filter((f) => f.typeface === "PairDemo");
-    assert.equal(
-      faces.length,
-      2,
-      `PairDemo embeds a regular and a bold face: ${JSON.stringify(embedded)}`,
+    assert.equal(faces.length, 2, `PairDemo embeds a regular and a bold face: ${JSON.stringify(embedded)}`);
+    assert.ok(
+      faces.some((f) => f.weight === 400),
+      "regular face listed",
     );
-    assert.ok(faces.some((f) => f.weight === 400), "regular face listed");
-    assert.ok(faces.some((f) => f.weight === 700), "bold face listed");
+    assert.ok(
+      faces.some((f) => f.weight === 700),
+      "bold face listed",
+    );
 
     const { default: JSZip } = await import("jszip");
     const zip = await JSZip.loadAsync(result.data);
@@ -268,27 +239,17 @@ describe("export-native embedded fonts", () => {
       /<p:embeddedFont><p:font typeface="PairDemo"\/><p:regular r:id="(rId\d+)"\/><p:bold r:id="(rId\d+)"\/><\/p:embeddedFont>/.exec(
         pres,
       );
-    assert.ok(
-      entry,
-      "one <p:embeddedFont> for PairDemo carries both regular and bold r:ids",
-    );
+    assert.ok(entry, "one <p:embeddedFont> for PairDemo carries both regular and bold r:ids");
     const [, regularRid, boldRid] = entry;
     assert.notEqual(regularRid, boldRid);
 
-    const rels = await zip
-      .file("ppt/_rels/presentation.xml.rels")
-      ?.async("string");
+    const rels = await zip.file("ppt/_rels/presentation.xml.rels")?.async("string");
     assert.ok(rels);
-    const ridTarget = (rid: string) =>
-      new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1];
+    const ridTarget = (rid: string) => new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1];
     const regularTarget = ridTarget(regularRid!);
     const boldTarget = ridTarget(boldRid!);
     assert.ok(regularTarget && boldTarget, "both r:ids resolve in rels");
-    assert.notEqual(
-      regularTarget,
-      boldTarget,
-      "regular and bold point at distinct fntdata parts",
-    );
+    assert.notEqual(regularTarget, boldTarget, "regular and bold point at distinct fntdata parts");
     // Both r:ids resolve to real fntdata parts in the zip.
     for (const target of [regularTarget!, boldTarget!]) {
       const bytes = await zip.file(`ppt/${target}`)?.async("uint8array");
@@ -371,14 +332,8 @@ describe("export-native embedded fonts", () => {
 
     const { families, charset } = collectUsedText(project);
     assert.ok(families.has("Oranienbaum"));
-    assert.ok(
-      families.has("思源宋体"),
-      "saved decks keep the named face; only Agent writes get rewritten",
-    );
-    assert.ok(
-      families.has("微软雅黑") && families.has("Arial"),
-      "unnamed text resolves to the default pair",
-    );
+    assert.ok(families.has("思源宋体"), "saved decks keep the named face; only Agent writes get rewritten");
+    assert.ok(families.has("微软雅黑") && families.has("Arial"), "unnamed text resolves to the default pair");
     for (const ch of "中文字符备注") {
       assert.ok(charset.has(ch.codePointAt(0)!));
     }

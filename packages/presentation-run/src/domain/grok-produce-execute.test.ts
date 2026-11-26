@@ -12,7 +12,7 @@ import {
   persistPresentationRunProvider,
 } from "../capabilities.js";
 import { XAI_API_BASE, XAI_RESPONSES_PATH } from "./grok-hosted.js";
-import { GENERATE_TOOLS } from "./agent-tools.js";
+import { GENERATE_TOOLS } from "./generate-tool-specs.js";
 import { writeDomainRuntime } from "./domain-hands.js";
 import {
   EMPTY_HOSTED_WEB_SEARCH,
@@ -87,7 +87,9 @@ describe("Grok produce execute path", () => {
         const tools = (body as { tools?: Array<{ type?: string; enable_image_search?: boolean }> }).tools ?? [];
         if (tools[0]?.enable_image_search) {
           return new Response(
-            JSON.stringify({ output_text: "Cover texture: ![bg](https://cdn.example.test/cover.png)" }),
+            JSON.stringify({
+              output_text: "Cover texture: ![bg](https://cdn.example.test/cover.png)",
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
@@ -140,10 +142,7 @@ describe("Grok produce execute path", () => {
       assert.equal(caps.imageSearch.configured, true);
       assert.equal(caps.imageGenerate.configured, true);
       assert.equal(caps.research.via, "pi-xai-hosted");
-      assert.deepEqual(hostedProduceToolNames(inspectProjectCapabilities(root)), [
-        "search_image",
-        "generate_image",
-      ]);
+      assert.deepEqual(hostedProduceToolNames(inspectProjectCapabilities(root)), ["search_image", "generate_image"]);
 
       const search = await run.execute(
         { name: "web_search", args: { query: "Starship latest flight 2026" } },
@@ -167,7 +166,11 @@ describe("Grok produce execute path", () => {
       const generated = await run.execute(
         {
           name: "generate_image",
-          args: { id: "cover-bg", prompt: "navy cover background for a 2026 briefing", aspect: "16:9" },
+          args: {
+            id: "cover-bg",
+            prompt: "navy cover background for a 2026 briefing",
+            aspect: "16:9",
+          },
         },
         ctx("img-gen-1"),
       );
@@ -245,8 +248,7 @@ describe("Grok produce execute path", () => {
       SLIDESTUDIO_IMAGE: "1",
     });
     const origFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response("image API unavailable", { status: 503 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response("image API unavailable", { status: 503 })) as typeof fetch;
     try {
       const run = createPresentationRun({ repoRoot: REPO });
       const handle = await run.open({
@@ -339,7 +341,9 @@ describe("Grok produce execute path", () => {
         parameters: spec.function.parameters,
       }));
       const webSpec = grokTools.find((tool) => tool.name === "web_search");
-      const webParams = webSpec?.parameters as { properties?: { queries?: unknown; query?: unknown } };
+      const webParams = webSpec?.parameters as {
+        properties?: { queries?: unknown; query?: unknown };
+      };
       assert.ok(webParams?.properties?.queries);
       assert.equal("query" in (webParams.properties ?? {}), false);
       const searchImageAt = grokTools.findIndex((tool) => tool.name === "search_image");

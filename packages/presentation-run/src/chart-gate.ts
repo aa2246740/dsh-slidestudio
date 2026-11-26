@@ -27,17 +27,12 @@ function chartHasPptdData(rec: Record<string, unknown>): boolean {
   const normalized = normalizeChartInput(rec);
   const data = asRecord(normalized.data);
   return Boolean(
-    data &&
-      Array.isArray(data.cols) &&
-      Array.isArray(data.rows) &&
-      data.cols.length >= 2 &&
-      data.rows.length > 0,
+    data && Array.isArray(data.cols) && Array.isArray(data.rows) && data.cols.length >= 2 && data.rows.length > 0,
   );
 }
 
 export type ChartGateResult =
-  | { readonly ok: true; readonly charts: number }
-  | { readonly ok: false; readonly detail: string };
+  { readonly ok: true; readonly charts: number } | { readonly ok: false; readonly detail: string };
 
 /**
  * OpenKimi PPTD charts are `data.cols` + `data.rows`. claim/dataRef/whyChart are

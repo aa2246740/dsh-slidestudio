@@ -36,34 +36,40 @@ window.__ModuleLoader__.load({
 		* invocation API, so use its slot/ARIA controls without touching private stores.
 		*/
 		function activateSettingsControl(ctx) {
-			const trigger = document.querySelector("[data-slot=\"sidebar.settings\"] [data-slot=\"settings.trigger\"]")?.closest("button");
-			if (trigger && !trigger.disabled) {
-				trigger.click();
+			try {
+				const trigger = document.querySelector("[data-slot=\"sidebar.settings\"] [data-slot=\"settings.trigger\"]")?.closest("button");
+				if (trigger && !trigger.disabled) {
+					trigger.click();
+					return true;
+				}
+				const launcher = document.querySelector("[data-slot=\"sidebar.settings\"] [data-slot=\"settings.launcher\"] button[aria-haspopup=\"menu\"]");
+				if (!launcher || launcher.disabled) return false;
+				if (launcher.getAttribute("aria-expanded") !== "true") {
+					launcher.click();
+					return false;
+				}
+				const aria = ctx.get("shortcuts")?.catalog.getSnapshot().find((row) => String(row.id) === "settings.open")?.aria;
+				const matches = [...document.querySelectorAll("[role=\"menu\"] button[role=\"menuitem\"]")].filter((button) => {
+					if (button.disabled) return false;
+					if (aria && button.getAttribute("aria-keyshortcuts") === aria) return true;
+					const label = button.cloneNode(true);
+					label.querySelectorAll("[aria-hidden=\"true\"]").forEach((node) => node.remove());
+					return ["设置", "Settings"].includes(label.textContent?.trim() ?? "");
+				});
+				if (matches.length !== 1) return false;
+				matches[0].click();
 				return true;
-			}
-			const launcher = document.querySelector("[data-slot=\"sidebar.settings\"] [data-slot=\"settings.launcher\"] button[aria-haspopup=\"menu\"]");
-			if (!launcher || launcher.disabled) return false;
-			if (launcher.getAttribute("aria-expanded") !== "true") {
-				launcher.click();
+			} catch {
 				return false;
 			}
-			const aria = ctx.get("shortcuts")?.catalog.getSnapshot().find((row) => String(row.id) === "settings.open")?.aria;
-			const matches = [...document.querySelectorAll("[role=\"menu\"] button[role=\"menuitem\"]")].filter((button) => {
-				if (button.disabled) return false;
-				if (aria && button.getAttribute("aria-keyshortcuts") === aria) return true;
-				const label = button.cloneNode(true);
-				label.querySelectorAll("[aria-hidden=\"true\"]").forEach((node) => node.remove());
-				return ["设置", "Settings"].includes(label.textContent?.trim() ?? "");
-			});
-			if (matches.length !== 1) return false;
-			matches[0].click();
-			return true;
 		}
 		/** The hub inside the iframe follows DSH's own Language setting. */
 		let currentLang = "zh";
 		function activeLang(ctx) {
 			try {
-				return ctx.get("locale")?.getLocale?.().active === "en" ? "en" : "zh";
+				const active = ctx.get("locale")?.getLocale?.().active;
+				if (!active) return "zh";
+				return /^zh(?:$|[-_])/i.test(active) ? "zh" : "en";
 			} catch {
 				return "zh";
 			}

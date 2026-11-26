@@ -14,10 +14,7 @@ import {
 } from "./parse.js";
 import { resolveThemeColor } from "./theme.js";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pptd-v2-"));
@@ -73,6 +70,27 @@ describe("pptd-v2 load/save", () => {
     assert.equal(t.content.text, "改过的标题");
   });
 
+  it("re-reads a page after an external rewrite and never shares mutated objects", () => {
+    const dir = tmpDir();
+    const created = createEmptyProject(dir, { title: "缓存回归" });
+    listComposedPage(created, "pages/cover.page", titleOnlyCoverPage("原标题"));
+    saveProject(created);
+
+    const first = loadProject(dir);
+    (first.pages[0]!.page.elements[0] as { content: { text: string } }).content.text = "内存里改掉";
+    // The cached parse must hand out fresh objects: mutating a returned
+    // project must not leak into the next read of the unchanged file.
+    const second = loadProject(dir);
+    assert.equal((second.pages[0]!.page.elements[0] as { content: { text: string } }).content.text, "原标题");
+
+    // External rewrite (editor/hand edit) — stat signature changes, cache
+    // misses, new content wins.
+    const pageFile = path.join(dir, "pages", "cover.page");
+    fs.writeFileSync(pageFile, fs.readFileSync(pageFile, "utf8").replace("原标题", "外部改过的"));
+    const third = loadProject(dir);
+    assert.equal((third.pages[0]!.page.elements[0] as { content: { text: string } }).content.text, "外部改过的");
+  });
+
   it("loads syn-smoke fixture", () => {
     const project = loadProject(path.join(repoRoot, "fixtures/syn-smoke"));
     assert.equal(project.pages.length, 2);
@@ -83,9 +101,9 @@ describe("pptd-v2 load/save", () => {
   it("loads syn-shapes compare sheet", () => {
     const project = loadProject(path.join(repoRoot, "fixtures/syn-shapes"));
     assert.equal(project.pages.length, 1);
-    const names = project.pages[0]!.page.elements
-      .filter((e) => e.elementType === "shape")
-      .map((e) => (e as { shapeName?: string }).shapeName);
+    const names = project.pages[0]!.page.elements.filter((e) => e.elementType === "shape").map(
+      (e) => (e as { shapeName?: string }).shapeName,
+    );
     for (const n of ["rect", "roundRect", "ellipse", "triangle", "rightArrow", "accentBorderCallout1"]) {
       assert.ok(names.includes(n), n);
     }
@@ -100,29 +118,20 @@ describe("pptd-v2 load/save", () => {
 
   it("rejects non-v2", () => {
     const dir = tmpDir();
-    fs.writeFileSync(
-      path.join(dir, "deck.pptd"),
-      "version: v1\nsize: [960, 540]\npages: [pages/a.page]\n",
-    );
+    fs.writeFileSync(path.join(dir, "deck.pptd"), "version: v1\nsize: [960, 540]\npages: [pages/a.page]\n");
     assert.throws(() => loadProject(dir), PptdError);
   });
 
   it("rejects path escape", () => {
     const dir = tmpDir();
     createEmptyProject(dir);
-    fs.writeFileSync(
-      path.join(dir, "deck.pptd"),
-      "version: v2\nsize: [960, 540]\npages:\n  - ../outside.page\n",
-    );
+    fs.writeFileSync(path.join(dir, "deck.pptd"), "version: v2\nsize: [960, 540]\npages:\n  - ../outside.page\n");
     assert.throws(() => loadProject(dir), /escapes/);
   });
 });
 
 describe("resolveThemeColor", () => {
   it("resolves $token", () => {
-    assert.equal(
-      resolveThemeColor("$primary", { colors: { primary: "#2563EB" } }),
-      "#2563EB",
-    );
+    assert.equal(resolveThemeColor("$primary", { colors: { primary: "#2563EB" } }), "#2563EB");
   });
 });

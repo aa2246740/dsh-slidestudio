@@ -3,8 +3,7 @@
  * Official dsh-tool-web (and grok-4.6) take `queries: string[]`, not `query`.
  */
 
-export const MISSING_HOSTED_WEB_SEARCH_RECEIPT =
-  "web_search receipt missing; research.via is pi-xai-hosted";
+export const MISSING_HOSTED_WEB_SEARCH_RECEIPT = "web_search receipt missing; research.via is pi-xai-hosted";
 
 export const EMPTY_HOSTED_WEB_SEARCH = "web_search returned no facts or citations";
 
@@ -20,10 +19,7 @@ export function briefNeedsLiveWebSearch(brief: string): boolean {
 
 export function webSearchQueriesFromArgs(args: Record<string, unknown>): string[] {
   if (Array.isArray(args.queries)) {
-    return [...new Set(args.queries.map((item) => String(item ?? "").trim()).filter(Boolean))].slice(
-      0,
-      4,
-    );
+    return [...new Set(args.queries.map((item) => String(item ?? "").trim()).filter(Boolean))].slice(0, 4);
   }
   const query = String(args.query ?? "").trim();
   return query ? [query] : [];
@@ -60,7 +56,11 @@ export type HostedWebSearchCall = {
 };
 
 export function liveWebSearchQueryForBrief(brief: string): string {
-  const line = brief.split(/\n/).map((row) => row.trim()).find((row) => row.length > 0) ?? "";
+  const line =
+    brief
+      .split(/\n/)
+      .map((row) => row.trim())
+      .find((row) => row.length > 0) ?? "";
   return line.slice(0, 200) || "recent facts for this briefing";
 }
 

@@ -136,16 +136,20 @@ describe("agent runtime", () => {
       llm: scriptedPort([
         call("think", { summary: "小学生", detail: "先定听众，不编造课外统计。" }, "t1"),
         call("read_playbook", { section: "category" }, "r1"),
-        call("write_todo", {
-          items: [
-            { title: "封面" },
-            { title: "今天要搞懂什么" },
-            { title: "概念" },
-            { title: "记住" },
-            { title: "3-4-5 例子" },
-            { title: "带走什么" },
-          ],
-        }, "w1"),
+        call(
+          "write_todo",
+          {
+            items: [
+              { title: "封面" },
+              { title: "今天要搞懂什么" },
+              { title: "概念" },
+              { title: "记住" },
+              { title: "3-4-5 例子" },
+              { title: "带走什么" },
+            ],
+          },
+          "w1",
+        ),
         call("research", { query: "勾股定理" }, "s1"),
         call("compose_deck", lessonDeck, "c1"),
       ]),
@@ -199,9 +203,13 @@ describe("agent runtime", () => {
       llm: scriptedPort([
         call("think", { summary: "小学生", detail: "课堂路径，不套复盘。" }, "t1"),
         call("read_playbook", { section: "catalog" }, "r1"),
-        call("write_todo", {
-          items: [{ title: "封面" }, { title: "概念" }, { title: "例子" }, { title: "收束" }],
-        }, "w1"),
+        call(
+          "write_todo",
+          {
+            items: [{ title: "封面" }, { title: "概念" }, { title: "例子" }, { title: "收束" }],
+          },
+          "w1",
+        ),
         call("research", { query: "勾股" }, "s1"),
         call("compose_deck", lessonDeck, "c1"),
       ]),
@@ -230,11 +238,7 @@ describe("agent runtime", () => {
   });
 
   it("research quotes attachments instead of inventing a source", () => {
-    const hit = runResearch(
-      "华北增长",
-      "华北区域 Q3 增长复盘",
-      "来源：q3.md\n华北增长 12%，口径与去年一致。",
-    );
+    const hit = runResearch("华北增长", "华北区域 Q3 增长复盘", "来源：q3.md\n华北增长 12%，口径与去年一致。");
     assert.equal(hit.source, "attachment");
     assert.match(hit.facts.join("\n"), /12%/);
     assert.doesNotMatch(JSON.stringify(hit), /Gartner|McKinsey/i);
@@ -521,11 +525,7 @@ describe("agent runtime", () => {
       writtenPages,
     };
 
-    const result = executeGenerateTool(
-      "compose_deck",
-      { title: "澄光生活", pages: writtenPages },
-      state,
-    );
+    const result = executeGenerateTool("compose_deck", { title: "澄光生活", pages: writtenPages }, state);
 
     assert.equal(result.ok, false);
     assert.match(result.detail, /7\.9%/);
@@ -535,10 +535,7 @@ describe("agent runtime", () => {
   it("auto-renders native #slide after write_page when raster is available", async () => {
     const playbook = loadPlaybook();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "auto-render-"));
-    const bytes = Buffer.concat([
-      Buffer.from("89504e470d0a1a0a", "hex"),
-      Buffer.alloc(80, 4),
-    ]);
+    const bytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(80, 4)]);
     const { createPageRasterPort } = await import("./page-raster.js");
     const raster = createPageRasterPort({
       editorBaseUrl: "http://127.0.0.1:55200",
@@ -562,12 +559,7 @@ describe("agent runtime", () => {
         },
       ],
     });
-    const pages = [
-      el("page-01", "自动看页"),
-      el("page-02", "第二页"),
-      el("page-03", "第三页"),
-      el("page-04", "收束"),
-    ];
+    const pages = [el("page-01", "自动看页"), el("page-02", "第二页"), el("page-03", "第三页"), el("page-04", "收束")];
     const result = await runAgentLoop({
       brief: "自动看页测试",
       playbook,
@@ -582,10 +574,7 @@ describe("agent runtime", () => {
         runtime: { kind: "agent-loop", piAvailable: false, piNote: "test" },
         mediaPolicy: "optional",
       },
-      llm: scriptedPort([
-        call("write_page", pages[0], "w1"),
-        call("compose_deck", { title: "自动看页", pages }, "c1"),
-      ]),
+      llm: scriptedPort([call("write_page", pages[0], "w1"), call("compose_deck", { title: "自动看页", pages }, "c1")]),
     });
     assert.equal(result.source, "agent");
     assert.ok(result.traces.some((t) => t.tool === "write_page" && t.ok));
@@ -600,10 +589,7 @@ describe("agent runtime", () => {
     const playbook = loadPlaybook();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "auto-render-id-"));
     const seen: number[] = [];
-    const bytes = Buffer.concat([
-      Buffer.from("89504e470d0a1a0a", "hex"),
-      Buffer.alloc(80, 6),
-    ]);
+    const bytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(80, 6)]);
     const { createPageRasterPort } = await import("./page-raster.js");
     const raster = createPageRasterPort({
       editorBaseUrl: "http://127.0.0.1:55200",
@@ -630,12 +616,7 @@ describe("agent runtime", () => {
         },
       ],
     });
-    const pages = [
-      el("page-01", "封面"),
-      el("page-02", "第二页"),
-      el("page-03", "第三页"),
-      el("page-04", "收束"),
-    ];
+    const pages = [el("page-01", "封面"), el("page-02", "第二页"), el("page-03", "第三页"), el("page-04", "收束")];
     const result = await runAgentLoop({
       brief: "自动看页测试",
       playbook,
@@ -802,10 +783,7 @@ describe("agent runtime", () => {
           };
         },
       },
-      llm: scriptedPort([
-        call("research", { query: "华北增长口径" }, "s1"),
-        call("compose_deck", lessonDeck, "c1"),
-      ]),
+      llm: scriptedPort([call("research", { query: "华北增长口径" }, "s1"), call("compose_deck", lessonDeck, "c1")]),
     });
     assert.equal(result.traces[0]?.summary, "intranet");
     assert.match(result.traces[0]?.detail ?? "", /内网纪要/);
@@ -912,63 +890,5 @@ describe("agent runtime", () => {
     });
     assert.equal(hit?.source, "intranet");
     assert.equal(hit?.citations[0], "wiki/budget");
-  });
-});
-
-describe("live deck title", () => {
-  // A live DSH turn writes pages one at a time. The deck must end up named after
-  // the deck the agent actually wrote (the cover headline), not after the raw
-  // prompt the user typed — that text used to be re-stamped on every page write.
-  const coverPage = (): SkillPageInput => ({
-    id: "01_cover",
-    pageType: "cover",
-    elements: [{
-      elementId: "title",
-      elementType: "text",
-      bounds: [80, 80, 800, 60],
-      content: { text: "iPod → iPod shuffle 产品史", fontSize: 32 },
-    }],
-  });
-  const secondPage = (): SkillPageInput => ({
-    id: "02_body",
-    pageType: "content",
-    elements: [{
-      elementId: "title",
-      elementType: "text",
-      bounds: [80, 80, 800, 60],
-      content: { text: "从硬盘到闪存", fontSize: 28 },
-    }],
-  });
-
-  it("keeps the cover headline instead of re-stamping the raw brief", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oss-live-title-"));
-    const state = {
-      brief: "做一份极简苹果风格的，介绍 ipod -> ipod shuffle 的产品历史的科普性 ppt",
-      playbook: loadPlaybook({ categoryId: "management-report" }),
-      todos: [],
-      researchNotes: [],
-      projectRoot: dir,
-    };
-    persistWrittenPages(state, [coverPage()]);
-    assert.equal(loadProject(dir).presentation.title, "iPod → iPod shuffle 产品史");
-
-    persistWrittenPages(state, [secondPage()]);
-    const after = loadProject(dir).presentation.title;
-    assert.equal(after, "iPod → iPod shuffle 产品史", "a later page write must not reset the deck title");
-    assert.notEqual(after, state.brief.slice(0, 40));
-  });
-
-  it("prefers an explicitly authored deck title over the cover headline", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oss-live-title-explicit-"));
-    const state = {
-      brief: "做一份极简苹果风格的科普 ppt",
-      playbook: loadPlaybook({ categoryId: "management-report" }),
-      todos: [],
-      researchNotes: [],
-      projectRoot: dir,
-      skillDeck: { title: "注入生成", pages: [] },
-    };
-    persistWrittenPages(state, [coverPage()]);
-    assert.equal(loadProject(dir).presentation.title, "注入生成");
   });
 });

@@ -1,11 +1,12 @@
 import type { GenerationActivity } from "./generation-activity.js";
 import type { RunLedgerInspection } from "./domain/run-ledger.js";
 
+import type { DesignAuthority } from "./domain/design-authority.js";
+
 export type RunId = string;
 
 export type DesignDirective =
-  | { readonly kind: "self-directed" }
-  | { readonly kind: "explicit-style"; readonly designSystemId: string };
+  { readonly kind: "self-directed" } | { readonly kind: "explicit-style"; readonly designSystemId: string };
 
 export type OpenRunInput = {
   readonly projectRoot: string;
@@ -22,12 +23,28 @@ export type RunHandle = {
   readonly projectRoot: string;
 };
 
+export type WriteAuthorityRefusal = {
+  readonly ok: false;
+  readonly summary: string;
+  readonly detail: string;
+  readonly payload: Record<string, unknown>;
+};
+
+export type WriteAuthorityRunner = <T>(
+  commit: () => T,
+) => { readonly ok: true; readonly value: T } | WriteAuthorityRefusal;
+
 export type CommandContext = {
   readonly runId: RunId;
   readonly sessionId: string;
   readonly toolCallId: string;
   readonly projectRoot: string;
   readonly abortSignal: AbortSignal;
+  /**
+   * Optional host-supplied synchronous write-authority gate run INSIDE
+   * `withProjectWriteLock(projectRoot)` around mutating commits.
+   */
+  readonly runAuthorizedWrite?: WriteAuthorityRunner;
 };
 
 export type PresentationCommand = {
@@ -66,6 +83,8 @@ export type RunInspection = {
   readonly hostDirected: false;
   readonly categoryId: undefined;
   readonly designSystemId: string | undefined;
+  /** The effective style decision when it replaced the Hub choice. */
+  readonly designAuthority?: DesignAuthority;
   readonly receipts: readonly SourceReceipt[];
   readonly catalog: { readonly sourceFiles: number; readonly visualFiles: number };
   readonly capabilities: CapabilitySnapshot;
@@ -167,6 +186,17 @@ export type VisionMode = "none" | "main-model" | "reviewer";
 
 export type ModelInputModality = "text" | "image";
 
+export type MaterialCapabilityEntry = {
+  readonly id: string;
+  readonly name?: string;
+  readonly kind: string;
+  readonly summaryZh: string;
+  readonly needsVision: boolean;
+  readonly viewable: boolean;
+  readonly mediaSrc?: string;
+  readonly parts?: readonly Record<string, unknown>[];
+};
+
 export type CapabilitySnapshot = {
   readonly research: CapabilityFlag;
   readonly imageSearch: CapabilityFlag;
@@ -182,6 +212,8 @@ export type CapabilitySnapshot = {
   readonly web: boolean;
   readonly render: boolean;
   readonly exportPptx: boolean;
+  /** Uploaded reference materials materialized into the project (project-scoped snapshots only). */
+  readonly materials?: readonly MaterialCapabilityEntry[];
   readonly note: string;
 };
 

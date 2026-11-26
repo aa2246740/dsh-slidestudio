@@ -1,0 +1,55 @@
+{
+  "id": "theme.layout.apply",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "版式（下拉）",
+  "description": "Page-mode 页面 section: the 版式 dropdown gives the current page a layout. 无版式 sends a null layout, which removes the inherited copies and keeps the page's own content. Disabled while a version is previewed.",
+  "kimiUi": {
+    "controlLabel": "版式",
+    "location": "右侧属性面板 / 页面 / 版式",
+    "appearsWhen": "page mode with no element selected"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Committed as test-fixtures/layouts-project (built by test-fixtures/build-layouts-project.mjs): page 1 封面, pages 2-23 正文, page 24 no layout. Page 5 uses 正文."
+  },
+  "action": {
+    "type": "select-menu",
+    "steps": ["打开「版式」下拉框", "选择「无版式」，或选择「封面」「正文」"],
+    "input": {
+      "options": ["无版式", "封面", "正文"]
+    }
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "layoutApply writes the page's layoutId; 无版式 writes no layoutId"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": true,
+    "commandHint": "layoutApply"
+  },
+  "test": {
+    "id": "EO-LAYOUT-001",
+    "automated": true,
+    "selfTestChecklist": [
+      "the 版式 section lists 无版式 and every layout with its page count",
+      "choosing 无版式 sends layoutId null; choosing a layout sends its id"
+    ]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

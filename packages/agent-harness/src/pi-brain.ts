@@ -15,12 +15,7 @@ import {
   type ComposeDeck,
 } from "./compose-ir.js";
 import { materializeDeck } from "./materialize.js";
-import {
-  applySkillDeck,
-  parseSkillDeck,
-  skillToCompose,
-  type SkillDeckInput,
-} from "./skill-pages.js";
+import { applySkillDeck, parseSkillDeck, skillToCompose, type SkillDeckInput } from "./skill-pages.js";
 import { missingOperatingFactsReason } from "./report-facts.js";
 import {
   DEFAULT_CATEGORY,
@@ -29,11 +24,7 @@ import {
   type Palette,
   type PlaybookBundle,
 } from "./playbook.js";
-import {
-  detectCapabilities,
-  formatCapabilityCard,
-  type CapabilityCard,
-} from "./capability-card.js";
+import { detectCapabilities, formatCapabilityCard, type CapabilityCard } from "./capability-card.js";
 import type { AgentRunHooks } from "./agent-brain.js";
 import type { ToolStep } from "./harness-types.js";
 import { piAvailable } from "./pi-available.js";
@@ -49,10 +40,7 @@ import { inspectRunLedger, type RunLedgerInspection } from "./run-ledger.js";
 import { paintExhibit } from "./exhibit-paint.js";
 import { parsePagedScript } from "./host-produce.js";
 import { reviewSkillPages } from "./layout-qa.js";
-import {
-  formatSkillPathsMarkdown,
-  resolvePiSkillDirs,
-} from "./pi-skill.js";
+import { formatSkillPathsMarkdown, resolvePiSkillDirs } from "./pi-skill.js";
 import {
   classifyPiEvents,
   classifyPiFailure,
@@ -61,11 +49,7 @@ import {
   summarizePiError,
   type PiFailure,
 } from "./pi-failure.js";
-import {
-  formatPauseMessage,
-  type AgentPause,
-  type AgentPauseKind,
-} from "./generate-checkpoint.js";
+import { formatPauseMessage, type AgentPause, type AgentPauseKind } from "./generate-checkpoint.js";
 import {
   PiRpcSession,
   assistantTextsFromEvents,
@@ -136,16 +120,8 @@ const SKILL_REL = path.join("_agent", "skill-deck.json");
 function writeCapabilityFiles(root: string, card: CapabilityCard): void {
   const dir = path.join(root, "_agent");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, "capability.json"),
-    `${JSON.stringify(card, null, 2)}\n`,
-    "utf8",
-  );
-  fs.writeFileSync(
-    path.join(dir, "capability.md"),
-    `${formatCapabilityCard(card)}\n`,
-    "utf8",
-  );
+  fs.writeFileSync(path.join(dir, "capability.json"), `${JSON.stringify(card, null, 2)}\n`, "utf8");
+  fs.writeFileSync(path.join(dir, "capability.md"), `${formatCapabilityCard(card)}\n`, "utf8");
 }
 
 function writeAgentKit(
@@ -213,9 +189,10 @@ function buildPrompt(
   card: CapabilityCard,
   recovery?: RunLedgerInspection,
 ): string {
-  const passedPages = recovery?.pages
-    .filter((page) => page.visualReview === "pass" && page.layout === "pass")
-    .map((page) => page.pageId) ?? [];
+  const passedPages =
+    recovery?.pages
+      .filter((page) => page.visualReview === "pass" && page.layout === "pass")
+      .map((page) => page.pageId) ?? [];
   const recoveryLines = recovery?.initialized
     ? [
         "RECOVERY RUN: continue the durable project on disk; do not start a replacement deck.",
@@ -233,7 +210,7 @@ function buildPrompt(
       ]
     : [];
   return [
-    "You are Pi producing an DSH SlideStudio deck.",
+    "You are Pi producing an Open SlideStudio deck.",
     "Follow the host skill open-slidestudio (SKILL.md already loaded). That is the produce process.",
     "Read _agent/capability.md and _agent/brief.txt.",
     "Call list_references, then read every required original OpenKimi chunk with read_reference. Next call view_design_reference and inspect the actual preview image.",
@@ -270,15 +247,8 @@ function tasteLockLines(brief: string, playbook: PlaybookBundle): string[] {
 }
 
 function playbookForBrief(brief: string, opts: PiBrainOptions): PlaybookBundle {
-  const categoryId = resolvePlaybookCategory(
-    brief,
-    opts.categoryId ?? DEFAULT_CATEGORY,
-  );
-  const designSystemId = resolveGenerateDesign(
-    brief,
-    opts.designSystemId ?? DEFAULT_DESIGN_SYSTEM,
-    categoryId,
-  );
+  const categoryId = resolvePlaybookCategory(brief, opts.categoryId ?? DEFAULT_CATEGORY);
+  const designSystemId = resolveGenerateDesign(brief, opts.designSystemId ?? DEFAULT_DESIGN_SYSTEM, categoryId);
   return loadPlaybook({
     skillRoot: opts.skillRoot,
     designSystemId,
@@ -286,20 +256,13 @@ function playbookForBrief(brief: string, opts: PiBrainOptions): PlaybookBundle {
   });
 }
 
-function writePiVisualReview(
-  root: string,
-  timed: TimedPiEvent[],
-): void {
+function writePiVisualReview(root: string, timed: TimedPiEvent[]): void {
   const ledger = inspectRunLedger(root);
   if (ledger.initialized) {
     const pageSeen =
       ledger.pages.length > 0 &&
       ledger.pages.every(
-        (page) =>
-          page.raster &&
-          page.imageEmitted &&
-          page.visualReview === "pass" &&
-          page.layout === "pass",
+        (page) => page.raster && page.imageEmitted && page.visualReview === "pass" && page.layout === "pass",
       );
     const seen = pageSeen && (!ledger.tasteGateEnabled || ledger.deckTasteReview === "pass");
     fs.writeFileSync(
@@ -330,9 +293,7 @@ function writePiVisualReview(
   }
   const evidence = skillStackEvidence(timed);
   const rasterDir = path.join(root, "_agent", "rasters");
-  const rasters = fs.existsSync(rasterDir)
-    ? fs.readdirSync(rasterDir).filter((f) => f.endsWith(".png"))
-    : [];
+  const rasters = fs.existsSync(rasterDir) ? fs.readdirSync(rasterDir).filter((f) => f.endsWith(".png")) : [];
   fs.writeFileSync(
     path.join(root, "_agent", "visual-review.json"),
     `${JSON.stringify(
@@ -377,16 +338,10 @@ function reloadProjectFromDisk(project: PptdProject): boolean {
   }
 }
 
-function readPiOutput(
-  root: string,
-): { deck: ComposeDeck; skillDeck?: SkillDeckInput } | undefined {
+function readPiOutput(root: string): { deck: ComposeDeck; skillDeck?: SkillDeckInput } | undefined {
   const skillFile = path.join(root, SKILL_REL);
   const composeFile = path.join(root, COMPOSE_REL);
-  const file = fs.existsSync(skillFile)
-    ? skillFile
-    : fs.existsSync(composeFile)
-      ? composeFile
-      : "";
+  const file = fs.existsSync(skillFile) ? skillFile : fs.existsSync(composeFile) ? composeFile : "";
   if (!file) return undefined;
   try {
     return parsePiJson(JSON.parse(fs.readFileSync(file, "utf8")) as unknown);
@@ -408,9 +363,9 @@ export function finishScriptedPages(
   if (scripted.length < 3 || skill.pages.length >= scripted.length) {
     return { deck: skill, added: 0 };
   }
-  const extra = scripted.slice(skill.pages.length).map((page, i) =>
-    paintExhibit(page, pal, skill.pages.length + i, scripted),
-  );
+  const extra = scripted
+    .slice(skill.pages.length)
+    .map((page, i) => paintExhibit(page, pal, skill.pages.length + i, scripted));
   return {
     deck: {
       title: skill.title || scripted[0]?.title || brief.slice(0, 24),
@@ -421,7 +376,9 @@ export function finishScriptedPages(
 }
 
 function previewAssistant(events: PiRpcLine[]): string[] {
-  return assistantTextsFromEvents(events).slice(-4).map((text) => text.slice(0, 800));
+  return assistantTextsFromEvents(events)
+    .slice(-4)
+    .map((text) => text.slice(0, 800));
 }
 
 function writeAssistantPreview(root: string, events: PiRpcLine[]): void {
@@ -429,9 +386,7 @@ function writeAssistantPreview(root: string, events: PiRpcLine[]): void {
   if (!texts.length) return;
   fs.writeFileSync(
     path.join(root, "_agent", "pi-assistant.txt"),
-    texts
-      .map((text, i) => `--- message ${i + 1} ---\n${text.slice(0, 12_000)}\n`)
-      .join("\n"),
+    texts.map((text, i) => `--- message ${i + 1} ---\n${text.slice(0, 12_000)}\n`).join("\n"),
     "utf8",
   );
 }
@@ -440,10 +395,7 @@ function stampNow(event: string): TimedPiEvent {
   return { at: new Date().toISOString(), event };
 }
 
-function pauseKindForPiFailure(
-  reason: string,
-  failure?: PiFailure,
-): AgentPauseKind {
+function pauseKindForPiFailure(reason: string, failure?: PiFailure): AgentPauseKind {
   if (failure?.kind === "rate_limit") return "rate_limit";
   if (failure?.kind === "auth") return "auth";
   if (failure?.kind === "client") return "model_unavailable";
@@ -480,11 +432,9 @@ export function clocksFromTimed(timed: TimedPiEvent[]): {
   }
   const slice = startIdx >= 0 ? timed.slice(startIdx) : timed;
   const agentStart = startIdx >= 0 ? timed[startIdx] : null;
-  const agentEnd =
-    [...slice].reverse().find((e) => e.event === "agent_end") ?? slice.at(-1) ?? null;
+  const agentEnd = [...slice].reverse().find((e) => e.event === "agent_end") ?? slice.at(-1) ?? null;
   const toolWrites = timed.filter((e) => e.event.startsWith("tool:write"));
-  const wallMs =
-    agentStart && agentEnd ? Date.parse(agentEnd.at) - Date.parse(agentStart.at) : null;
+  const wallMs = agentStart && agentEnd ? Date.parse(agentEnd.at) - Date.parse(agentStart.at) : null;
   return {
     agentStart: agentStart?.at ?? null,
     agentEnd: agentEnd?.at ?? null,
@@ -493,11 +443,7 @@ export function clocksFromTimed(timed: TimedPiEvent[]): {
   };
 }
 
-function writeTrace(
-  root: string,
-  payload: Record<string, unknown>,
-  timed: TimedPiEvent[],
-): void {
+function writeTrace(root: string, payload: Record<string, unknown>, timed: TimedPiEvent[]): void {
   const dir = path.join(root, "_agent");
   fs.mkdirSync(dir, { recursive: true });
   const clocks = clocksFromTimed(timed);
@@ -536,9 +482,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
   });
   const provider = opts.provider ?? envCfg.provider;
   const fallback = opts.fallback === true;
-  const model =
-    opts.model ??
-    (opts.provider && opts.provider !== envCfg.provider ? undefined : envCfg.model);
+  const model = opts.model ?? (opts.provider && opts.provider !== envCfg.provider ? undefined : envCfg.model);
   const timeoutMs = opts.timeoutMs ?? envCfg.timeoutMs;
   const bin = opts.bin ?? envCfg.bin;
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
@@ -640,8 +584,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
         const closedStack = mergeSkillStackEvidence(brain.timedEvents, project.rootDir);
         const ledger = inspectRunLedger(project.rootDir);
         const durableInterrupted = strictExecution && ledger.initialized && !ledger.composed;
-        const fixtureRateLimit =
-          failure?.kind === "rate_limit" && !closedStack.compose && closedStack.pageWrites < 2;
+        const fixtureRateLimit = failure?.kind === "rate_limit" && !closedStack.compose && closedStack.pageWrites < 2;
         if (durableInterrupted || fixtureRateLimit) {
           const kind = pauseKindForPiFailure(reason, failure);
           brain.pause = {
@@ -682,14 +625,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
         if (collected.length) writeAssistantPreview(project.rootDir, collected);
         if (brain.pause) return;
         if (!fallback) throw new Error(reason);
-        apply(
-          deterministicDeck(
-            brief,
-            playbook.designSystemId,
-            undefined,
-            playbook.categoryId,
-          ),
-        );
+        apply(deterministicDeck(brief, playbook.designSystemId, undefined, playbook.categoryId));
       };
 
       for (let i = 0; i < models.length; i++) {
@@ -727,9 +663,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
               ? stateModel.provider.trim()
               : provider;
           activeModel =
-            typeof stateModel?.id === "string" && stateModel.id.trim()
-              ? stateModel.id.trim()
-              : candidate ?? model;
+            typeof stateModel?.id === "string" && stateModel.id.trim() ? stateModel.id.trim() : (candidate ?? model);
           const modelInputs = Array.isArray(stateModel?.input)
             ? stateModel.input.filter((input): input is string => typeof input === "string")
             : [];
@@ -794,10 +728,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
             lastFailure = failure;
             lastReason = failure!.message;
             lastStderr = session.getStderr();
-            appendTrace(
-              brain,
-              [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`],
-            );
+            appendTrace(brain, [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`]);
             continue;
           }
           if (failure?.kind === "rate_limit" && failure.retryAfterMs) {
@@ -805,11 +736,10 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
             appendTrace(brain, [`retry-429:${waitMs}ms`]);
             await sleep(waitMs);
             const progress = skillStackEvidence(brain.timedEvents);
-            const resume =
-              strictExecution
-                ? `Continue the gated run from disk. Satisfy the current blockers in order: exact sources, selected preview, committed/read design contract, contract-bound todo, every page render and review, structural review, full-deck overview and grounded nine-axis review, then compose. Current blockers: ${inspectRunLedger(project.rootDir).composeBlockers.join("; ")}`
-                : progress.outline || progress.pageWrites > 0
-                  ? "Continue the OpenKimi stack from disk. Call render_page or review_pages, then compose_deck. Do not start over. Do not dump skill-deck.json."
+            const resume = strictExecution
+              ? `Continue the gated run from disk. Satisfy the current blockers in order: exact sources, selected preview, committed/read design contract, contract-bound todo, every page render and review, structural review, full-deck overview and grounded nine-axis review, then compose. Current blockers: ${inspectRunLedger(project.rootDir).composeBlockers.join("; ")}`
+              : progress.outline || progress.pageWrites > 0
+                ? "Continue the OpenKimi stack from disk. Call render_page or review_pages, then compose_deck. Do not start over. Do not dump skill-deck.json."
                 : prompt;
             const again = await session.promptAndWait(resume, timeoutMs);
             collected = [...events, ...again];
@@ -820,10 +750,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
               lastFailure = failure;
               lastReason = failure!.message;
               lastStderr = session.getStderr();
-              appendTrace(
-                brain,
-                [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`],
-              );
+              appendTrace(brain, [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`]);
               continue;
             }
           }
@@ -863,11 +790,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
             evidence = skillStackEvidence(brain.timedEvents);
             failure = classifyPiEvents(again) ?? failure;
           }
-          if (
-            !stackReady() &&
-            failure?.kind === "rate_limit" &&
-            failure.retryable
-          ) {
+          if (!stackReady() && failure?.kind === "rate_limit" && failure.retryable) {
             const waitMs = Math.min(45_000, Math.max(1_000, failure.retryAfterMs ?? 8_000));
             appendTrace(brain, [`retry-429-stack:${waitMs}ms`]);
             await sleep(waitMs);
@@ -908,8 +831,8 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
               strictExecution
                 ? `gated OpenKimi run incomplete: ${inspectRunLedger(project.rootDir).composeBlockers.join("; ")}`
                 : evidence.ok && !evidence.renderCoverage
-                ? `render_page covered ${evidence.renderPages}/${evidence.pageWrites} pages — need every page the user sees`
-                : evidence.reason,
+                  ? `render_page covered ${evidence.renderPages}/${evidence.pageWrites} pages — need every page the user sees`
+                  : evidence.reason,
             );
             return;
           }
@@ -924,10 +847,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
             if (shouldSwitchPiModel(failure)) {
               lastFailure = failure;
               lastReason = failure!.message;
-              appendTrace(
-                brain,
-                [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`],
-              );
+              appendTrace(brain, [`${failure?.retiredModel ? "retired" : "quota"}:${candidate}`]);
               continue;
             }
             if (failure) {
@@ -1003,14 +923,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
             return;
           }
           if (!fallback) throw err;
-          apply(
-            deterministicDeck(
-              brief,
-              playbook.designSystemId,
-              undefined,
-              playbook.categoryId,
-            ),
-          );
+          apply(deterministicDeck(brief, playbook.designSystemId, undefined, playbook.categoryId));
           return;
         } finally {
           unsubscribe?.();
@@ -1038,9 +951,7 @@ export function createPiBrain(opts: PiBrainOptions = {}): PiBrain {
           return;
         }
         step.status = "completed";
-        step.summary = brain.usedPi
-          ? `pi-rpc · skill`
-          : `fallback · ${brain.fallbackReason ?? ""}`;
+        step.summary = brain.usedPi ? `pi-rpc · skill` : `fallback · ${brain.fallbackReason ?? ""}`;
         step.detail = opts.onRuntimeEvent ? "" : brain.eventTrace.join("\n");
         if (hooks.streamDetail && step.detail) {
           await hooks.streamDetail(step.detail, (partial) => {

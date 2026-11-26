@@ -10,43 +10,55 @@ export const inject = ['slots'];
  * invocation API, so use its slot/ARIA controls without touching private stores.
  */
 function activateSettingsControl(ctx) {
-    const trigger = document.querySelector('[data-slot="sidebar.settings"] [data-slot="settings.trigger"]')
-        ?.closest('button');
-    if (trigger && !trigger.disabled) {
-        trigger.click();
+    try {
+        const trigger = document
+            .querySelector('[data-slot="sidebar.settings"] [data-slot="settings.trigger"]')
+            ?.closest('button');
+        if (trigger && !trigger.disabled) {
+            trigger.click();
+            return true;
+        }
+        const launcher = document.querySelector('[data-slot="sidebar.settings"] [data-slot="settings.launcher"] button[aria-haspopup="menu"]');
+        if (!launcher || launcher.disabled)
+            return false;
+        if (launcher.getAttribute('aria-expanded') !== 'true') {
+            launcher.click();
+            return false; // React mounts the portal menu before the next poll.
+        }
+        const shortcuts = ctx.get('shortcuts');
+        const aria = shortcuts?.catalog.getSnapshot().find((row) => String(row.id) === 'settings.open')?.aria;
+        const matches = [...document.querySelectorAll('[role="menu"] button[role="menuitem"]')].filter((button) => {
+            if (button.disabled)
+                return false;
+            // ja/es/fr 等菜单文案不是「设置 / Settings」，先认快捷键。
+            if (aria && button.getAttribute('aria-keyshortcuts') === aria)
+                return true;
+            // The user may unbind the command; the official zh/en menu remains usable.
+            const label = button.cloneNode(true);
+            label.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove());
+            return ['设置', 'Settings'].includes(label.textContent?.trim() ?? '');
+        });
+        // 找不到唯一菜单项时返回 false，由轮询超时通知 oss:dsh-settings-failed。
+        if (matches.length !== 1)
+            return false;
+        matches[0].click();
         return true;
     }
-    const launcher = document.querySelector('[data-slot="sidebar.settings"] [data-slot="settings.launcher"] button[aria-haspopup="menu"]');
-    if (!launcher || launcher.disabled)
+    catch {
         return false;
-    if (launcher.getAttribute('aria-expanded') !== 'true') {
-        launcher.click();
-        return false; // React mounts the portal menu before the next poll.
     }
-    const shortcuts = ctx.get('shortcuts');
-    const aria = shortcuts?.catalog.getSnapshot().find(row => String(row.id) === 'settings.open')?.aria;
-    const matches = [...document.querySelectorAll('[role="menu"] button[role="menuitem"]')]
-        .filter(button => {
-        if (button.disabled)
-            return false;
-        if (aria && button.getAttribute('aria-keyshortcuts') === aria)
-            return true;
-        // The user may unbind the command; the official zh/en menu remains usable.
-        const label = button.cloneNode(true);
-        label.querySelectorAll('[aria-hidden="true"]').forEach(node => node.remove());
-        return ['设置', 'Settings'].includes(label.textContent?.trim() ?? '');
-    });
-    if (matches.length !== 1)
-        return false;
-    matches[0].click();
-    return true;
 }
 /** The hub inside the iframe follows DSH's own Language setting. */
 let currentLang = 'zh';
 function activeLang(ctx) {
     try {
         const locale = ctx.get('locale');
-        return locale?.getLocale?.().active === 'en' ? 'en' : 'zh';
+        const active = locale?.getLocale?.().active;
+        // 旧夹具没有 locale，或 active 为空，继续用中文。
+        if (!active)
+            return 'zh';
+        // rc.5 增加了 ja/es/fr/de/ru/pt。只有 zh、zh-CN、zh_TW 这类中文标记显示中文。
+        return /^zh(?:$|[-_])/i.test(active) ? 'zh' : 'en';
     }
     catch {
         return 'zh';
@@ -56,9 +68,7 @@ function slideTitle() {
     return currentLang === 'en' ? 'Slides' : '演示文稿';
 }
 function slideDescription() {
-    return currentLang === 'en'
-        ? 'Turn one sentence into a polished slide deck'
-        : '一句话把想法变成漂亮的演示文稿';
+    return currentLang === 'en' ? 'Turn one sentence into a polished slide deck' : '一句话把想法变成漂亮的演示文稿';
 }
 /** Push the active locale into every app iframe the plugin mounted. */
 function broadcastLang() {
@@ -79,7 +89,7 @@ function settingsModalOpen() {
 /** Any other dialog holding the modal layer — e.g. the settings.onboarding
  *  key prompt that re-mounts on a fresh home — blocks `settings.open`. */
 function otherDialogOpen() {
-    return (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcut-modal="settings"])') !== null);
+    return document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcut-modal="settings"])') !== null;
 }
 /** The slot renderer marks each mount site with `data-slot` — the anchor is
  *  absent on pages (like Personal's) that never render `sidebar.settings`. */
@@ -187,7 +197,12 @@ function driveSettingsOpen(ctx, finish, notify) {
 let pageDestination;
 const pageListeners = new Set();
 function SlidesPage() {
-    const destination = React.useSyncExternalStore(listener => { pageListeners.add(listener); return () => { pageListeners.delete(listener); }; }, () => pageDestination);
+    const destination = React.useSyncExternalStore((listener) => {
+        pageListeners.add(listener);
+        return () => {
+            pageListeners.delete(listener);
+        };
+    }, () => pageDestination);
     return (_jsx("iframe", { title: "DSH SlideStudio", src: destination ?? `/app/hub.html?lang=${currentLang}`, style: { display: 'block', width: '100%', height: '100%', minHeight: '80vh', border: 0 } }));
 }
 function SlidesEntryIcon({ size = 16 }) {
@@ -197,7 +212,7 @@ const PANEL = 'slides';
 /** Public composer takeover: accidental Work entry remains readable, with no
  * prompt box that can bypass the editor's project/intent checks. */
 function registerSessionEntry(ctx) {
-    ctx.inject(['sessions'], inner => {
+    ctx.inject(['sessions'], (inner) => {
         const sessions = inner.get('sessions');
         const ReadOnlyComposer = ({ matched }) => {
             const [busy, setBusy] = React.useState(false);
@@ -208,12 +223,18 @@ function registerSessionEntry(ctx) {
                 setError('');
                 try {
                     const response = await fetch(`/slides/state/${encodeURIComponent(matched)}`);
-                    const state = await response.json();
+                    const state = (await response.json());
                     if (!response.ok || !state.binding?.projectRoot)
                         throw new Error(state.error || (english ? 'Deck unavailable' : '找不到对应的演示文稿'));
-                    const query = new URLSearchParams({ project: state.binding.projectRoot, session: matched, workspace: '1', live: '1', lang: currentLang });
+                    const query = new URLSearchParams({
+                        project: state.binding.projectRoot,
+                        session: matched,
+                        workspace: '1',
+                        live: '1',
+                        lang: currentLang,
+                    });
                     pageDestination = `/app/index.html?${query}`;
-                    pageListeners.forEach(listener => listener());
+                    pageListeners.forEach((listener) => listener());
                     const personal = ctx.get('personal');
                     if (!personal?.open?.(PANEL))
                         ctx.get('layout')?.selectPanel(PANEL);
@@ -225,27 +246,52 @@ function registerSessionEntry(ctx) {
                     setBusy(false);
                 }
             };
-            return _jsxs("section", { "aria-label": english ? 'SlideStudio generation history' : '演示文稿生成记录', style: { padding: '16px 20px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 12, background: 'var(--dsw-alias-button-elevated-fill, #fff)', color: 'var(--dsw-alias-label-primary, #222)' }, children: [_jsx("strong", { children: english ? 'Continue editing in SlideStudio' : '请在演示文稿中继续编辑' }), _jsx("p", { style: { margin: '8px 0 12px', fontSize: 13 }, children: english ? 'This conversation is the generation history. Open the deck to edit, continue generation or stop it.' : '这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。' }), _jsx("button", { type: "button", disabled: busy, onClick: () => { void open(); }, style: { font: 'inherit', padding: '8px 14px', border: '1px solid var(--dsw-alias-border-l3, #ddd)', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer' }, children: busy ? (english ? 'Opening…' : '正在打开…') : (english ? 'Open in SlideStudio' : '在演示文稿中继续') }), error && _jsx("p", { role: "alert", children: error })] });
+            return (_jsxs("section", { "aria-label": english ? 'SlideStudio generation history' : '演示文稿生成记录', style: {
+                    padding: '16px 20px',
+                    border: '1px solid var(--dsw-alias-border-l3, #ddd)',
+                    borderRadius: 12,
+                    background: 'var(--dsw-alias-button-elevated-fill, #fff)',
+                    color: 'var(--dsw-alias-label-primary, #222)',
+                }, children: [_jsx("strong", { children: english ? 'Continue editing in SlideStudio' : '请在演示文稿中继续编辑' }), _jsx("p", { style: { margin: '8px 0 12px', fontSize: 13 }, children: english
+                            ? 'This conversation is the generation history. Open the deck to edit, continue generation or stop it.'
+                            : '这里保留生成记录。修改内容、继续生成或停止生成，请打开对应的演示文稿。' }), _jsx("button", { type: "button", disabled: busy, onClick: () => {
+                            void open();
+                        }, style: {
+                            font: 'inherit',
+                            padding: '8px 14px',
+                            border: '1px solid var(--dsw-alias-border-l3, #ddd)',
+                            borderRadius: 8,
+                            background: 'transparent',
+                            color: 'inherit',
+                            cursor: 'pointer',
+                        }, children: busy ? (english ? 'Opening…' : '正在打开…') : english ? 'Open in SlideStudio' : '在演示文稿中继续' }), error && _jsx("p", { role: "alert", children: error })] }));
         };
         inner.slots.inject('conversation.composer', () => {
             let remove;
             let signature = '';
             const update = () => {
                 const owned = Object.entries(sessions.list.getSnapshot().byId)
-                    .filter(([, row]) => row.projectionValues?.agentPreset === 'slides').map(([id]) => id).sort();
+                    .filter(([, row]) => row.projectionValues?.agentPreset === 'slides')
+                    .map(([id]) => id)
+                    .sort();
                 const next = JSON.stringify(owned);
                 if (next === signature)
                     return;
                 signature = next;
                 remove?.();
                 const ids = new Set(owned);
-                remove = inner.slots.register({ name: 'conversation.composer', priority: -100,
+                remove = inner.slots.register({
+                    name: 'conversation.composer',
+                    priority: -100,
                     select: (owner) => owner.sessionId && ids.has(owner.sessionId) ? owner.sessionId : null,
                 }, ReadOnlyComposer);
             };
             update();
             const off = sessions.list.subscribe(update);
-            return () => { off(); remove?.(); };
+            return () => {
+                off();
+                remove?.();
+            };
         });
     });
 }

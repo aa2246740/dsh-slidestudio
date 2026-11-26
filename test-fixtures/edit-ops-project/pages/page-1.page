@@ -1,0 +1,31 @@
+pageType: cover
+elements:
+  - elementId: title
+    elementType: text
+    bounds:
+      - 80
+      - 180
+      - 640
+      - 90
+    content:
+      text: 经营分析汇报
+      fontSize: 44
+      bold: true
+      color: "#111827"
+      align:
+        - left
+        - middle
+  - elementId: subtitle
+    elementType: text
+    bounds:
+      - 80
+      - 282
+      - 640
+      - 40
+    content:
+      text: 编辑操作检查用稿
+      fontSize: 18
+      color: "#374151"
+      align:
+        - left
+        - top

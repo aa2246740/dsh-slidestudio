@@ -1,13 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, join, resolve } from "node:path";
-import { homedir } from "node:os";
+import path, { isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { get, request } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as setTimeout$1 } from "node:timers/promises";
-import { apply as apply$1 } from "@open-slidestudio/dsh-slides-host";
+import { apply as apply$1, resolveUserDshHome } from "@open-slidestudio/dsh-slides-host";
 // ../scripts/lib/observability.mjs
 const PRIVATE_KEYS = /(?:authorization|cookie|token|secret|password|api.?key|prompt|brief|text|content|attachment|email|phone|path|project|session)/i;
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,80}$/;
@@ -138,7 +137,7 @@ function createObservability({ app, version = "development", sink = (line) => co
 // lib/types/logger.js
 const logger = createObservability({
 	app: "slidestudio-plugin",
-	version: "0.2.9"
+	version: "0.3.0"
 });
 // lib/types/editor-sidecar.js
 const HOP_HEADERS = /* @__PURE__ */ new Set([
@@ -255,60 +254,139 @@ async function waitForEditor(origin, timeoutMs = 15e3) {
 	} while (Date.now() < deadline);
 	return false;
 }
-// lib/types/slides-preset.js
-/** The slide preset's director persona, kept verbatim with the standalone bundle. */
-const SLIDES_PERSONA_PREFIX = [
-	"You are the DSH SlideStudio slides director. Working directory is {{cwd}}.",
-	"Write user-facing progress and explanations in the language of the user brief.",
-	"Treat clear user instructions as authorization; do not ask for a second confirmation for a whole-deck edit or a reversible styling change.",
-	"When a missing preference materially affects the result, use ask_user_question with concise options or free text. Wait for its native answer and continue the same task. Never invent an answer or repeat a cancelled question.",
-	"Use only the product PPT tools and ask_user_question. Never write YAML except through write_page.",
-	"Pass every tool's declared fields directly at the top level; never wrap them in an arguments object.",
-	"write_page elements use elementId, elementType, bounds [x,y,w,h], and content.text.",
-	"Put fontSize, fontFamily, color, and align directly on content; content.style is",
-	"only a string theme reference such as $title, never an object. Put layoutRole on the element.",
-	"Charts are data.cols + data.rows and series[].type/encode.",
-	"After adopt, every write_page color MUST be official #RRGGBB or a",
-	"Theme.colors $token that already resolves to that pack PART B",
-	"【Color Palette】 hex. Prefer pack hexes. Host does not fill",
-	"Theme.colors; empty-create $primary is #2563EB and is not a pack",
-	"color. Never host navy #06223F. Never 澄光 memory chrome (#FDC356) on",
-	"another pack. Never omit shape fill expecting a default; omitted",
-	"fill is no paint and must not become white. Set an explicit pack fill.",
-	"Copy the adopted pack's official PART A/B craft: body titles are",
-	"assertion-sentence conclusions with a one-line scope subtitle; body",
-	"pages carry a chapter breadcrumb; source/footnote bottom-left and",
-	"page number bottom-right. Host will not paint YAML or Theme.colors.",
-	"Use inspect_capabilities and the tools actually supplied for this session.",
-	"Provider-hosted search or image tools are available only when explicitly supplied; do not infer them from a model name.",
-	"search_image and generate_image remain product tools that write media/ for PPTD.",
-	"If imageSearch or imageGenerate is on, BATCH search_image and generate_image for every photo-led page into media/ with unique ids BEFORE write_page. Do not stop after the cover image. Mark photo-led pages with the photo exhibit in write_todo; a photo page whose media image is missing or reused is refused. Do not reuse one src as another page's full-bleed.",
-	"Splitting a section into more pages is fine: update write_todo with the new pageIds before writing them; a page not in the todo is refused."
-].join("\n");
-function registerSlidesPreset(ctx) {
-	const presets = ctx.get("agentPresets");
-	if (!presets?.register) {
-		logger.log("warn", "agent_preset_unavailable");
-		return;
+// ../scripts/lib/feature-flags.mjs
+/**
+* Feature flags for SlideStudio.
+* Defaults live in config/feature-flags.json. Operators and agents override a
+* flag per checkout with SLIDESTUDIO_FLAG_<FLAG_NAME> (screaming snake of the
+* flag id): "1"/"true"/"on" -> true, "0"/"false"/"off" -> false, any other
+* non-empty string -> the literal value.
+*/
+function flagEnvName(name) {
+	return `SLIDESTUDIO_FLAG_${name.toUpperCase().replace(/-/g, "_")}`;
+}
+/** Matches config/feature-flags.json. Used only when that file was not packaged. */
+const SAFE_FLAG_DEFAULTS = {
+	project_retention_days: { default: 0 },
+	image_generate: { default: true },
+	mcp_register: { default: false }
+};
+function flagDefinitions(root) {
+	try {
+		return JSON.parse(readFileSync(path.join(root, "config/feature-flags.json"), "utf8")).flags ?? {};
+	} catch (error) {
+		if (error?.code === "ENOENT") return SAFE_FLAG_DEFAULTS;
+		throw error;
 	}
-	ctx.effect(() => presets.register({
-		id: "slides",
-		name: "DSH SlideStudio slides",
-		description: "Product PPT tools only. No bash, filesystem, or editor tools.",
-		order: 10,
-		plugins: [{
-			id: "persona",
-			name: "@deepseek-ai/dsh-persona",
-			config: {
-				prefix: SLIDES_PERSONA_PREFIX,
-				complete: true,
-				includeRuntimeContext: false
+}
+function loadFeatureFlags(root, env = process.env) {
+	const defs = flagDefinitions(root);
+	return {
+		defined: (name) => name in defs,
+		get(name) {
+			const raw = env[flagEnvName(name)];
+			if (raw != null && String(raw).trim() !== "") {
+				const value = String(raw).trim();
+				if (/^(1|true|on|yes)$/i.test(value)) return true;
+				if (/^(0|false|off|no)$/i.test(value)) return false;
+				const numeric = Number(value);
+				return Number.isFinite(numeric) ? numeric : value;
 			}
-		}, {
-			id: "slides-ask-user",
-			name: "@deepseek-ai/dsh-tool-ask-user"
-		}]
-	}));
+			return defs[name]?.default;
+		}
+	};
+}
+// lib/types/mcp-register.js
+/** Server key and tool namespace registered with the DSH MCP manager. */
+const SLIDES_MCP_SERVER_NAME = "slidestudio";
+/** Matches DSH rc.5 `mcp-client` template syntax (`${...}`), which has no escape form. */
+const TEMPLATE_SYNTAX = /\$\{[^}]*\}/;
+const defaultFlag = (repoRoot) => loadFeatureFlags(repoRoot).get("mcp_register") === true;
+/** Prefer the bundled package, fall back to the checkout workspace build. */
+function resolveSlidesMcpCli(repoRoot, exists = existsSync) {
+	return [join(repoRoot, "node_modules", "@open-slidestudio", "slides-mcp", "dist", "cli.js"), join(repoRoot, "packages", "slides-mcp", "dist", "cli.js")].find((file) => exists(file));
+}
+/**
+* Build a DSH 0.2.2-rc.5 `McpServerRegistration` guaranteed free of `${...}`
+* template tokens (which rc.5 rejects or expands as `${credential:...}`).
+* Paths in `dataRoot`/`editorOrigin`/`repoRoot` containing `${...}` are
+* base64url-encoded via `--config-b64`; if `execPath` or `cliPath` itself
+* contains `${...}`, returns `undefined` so the caller fails closed.
+*/
+function slidesMcpRegistration(options, cliPath, execPath = process.execPath) {
+	if (TEMPLATE_SYNTAX.test(execPath) || TEMPLATE_SYNTAX.test(cliPath)) return void 0;
+	if (TEMPLATE_SYNTAX.test(options.dataRoot) || TEMPLATE_SYNTAX.test(options.editorOrigin) || TEMPLATE_SYNTAX.test(options.repoRoot)) return {
+		transport: "stdio",
+		command: execPath,
+		args: [
+			cliPath,
+			"--config-b64",
+			Buffer.from(JSON.stringify({
+				dataRoot: options.dataRoot,
+				editorBaseUrl: options.editorOrigin,
+				repoRoot: options.repoRoot
+			}), "utf8").toString("base64url")
+		]
+	};
+	return {
+		transport: "stdio",
+		command: execPath,
+		args: [
+			cliPath,
+			"--data-root",
+			options.dataRoot,
+			"--editor-url",
+			options.editorOrigin
+		],
+		cwd: options.repoRoot
+	};
+}
+/**
+* Optionally contribute the bundled slides-mcp server to the DSH MCP manager
+* (`mcpManager.register`, DSH 0.2.2-rc.5+) for this plugin's lifetime. Off by
+* default behind the `mcp_register` flag. On hosts without the manager (rc.2)
+* it logs a warning and returns without side effects; a registration failure
+* (for example a user-configured server with the same name) never blocks the
+* plugin from loading.
+*/
+function registerSlidesMcp(ctx, options, deps = {}) {
+	const log = deps.log ?? ((level, event, fields) => logger.log(level, event, fields));
+	if (!(deps.flagEnabled ?? defaultFlag)(options.repoRoot)) return "disabled";
+	const manager = ctx.get("mcpManager");
+	if (!manager || typeof manager.register !== "function") {
+		log("warn", "mcp_manager_unavailable", { server: SLIDES_MCP_SERVER_NAME });
+		return "mcp_manager_unavailable";
+	}
+	const cliPath = resolveSlidesMcpCli(options.repoRoot, deps.exists);
+	if (!cliPath) {
+		log("warn", "slides_mcp_cli_missing", { server: SLIDES_MCP_SERVER_NAME });
+		return "slides_mcp_cli_missing";
+	}
+	const entry = slidesMcpRegistration(options, cliPath, deps.execPath);
+	if (!entry) {
+		log("warn", "mcp_register_template_path_refused", { server: SLIDES_MCP_SERVER_NAME });
+		return "template_path_refused";
+	}
+	ctx.effect(() => {
+		let dispose;
+		try {
+			dispose = manager.register(SLIDES_MCP_SERVER_NAME, entry);
+			log("info", "mcp_registered", { server: SLIDES_MCP_SERVER_NAME });
+		} catch (error) {
+			log("warn", "mcp_register_failed", {
+				server: SLIDES_MCP_SERVER_NAME,
+				reason: error instanceof Error ? error.message : String(error)
+			});
+		}
+		return () => {
+			try {
+				dispose?.();
+			} catch (error) {
+				log("warn", "mcp_unregister_failed", { reason: error instanceof Error ? error.message : String(error) });
+			}
+		};
+	});
+	return "registered";
 }
 // lib/types/dsh-slidestudio.js
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
@@ -317,10 +395,8 @@ const name = "dsh-slidestudio";
 const inject = [
 	"webServer",
 	"connection",
-	"tools",
-	"agents",
-	"attachments",
-	"llm"
+	"llm",
+	"attachments"
 ];
 const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
 const SIDECAR_RESTART_COOLDOWN_MS = 2e3;
@@ -511,13 +587,19 @@ function apply(ctx) {
 	const checkoutRoot = fileURLToPath(new URL("../..", import.meta.url));
 	const repoRoot = resolve(existsSync(join(packageRoot, "apps/native-web/src/server.mjs")) ? packageRoot : checkoutRoot);
 	const editorOrigin = `http://127.0.0.1:${EDITOR_PORT}`;
-	const dataRoot = resolveDataDirectory(repoRoot, ctx.get("profileContext")?.home || process.env.DSH_HOME || join(homedir(), ".dsh"), process.env.SLIDESTUDIO_DATA_DIR);
-	registerSlidesPreset(ctx);
+	const home = resolveUserDshHome();
+	const dataRoot = resolveDataDirectory(repoRoot, home, process.env.SLIDESTUDIO_DATA_DIR);
 	applySlidesHostAny(ctx, {
 		workspaceRoot: repoRoot,
 		dataRoot,
 		editorBaseUrl: editorOrigin,
-		personal: true
+		personal: true,
+		dshHome: home
+	});
+	registerSlidesMcp(ctx, {
+		repoRoot,
+		dataRoot,
+		editorOrigin
 	});
 	const supervisor = createEditorSupervisor({
 		repoRoot,

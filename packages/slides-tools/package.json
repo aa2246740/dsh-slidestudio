@@ -1,0 +1,39 @@
+{
+  "name": "@open-slidestudio/slides-tools",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Host-agnostic canonical slide tool contract shared by the DSH Hub, the MCP server and the core agent loop.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tool-names": {
+      "types": "./dist/tool-names.d.ts",
+      "import": "./dist/tool-names.js"
+    },
+    "./internal/*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@open-slidestudio/pptd-v2": "0.1.0",
+    "@open-slidestudio/presentation-run": "0.1.0",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

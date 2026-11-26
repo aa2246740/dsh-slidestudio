@@ -49,9 +49,7 @@ export const DEFAULT_FONT_PAIR: FontPair = { latin: "Arial", ea: "微软雅黑" 
  */
 export const CHART_FONT_FACE = `${DEFAULT_FONT_PAIR.latin}***${DEFAULT_FONT_PAIR.ea}`;
 
-const FONT_BY_NAME = new Map(
-  SLIDE_FONTS.map((entry) => [entry.name.toLowerCase(), entry]),
-);
+const FONT_BY_NAME = new Map(SLIDE_FONTS.map((entry) => [entry.name.toLowerCase(), entry]));
 
 export function fontEntry(name: string): FontEntry | undefined {
   return FONT_BY_NAME.get(name.trim().toLowerCase());
@@ -82,13 +80,7 @@ export function fontCss(family: string | FontPair | undefined): string {
   const pair = resolveFontPair(family);
   const latin = fontEntry(pair.latin);
   const ea = fontEntry(pair.ea);
-  const families = [
-    pair.latin,
-    ...(latin?.fallbacks ?? []),
-    pair.ea,
-    ...(ea?.fallbacks ?? []),
-    "sans-serif",
-  ];
+  const families = [pair.latin, ...(latin?.fallbacks ?? []), pair.ea, ...(ea?.fallbacks ?? []), "sans-serif"];
   const seen = new Set<string>();
   const stack: string[] = [];
   for (const name of families) {
@@ -130,51 +122,54 @@ export function resolveFontPair(family: string | FontPair | undefined): FontPair
  * a role out of "得意黑" or "Source Han Serif".
  */
 const KNOWN_FONT_ROLES: Record<string, string> = {
-  "misans": "hei",
+  misans: "hei",
   "noto sans sc": "hei",
   "noto sans cjk sc": "hei",
   "source han sans": "hei",
   "source han sans sc": "hei",
-  "思源黑体": "hei",
-  "阿里妈妈数黑体": "hei",
-  "得意黑": "kai",
+  思源黑体: "hei",
+  阿里妈妈数黑体: "hei",
+  得意黑: "kai",
   "smiley sans": "kai",
-  "liter": "hei",
-  "hedvigletterssans": "hei",
-  "quattrocentosans": "hei",
-  "coda": "hei",
-  "jersey15": "hei",
-  "jersey20charted": "hei",
-  "inter": "hei",
-  "思源宋体": "song",
+  liter: "hei",
+  hedvigletterssans: "hei",
+  quattrocentosans: "hei",
+  coda: "hei",
+  jersey15: "hei",
+  jersey20charted: "hei",
+  inter: "hei",
+  思源宋体: "song",
   "source han serif": "song",
   "source han serif sc": "song",
   "noto serif sc": "song",
   "noto serif cjk sc": "song",
   "noto serif cjk tc": "song",
-  "霞鹜新致宋": "song",
-  "lxgwxinzhissong": "song",
-  "unna": "song",
-  "oranienbaum": "song",
-  "sortsmillgoudy": "song",
-  "times": "song",
-  "cambria": "song",
-  "阿里妈妈刀隶体": "kai",
-  "阿里妈妈东方大楷": "kai",
-  "站酷文艺体": "kai",
-  "站酷庆科黄油体": "kai",
-  "飞波正点体": "kai",
-  "程荣光刻楷": "kai",
+  霞鹜新致宋: "song",
+  lxgwxinzhissong: "song",
+  unna: "song",
+  oranienbaum: "song",
+  sortsmillgoudy: "song",
+  times: "song",
+  cambria: "song",
+  阿里妈妈刀隶体: "kai",
+  阿里妈妈东方大楷: "kai",
+  站酷文艺体: "kai",
+  站酷庆科黄油体: "kai",
+  飞波正点体: "kai",
+  程荣光刻楷: "kai",
   "lxgw bright": "kai",
   "zcool kuaile": "kai",
   "long cang": "kai",
-  "精品点阵体": "kai",
-  "pressstart2p": "kai",
-  "luckiestguy": "kai",
+  精品点阵体: "kai",
+  pressstart2p: "kai",
+  luckiestguy: "kai",
 };
 
 const FONT_ROLE_RULES: readonly { role: string; pattern: RegExp }[] = [
-  { role: "kai", pattern: /kaiti|楷体|楷|calligraphy|handwrit|script|brush|cursive|kai|行书|隶书/i },
+  {
+    role: "kai",
+    pattern: /kaiti|楷体|楷|calligraphy|handwrit|script|brush|cursive|kai|行书|隶书/i,
+  },
   { role: "fangsong", pattern: /fangsong|仿宋|仿/i },
   { role: "song", pattern: /songti|simsun|serif|song|宋体|宋|明朝|明/i },
   { role: "hei", pattern: /hei|gothic|sans|黑|雅黑|圆体/i },
@@ -234,7 +229,8 @@ export function normalizeFontFamily(value: unknown): {
     const ea = typeof rec.ea === "string" ? rec.ea.trim() : "";
     if (!latin && !ea) return { fontFamily: { ...DEFAULT_FONT_PAIR } };
     const next: FontPair = {
-      latin: latin && isSlideFont(latin) ? canonicalFontName(latin) : nearestFont(latin || DEFAULT_FONT_PAIR.latin, "latin"),
+      latin:
+        latin && isSlideFont(latin) ? canonicalFontName(latin) : nearestFont(latin || DEFAULT_FONT_PAIR.latin, "latin"),
       ea: ea && isSlideFont(ea) ? canonicalFontName(ea) : nearestFont(ea || DEFAULT_FONT_PAIR.ea, "ea"),
     };
     const original = { latin, ea };

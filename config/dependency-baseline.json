@@ -30,6 +30,7 @@
     "package.json dependencies @deepseek-ai/dsh-jobs",
     "package.json dependencies @deepseek-ai/dsh-llm-deepseek",
     "package.json dependencies @deepseek-ai/dsh-output-retention",
+    "package.json dependencies @deepseek-ai/dsh-ptc-runtime",
     "package.json dependencies @deepseek-ai/dsh-sdk-protocol",
     "package.json dependencies @deepseek-ai/dsh-session-persistence",
     "package.json dependencies @deepseek-ai/dsh-session-query",

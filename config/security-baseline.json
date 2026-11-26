@@ -1,9 +1,15 @@
 {
   "version": 1,
-  "reviewedAt": "2026-11-03",
-  "expires": "2026-12-03",
-  "rationale": "Reviewed after upgrading the compatible copies: vite 6.4.5, zod 4.6.7, @modelcontextprotocol/client 2.4.0, undici 8.12.3, fast-uri 3.1.9, fflate 0.8.3, protobufjs 7.6.6, and brace-expansion 5.0.12. The entries below still match advisories whose only fix is a breaking major. glob 13.0.6 is nested in pinned @earendil-works/pi-coding-agent 0.80.10 and is patched only by glob >=14.0.2; the pi-coding-agent major bump was declined. minimatch is patched only in >=11.0.1, while eslint 10.13.0 depends on minimatch 10. image-size 1.2.1 is required by pptxgenjs 3.x (^1.2.1); the patched release is 2.0.3+ and npm's fix is pptxgenjs 4. zod 4 is installed at 4.6.7, which is outside GHSA-mrhx-c7xc-m3w5; the advisory range <4.6.6 still matches the zod 3.25.76 copies in agent-core, design-brain, pptd, and pptd-v2, and those packages cannot take zod 4 without an API migration. This exception does not accept new advisories or critical findings.",
+  "reviewedAt": "2026-11-27",
+  "expires": "2026-12-27",
+  "rationale": "Reviewed for the 0.3.0 release. All remaining findings are inherited through pinned upstream dependencies whose only fix is a breaking major or an unused transitive AWS SDK XML parser. fast-xml-parser 5.7.3 (low, GHSA-474x-hrwr-fgx4) is nested inside @earendil-works/pi-ai -> @aws-sdk/client-bedrock-runtime -> @aws-sdk/xml-builder, which SlideStudio does not call. glob 13.0.6 is nested in pinned @earendil-works/pi-coding-agent 0.80.10 and requires glob >=14.0.2. minimatch (GHSA-g3hv-75wg-m249, advisory range >=7.0.0 <11.0.1) is required at 10.x by eslint 10.13.0 and typescript-eslint 8.72.0. image-size 1.2.1 is required by pptxgenjs 3.x (^1.2.1). zod 4 is installed at 4.6.7 outside GHSA-mrhx-c7xc-m3w5, while legacy packages keep zod 3.25.76. This exception does not accept new advisories or critical findings.",
   "findings": [
+    {
+      "name": "fast-xml-parser",
+      "severity": "low",
+      "url": "https://github.com/advisories/GHSA-474x-hrwr-fgx4",
+      "range": "<=5.11.2"
+    },
     {
       "name": "glob",
       "severity": "moderate",
@@ -26,7 +32,7 @@
       "name": "minimatch",
       "severity": "moderate",
       "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249",
-      "range": "<11.0.1"
+      "range": ">=7.0.0 <11.0.1"
     },
     {
       "name": "zod",

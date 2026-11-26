@@ -5,7 +5,17 @@ import ts from "typescript";
 import { ROOT, appFor, sourceFiles } from "./source-files.mjs";
 
 const LEGACY = ["pptd", "agent-core", "exporter-pptx", "design-brain"];
-const NATIVE = ["pptd-v2", "project-store", "canvas-session", "exporter-native", "presentation-run", "dsh-slides-host"];
+const NATIVE = [
+  "pptd-v2",
+  "project-store",
+  "canvas-session",
+  "exporter-native",
+  "presentation-run",
+  "slides-tools",
+  "slides-runtime",
+  "slides-mcp",
+  "dsh-slides-host",
+];
 
 export function moduleImports(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);

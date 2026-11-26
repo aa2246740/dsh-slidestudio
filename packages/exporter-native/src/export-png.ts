@@ -1,9 +1,5 @@
 import zlib from "node:zlib";
-import {
-  loadProject,
-  toRgbHex,
-  type PptdProject,
-} from "@open-slidestudio/pptd-v2";
+import { loadProject, sanitizeProjectColors, toRgbHex, type PptdProject } from "@open-slidestudio/pptd-v2";
 
 export type PngExportResult = {
   data: Buffer;
@@ -75,11 +71,8 @@ function parseHexRgb(hex: string): [number, number, number] {
  * Offline PNG of slide size + background color only.
  * This is not a picture of the page. Visual QA must use native #slide.
  */
-export function exportPageToPng(
-  source: string | PptdProject,
-  pageIndex = 0,
-): PngExportResult {
-  const project = typeof source === "string" ? loadProject(source) : source;
+export function exportPageToPng(source: string | PptdProject, pageIndex = 0): PngExportResult {
+  const project = sanitizeProjectColors(typeof source === "string" ? loadProject(source) : source).project;
   const page = project.pages[pageIndex];
   if (!page) throw new Error(`page index out of range: ${pageIndex}`);
   const [width, height] = project.presentation.size;
@@ -92,7 +85,7 @@ export function exportPageToPng(
         : "#ffffff";
   return {
     data: solidPng(width, height, parseHexRgb(hex)),
-    filename: `${((project.presentation.title ?? "slide").replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_+|_+$/g, "") || "slide")}-p${pageIndex + 1}.png`,
+    filename: `${(project.presentation.title ?? "slide").replace(/[^\w\u4e00-\u9fff-]+/g, "_")}-p${pageIndex + 1}.png`,
     width,
     height,
     pageIndex,

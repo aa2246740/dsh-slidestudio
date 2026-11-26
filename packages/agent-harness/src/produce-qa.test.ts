@@ -22,7 +22,10 @@ describe("produce QA", () => {
     const fixed = repairPaintedPage(page);
     assert.ok(fixed.elements[0]!.bounds[0] + fixed.elements[0]!.bounds[2] <= 960);
     assert.ok(fixed.elements[0]!.bounds[1] + fixed.elements[0]!.bounds[3] <= 540);
-    assert.equal(qaPaintedPage(fixed).some((i) => i.code === "overflow"), false);
+    assert.equal(
+      qaPaintedPage(fixed).some((i) => i.code === "overflow"),
+      false,
+    );
   });
 
   it("flags a dropped locked number", () => {

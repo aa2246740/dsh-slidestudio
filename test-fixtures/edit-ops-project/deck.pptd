@@ -1,0 +1,86 @@
+version: v2
+title: 编辑操作检查
+size:
+  - 960
+  - 540
+theme:
+  colors:
+    primary: "#2563EB"
+    text: "#111111"
+    background: "#FFFFFF"
+  textStyles:
+    title:
+      fontSize: 36
+      bold: true
+      color: $text
+    body:
+      fontSize: 18
+      color: $text
+pages:
+  - pages/page-1.page
+  - pages/page-2.page
+  - pages/page-3.page
+  - pages/page-4.page
+  - pages/page-5.page
+masters:
+  - id: main
+    name: 母版
+    elements:
+      - elementId: pageno
+        elementType: text
+        bounds:
+          - 880
+          - 506
+          - 60
+          - 22
+        layoutRole: footer
+        content:
+          text: "{page}"
+          field: pageNumber
+          fontSize: 12
+          color: "#6B7280"
+          align:
+            - right
+            - middle
+layouts:
+  - id: body
+    name: 正文
+    masterId: main
+    elements:
+      - elementId: header-rule
+        elementType: line
+        bounds:
+          - 0
+          - 56
+          - 960
+          - 2
+        viewBox:
+          - 960
+          - 2
+        points: 0,1 960,1
+        border:
+          width: 1.5
+          color: "#1D4ED8"
+      - elementId: logo
+        elementType: image
+        bounds:
+          - 24
+          - 12
+          - 120
+          - 40
+        src: media/logo-a.png
+      - elementId: footer
+        elementType: text
+        bounds:
+          - 40
+          - 506
+          - 600
+          - 22
+        layoutRole: footer
+        content:
+          text: 编辑操作检查 · 正文
+          fontSize: 12
+          color: "#6B7280"
+          align:
+            - left
+            - middle

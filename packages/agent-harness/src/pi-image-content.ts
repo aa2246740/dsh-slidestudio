@@ -24,10 +24,10 @@ export type PiVerifiedImageContent = Readonly<{
   payload: PiImageContentPayload;
 }>;
 
-export type PiRenderedPageContent = PiVerifiedImageContent & Readonly<{
-  payload: PiImageContentPayload &
-    Readonly<{ imageKind: "page"; pageId: string; pageRevision: number }>;
-}>;
+export type PiRenderedPageContent = PiVerifiedImageContent &
+  Readonly<{
+    payload: PiImageContentPayload & Readonly<{ imageKind: "page"; pageId: string; pageRevision: number }>;
+  }>;
 
 function parsePayload(raw: Record<string, unknown>): PiImageContentPayload {
   const legacyPage = raw.imageKind === undefined && raw.pageId !== undefined;
@@ -51,12 +51,7 @@ function parsePayload(raw: Record<string, unknown>): PiImageContentPayload {
     ...(pageId ? { pageId } : {}),
     ...(Number.isSafeInteger(pageRevision) ? { pageRevision } : {}),
   };
-  if (
-    !payload.src ||
-    !/^[a-f0-9]{64}$/.test(payload.sha256) ||
-    !payload.deliveryToken ||
-    !payload.subjectId
-  ) {
+  if (!payload.src || !/^[a-f0-9]{64}$/.test(payload.sha256) || !payload.deliveryToken || !payload.subjectId) {
     throw new Error("image tool did not return verifiable image-delivery metadata");
   }
   if (
@@ -111,11 +106,7 @@ export function buildPiRenderedPageContent(
   rawPayload: Record<string, unknown>,
 ): PiRenderedPageContent {
   const result = buildPiImageContent(cwd, toolText, rawPayload);
-  if (
-    result.payload.imageKind !== "page" ||
-    !result.payload.pageId ||
-    !result.payload.pageRevision
-  ) {
+  if (result.payload.imageKind !== "page" || !result.payload.pageId || !result.payload.pageRevision) {
     throw new Error("render_page did not return a page image");
   }
   return result as PiRenderedPageContent;

@@ -100,7 +100,7 @@ profile。Hub 在 `http://127.0.0.1:13080`，编辑器在
 `npm run build:native`，启动用 `npm start`；测试命令见 [AGENTS.md](AGENTS.md)。
 开发 profile 是仓库中的 `.dsh/home`，不是桌面端正在使用的 Home。
 
-客户端编译还需插件目录中的开发依赖及 dshx 的 `externalClientBundle` 适配器。设置 `DSHX_HARNESS` 为含 `tools/dshx/src/client-build.js` 的 Harness 路径，在插件目录安装开发依赖后执行 `npm run build --prefix dsh-slidestudio`。官方 Harness 源码不需要修改。
+客户端编译使用插件目录里的 `dsh-slidestudio/tools/client-build.mjs`，不再读取 `DSHX_HARNESS` 或 `~/.config/dshx/harness`。在插件目录安装开发依赖后执行 `npm run build --prefix dsh-slidestudio`。官方 Harness 源码不需要修改。
 
 从本地源码链接切换到 npm 包时，当前 Host 可能仍缓存旧模块。安装后核对实际运行路径；若仍是旧源码，正常退出并重新打开 DSH，再检查项目与生成。桌面端卸载本地链接偶尔会留下同名软链接，应确认它已不在 profile 配置中且只指向旧源码，再由维护者处理；不要删除源码或项目目录。
 

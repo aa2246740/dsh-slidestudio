@@ -1,15 +1,15 @@
 {
   "name": "dsh-slidestudio",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "DSH SlideStudio — AI presentations with editable PPTX export for DeepSeek Harness",
   "type": "module",
   "main": "lib/dsh-slidestudio.js",
   "types": "lib/types/dsh-slidestudio.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsdown",
+    "build": "node -e \"const fs=require('node:fs');for(const p of ['lib','tsconfig.tsbuildinfo'])fs.rmSync(p,{recursive:true,force:true})\" && tsc -p tsconfig.json && tsdown",
     "lint": "eslint --config ../eslint.config.mjs src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:client": "node --test scripts/test-settings.mjs scripts/test-data-directory.mjs scripts/test-sidecar-ready.mjs scripts/test-session-entry.mjs",
+    "test:client": "node --test scripts/test-settings.mjs scripts/test-data-directory.mjs scripts/test-sidecar-ready.mjs scripts/test-session-entry.mjs scripts/test-rc5-compat.mjs",
     "test": "vitest run --config ../vitest.config.mjs --project plugin",
     "test:list": "vitest list --config ../vitest.config.mjs --project plugin"
   },
@@ -44,7 +44,8 @@
     "locale/*.json"
   ],
   "engines": {
-    "node": "^22.19.0 || >=24.11.0"
+    "node": "^22.19.0 || >=24.9.0",
+    "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   },
   "license": "Apache-2.0",
   "dependencies": {

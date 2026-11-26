@@ -3,14 +3,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { proxyToSidecar, startEditorSidecar } from "./editor-sidecar.js";
 import { resolveDataDirectory } from "./data-directory.js";
 import { waitForEditor } from "./sidecar-ready.js";
 import type { ChildProcess } from "node:child_process";
-import { apply as applySlidesHost } from "@open-slidestudio/dsh-slides-host";
+import { apply as applySlidesHost, resolveUserDshHome } from "@open-slidestudio/dsh-slides-host";
 import { logger } from "./logger.js";
-import { registerSlidesPreset } from "./slides-preset.js";
+import { registerSlidesMcp, type McpRegisterContext } from "./mcp-register.js";
 
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
 const applySlidesHostAny = applySlidesHost as unknown as (ctx: Context, config: {
@@ -18,19 +17,14 @@ const applySlidesHostAny = applySlidesHost as unknown as (ctx: Context, config: 
   dataRoot?: string;
   editorBaseUrl?: string;
   personal?: boolean;
+  dshHome?: string;
 }) => void;
 
 export const name = "dsh-slidestudio";
-// slides-host services are injected through this wrapper so activation ordering
-// keeps `webServer`/`agents`/`llm` ready before the slice API mounts.
-export const inject = [
-  "webServer",
-  "connection",
-  "tools",
-  "agents",
-  "attachments",
-  "llm",
-];
+// The DSH 4-service thin shell: SlideStudio runs its own agent loop
+// (@open-slidestudio/slides-runtime) and needs only these Host services ready
+// before the slice API mounts. `mcpManager` is read optionally (rc.5).
+export const inject = ["webServer", "connection", "llm", "attachments"];
 
 // Local service surface — the dev cordis package lacks the Host's augmentations,
 // so declare the ones this entry touches.
@@ -273,17 +267,21 @@ export function apply(ctx: Context) {
       : checkoutRoot,
   );
   const editorOrigin = `http://127.0.0.1:${EDITOR_PORT}`;
-  const home = (ctx.get("profileContext") as { home?: string } | undefined)?.home
-    || process.env.DSH_HOME || join(homedir(), ".dsh");
+  // Same rule as the Host's own resolveDshHome: DSH_HOME (non-blank, `~`
+  // expanded), else ~/.dsh, so the Host profile service is not needed.
+  const home = resolveUserDshHome();
   const dataRoot = resolveDataDirectory(repoRoot, home, process.env.SLIDESTUDIO_DATA_DIR);
 
-  registerSlidesPreset(ctx);
   applySlidesHostAny(ctx, {
     workspaceRoot: repoRoot,
     dataRoot,
     editorBaseUrl: editorOrigin,
     personal: true,
+    dshHome: home,
   });
+  // Optional (flag `mcp_register`): contribute slides-mcp to the DSH 0.2.2-rc.5
+  // MCP manager; rc.2 hosts without mcpManager skip it with a warning.
+  registerSlidesMcp(ctx as unknown as McpRegisterContext, { repoRoot, dataRoot, editorOrigin });
 
   const supervisor = createEditorSupervisor({
     repoRoot,

@@ -2,13 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createEmptyProject, loadProject } from "@open-slidestudio/pptd-v2";
-import {
-  readRunLedger,
-  inspectRunLedger,
-  stableSha256,
-  pageHasReadableCopy,
-  pageIdMatchesFile,
-} from "@open-slidestudio/presentation-run";
+import { readRunLedger, inspectRunLedger, stableSha256, pageHasReadableCopy } from "@open-slidestudio/presentation-run";
 import { acquireProjectLease } from "./lease.js";
 import {
   classifyAgentError,
@@ -143,29 +137,41 @@ export class SliceSessionStore {
     const abs = path.join(this.slicesRoot(), slug);
     fs.mkdirSync(this.slicesRoot(), { recursive: true });
     fs.mkdirSync(abs);
-    createEmptyProject(abs, {
-      title: input.title,
-      size: input.size ? [input.size[0], input.size[1]] : undefined,
-    });
-    const binding: SliceSessionBinding = {
-      version: 1,
-      dshSessionId: input.dshSessionId,
-      projectRoot: path.relative(this.workspaceRoot, abs),
-      design: input.design,
-      provider: input.provider,
-      createdAt: new Date().toISOString(),
-    };
-    fs.mkdirSync(path.join(abs, "_agent"), { recursive: true });
-    fs.writeFileSync(bindingPath(abs), `${JSON.stringify(binding, null, 2)}\n`);
-    this.index().set(input.dshSessionId, binding);
-    acquireProjectLease(abs, "dsh", input.dshSessionId);
-    return { binding, created: true };
+    try {
+      createEmptyProject(abs, {
+        title: input.title,
+        size: input.size ? [input.size[0], input.size[1]] : undefined,
+      });
+      const binding: SliceSessionBinding = {
+        version: 1,
+        dshSessionId: input.dshSessionId,
+        projectRoot: path.relative(this.workspaceRoot, abs),
+        design: input.design,
+        provider: input.provider,
+        createdAt: new Date().toISOString(),
+      };
+      fs.mkdirSync(path.join(abs, "_agent"), { recursive: true });
+      fs.writeFileSync(bindingPath(abs), `${JSON.stringify(binding, null, 2)}\n`);
+      acquireProjectLease(abs, "dsh", input.dshSessionId);
+      this.index().set(input.dshSessionId, binding);
+      return { binding, created: true };
+    } catch (error) {
+      this.evictCreatedProject(input.dshSessionId, abs);
+      throw error;
+    }
   }
 
-  updateProvider(
-    dshSessionId: string,
-    provider: { providerId: string; modelId: string },
-  ): void {
+  /** Roll back a freshly created slice directory if post-open setup (e.g. lease/runtime write) fails. */
+  evictCreatedProject(dshSessionId: string, projectRoot: string): void {
+    const resolved = path.resolve(projectRoot);
+    const root = path.resolve(this.slicesRoot());
+    if (resolved.startsWith(`${root}${path.sep}`)) {
+      fs.rmSync(resolved, { recursive: true, force: true });
+    }
+    this.bindings?.delete(dshSessionId);
+  }
+
+  updateProvider(dshSessionId: string, provider: { providerId: string; modelId: string }): void {
     const binding = this.bindingFor(dshSessionId);
     if (!binding) return;
     const next: SliceSessionBinding = { ...binding, provider };
@@ -213,13 +219,9 @@ export class SliceSessionStore {
     const phase = this.derivePhase(binding, root, pageCount);
     const error = readCurrentAgentError(root);
     const wait = readRateLimitWait(root);
-    const classified = error
-      ? classifyAgentError({ code: error.code, message: error.detail })
-      : undefined;
+    const classified = error ? classifyAgentError({ code: error.code, message: error.detail }) : undefined;
     const rateLimitWait =
-      phase.kind === "paused" && classified && isWaitAndResumeFault(classified) && wait
-        ? wait
-        : undefined;
+      phase.kind === "paused" && classified && isWaitAndResumeFault(classified) && wait ? wait : undefined;
     return {
       binding,
       project: { title, pageCount, deckSha256 },
@@ -228,11 +230,7 @@ export class SliceSessionStore {
     };
   }
 
-  private derivePhase(
-    binding: SliceSessionBinding,
-    root: string,
-    pageCount: number,
-  ): SlicePhase {
+  private derivePhase(binding: SliceSessionBinding, root: string, pageCount: number): SlicePhase {
     const ledger = readRunLedger(root);
     const lastTool = lastHandsTool(root) ?? "open_project";
     const error = readCurrentAgentError(root);
@@ -250,34 +248,23 @@ export class SliceSessionStore {
       ? fs.readdirSync(rasterDir).filter((name) => name.endsWith(".png"))
       : [];
     const rasterFile = pickRasterFile(rasterFiles, last.pageId);
-    const rasterBytes = rasterFile
-      ? fs.readFileSync(path.join(rasterDir, rasterFile))
-      : Buffer.alloc(0);
-    const rasterSha256 = rasterBytes.length
-      ? crypto.createHash("sha256").update(rasterBytes).digest("hex")
-      : "";
-    const review = [...ledger.facts].reverse().find(
-      (fact) =>
-        fact.type === "page.visual-review-recorded" && fact.pageId === last.pageId,
-    );
+    const rasterBytes = rasterFile ? fs.readFileSync(path.join(rasterDir, rasterFile)) : Buffer.alloc(0);
+    const rasterSha256 = rasterBytes.length ? crypto.createHash("sha256").update(rasterBytes).digest("hex") : "";
+    const review = [...ledger.facts]
+      .reverse()
+      .find((fact) => fact.type === "page.visual-review-recorded" && fact.pageId === last.pageId);
     const cover: PageEvidence = {
       pageId: last.pageId,
       revision: last.revision,
       pageSha256: last.pageSha256,
       rasterSha256,
       rasterUrl: `/slides/raster/${binding.dshSessionId}/${last.pageId}`,
-      reviewVerdict:
-        review?.type === "page.visual-review-recorded" ? review.verdict : "missing",
+      reviewVerdict: review?.type === "page.visual-review-recorded" ? review.verdict : "missing",
       layoutStatus: "unavailable",
     };
     const composed = inspectRunLedger(root).composed;
-    const lastLoaded = fs.existsSync(path.join(root, "deck.pptd"))
-      ? loadProject(root).pages.at(-1)
-      : undefined;
-    const closerOk =
-      !lastLoaded ||
-      pageCount < 2 ||
-      pageHasReadableCopy({ elements: lastLoaded.page.elements });
+    const lastLoaded = fs.existsSync(path.join(root, "deck.pptd")) ? loadProject(root).pages.at(-1) : undefined;
+    const closerOk = !lastLoaded || pageCount < 2 || pageHasReadableCopy({ elements: lastLoaded.page.elements });
     // Provider faults outrank the generic empty-closer page-ready state.
     // Temporary 429 stays paused so Retry-After can resume; token-plan / quota
     // stay paused for the operator.
@@ -323,9 +310,7 @@ export function pickRequestedRasterFile(files: string[], pageId: string): string
   const want = pageId.toLowerCase();
   const exact = pngs.find((name) => name.toLowerCase() === `${want}.png`);
   if (exact) return exact;
-  return pngs.find(
-    (name) => name.toLowerCase().startsWith(`${want}.`) || name.toLowerCase().startsWith(`${want}_`),
-  );
+  return pngs.find((name) => name.toLowerCase().startsWith(`${want}.`) || name.toLowerCase().startsWith(`${want}_`));
 }
 
 export function pickCoverRevision(
@@ -368,14 +353,4 @@ function lastHandsTool(projectRoot: string): string | undefined {
   }
 }
 
-export function yamlExistsForPage(projectRoot: string, pageId: string): boolean {
-  try {
-    if (!fs.existsSync(path.join(projectRoot, "deck.pptd"))) return false;
-    const project = loadProject(projectRoot);
-    if (project.pages.length === 0) return false;
-    const needle = pageId.toLowerCase();
-    return project.pages.some((loaded) => pageIdMatchesFile(needle, loaded.path));
-  } catch {
-    return false;
-  }
-}
+export { yamlExistsForPage } from "@open-slidestudio/slides-tools";

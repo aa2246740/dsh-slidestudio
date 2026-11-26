@@ -3,21 +3,28 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadProject } from "@open-slidestudio/pptd-v2";
 import { parseCanonicalPagePlan, type CanonicalPlanPage } from "./page-plan.js";
-import {
-  isCloserPage,
-  pageHasReadableCopy,
-  isPlaceholderReviewIssue,
-  persistPageKey,
-  renderedLayoutBlocksCompose,
-} from "./layout-qa.js";
+import { currentDiskPageFacts, planCoverageBlockers } from "./plan-coverage.js";
+import { isCloserPage, isPlaceholderReviewIssue, pageHasReadableCopy } from "./layout-qa.js";
 import { inspectProjectCapabilities } from "../capabilities.js";
 import { executionPolicyFor, leftoverComposeBlockers, yamlStructureBlockers } from "./run-ledger-policy.js";
+import { latestPageFacts } from "./page-revision-ledger.js";
+import type { LayoutRevisionFact } from "./layout-ledger.js";
+import type { TemplateComponentUsedFact } from "./template-component-ledger.js";
 import {
   MISSING_HOSTED_WEB_SEARCH_RECEIPT,
   hostedResearchNeedsWebSearchReceipt,
   ledgerHasSuccessfulWebSearch,
 } from "./hosted-web-search.js";
 import { spinWait, writeFileAtomic } from "./atomic-file.js";
+import { bytesSha256, stableSha256 } from "./hashing.js";
+import { inspectPageEvidence } from "./page-evidence.js";
+import { diskProject, layoutChromes, pageChromes } from "./page-chrome.js";
+import { composeLayoutChromes, composePageChromes } from "./compose-chromes.js";
+import { layoutComposeBlockers, renderedLayoutBlockers } from "./layout-compose-gate.js";
+import type { MaterialChunkFact, MaterialReadFact } from "./material-read-progress.js";
+export type { MaterialChunkFact } from "./material-read-progress.js";
+import type { MaterialFiguresFact, PageProvenanceFact } from "./material-figures.js";
+export type { MaterialFiguresFact, PageProvenanceFact } from "./material-figures.js";
 
 export const RUN_LEDGER_REL = path.join("_agent", "run-ledger.v1.json");
 /** Bump whenever rendered layout acceptance semantics change. */
@@ -56,11 +63,7 @@ export type TodoFact = Readonly<{
   todoSha256: string;
   itemCount: number;
   pageIds?: readonly string[];
-  pagePlan?: readonly Readonly<{
-    pageId: string;
-    title: string;
-    layoutFamily: string;
-  }>[];
+  pagePlan?: readonly CanonicalPlanPage[];
 }>;
 
 export type PageRevisionFact = Readonly<{
@@ -114,6 +117,8 @@ export type RasterFact = Readonly<{
   layoutGateVersion?: string;
   layoutStatus: "pass" | "fail" | "unavailable";
   layoutIssues: readonly PageLayoutIssue[];
+  /** Chrome fingerprint of the masters and layouts shown when rendered ("none" without one). */
+  chromeSha256?: string;
 }>;
 
 export type ImagePreparedFact = Readonly<{
@@ -173,6 +178,8 @@ export type DeckComposedFact = Readonly<{
   title: string;
   deckSha256: string;
   pageRevisions: Readonly<Record<string, string>>;
+  /** Chrome of the pages that showed a layout at compose time; absent when none did. */
+  pageChromes?: Readonly<Record<string, string>>;
 }>;
 
 export type WebSearchExecutedFact = Readonly<{
@@ -205,6 +212,7 @@ export type ExportSucceededFact = Readonly<{
 
 export type RunFact =
   | ReferenceChunkFact
+  | MaterialReadFact
   | TodoFact
   | PageRevisionFact
   | PageEditAuthorizationFact
@@ -215,7 +223,11 @@ export type RunFact =
   | StructuralReviewFact
   | DeckComposedFact
   | WebSearchExecutedFact
-  | ExportSucceededFact;
+  | ExportSucceededFact
+  | PageProvenanceFact
+  | MaterialFiguresFact
+  | LayoutRevisionFact
+  | TemplateComponentUsedFact;
 
 export type RunLedgerV1 = Readonly<{
   schemaVersion: 1;
@@ -243,6 +255,8 @@ export type PageEvidenceStatus = Readonly<{
   imageEmitted: boolean;
   visualReview: "pass" | "revise" | "missing";
   layout: "pass" | "fail" | "unavailable" | "missing";
+  /** The latest raster showed other masters or layouts than the deck now has; render again. */
+  chromeStale: boolean;
 }>;
 
 export type RunLedgerInspection = Readonly<{
@@ -258,7 +272,7 @@ export type RunLedgerInspection = Readonly<{
   composed: boolean;
 }>;
 
-function nowIso(): string {
+export function nowIso(): string {
   return new Date().toISOString();
 }
 
@@ -268,29 +282,9 @@ function asRecord(raw: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function stableValue(raw: unknown): unknown {
-  if (Array.isArray(raw)) return raw.map(stableValue);
-  const rec = asRecord(raw);
-  if (!rec) return raw;
-  return Object.fromEntries(
-    Object.keys(rec)
-      .sort()
-      .map((key) => [key, stableValue(rec[key])]),
-  );
-}
+export { bytesSha256, stableSha256 };
 
-export function stableSha256(raw: unknown): string {
-  return crypto
-    .createHash("sha256")
-    .update(JSON.stringify(stableValue(raw) ?? null))
-    .digest("hex");
-}
-
-export function bytesSha256(bytes: Buffer): string {
-  return crypto.createHash("sha256").update(bytes).digest("hex");
-}
-
-function factId(type: RunFact["type"], payload: unknown): string {
+export function factId(type: RunFact["type"], payload: unknown): string {
   return `${type}:${stableSha256(payload)}`;
 }
 
@@ -367,7 +361,19 @@ function ledgerFile(root: string): string {
 export function readRunLedger(root: string): RunLedgerV1 | undefined {
   const file = ledgerFile(root);
   if (!fs.existsSync(file)) return undefined;
-  return parseLedger(JSON.parse(fs.readFileSync(file, "utf8")) as unknown);
+  try {
+    return parseLedger(JSON.parse(fs.readFileSync(file, "utf8")) as unknown);
+  } catch {
+    // A crash or power loss can leave the atomic write as a zero-filled stub.
+    // Quarantine it so one damaged deck reads as "ledger not initialized"
+    // instead of throwing through every inspect/derive caller.
+    try {
+      fs.renameSync(file, `${file}.corrupt-${Date.now()}`);
+    } catch {
+      // best effort — an unreadable dir still must not throw here
+    }
+    return undefined;
+  }
 }
 
 function acquireLock(root: string): () => void {
@@ -409,16 +415,16 @@ function writeLedger(root: string, ledger: RunLedgerV1): void {
   writeFileAtomic(ledgerFile(root), `${JSON.stringify(ledger, null, 2)}\n`);
 }
 
-function mutateLedger(root: string, apply: (current: RunLedgerV1) => RunLedgerV1): RunLedgerV1 {
+export function mutateLedger(
+  root: string,
+  apply: (current: RunLedgerV1) => RunLedgerV1,
+): RunLedgerV1 {
   const release = acquireLock(root);
   try {
     const current = readRunLedger(root);
     if (!current) throw new Error("run ledger is not initialized");
     const next = apply(current);
-    // Reducers return the same object when nothing changed; a read-only
-    // mutation (e.g. an unchanged execution-policy ensure on a state poll)
-    // must not rewrite the whole ledger on disk.
-    if (next !== current) writeLedger(root, next);
+    writeLedger(root, next);
     return next;
   } finally {
     release();
@@ -451,15 +457,6 @@ export function ensureRunLedgerExecutionPolicy(
 ): RunLedgerV1 | undefined {
   const existing = readRunLedger(root);
   if (!existing) return undefined;
-  // Cheap early-out before taking the lock: hydrate() calls this on every
-  // /slides/state poll, so an already-matching policy must not churn the
-  // lock file or rewrite the ledger. The locked mutation re-validates below.
-  if (
-    existing.sourcePack.executionPolicy !== undefined &&
-    stableSha256(existing.sourcePack.executionPolicy) === stableSha256(executionPolicy)
-  ) {
-    return existing;
-  }
   return mutateLedger(root, (current) => {
     const currentPolicy = current.sourcePack.executionPolicy;
     if (currentPolicy && stableSha256(currentPolicy) !== stableSha256(executionPolicy)) {
@@ -474,10 +471,7 @@ export function ensureRunLedgerExecutionPolicy(
   });
 }
 
-export function ensureRunLedger(
-  root: string,
-  sourcePack: RunLedgerV1["sourcePack"],
-): RunLedgerV1 {
+export function ensureRunLedger(root: string, sourcePack: RunLedgerV1["sourcePack"]): RunLedgerV1 {
   const existing = readRunLedger(root);
   if (existing) {
     const merged = mergeCompatibleSourcePack(existing, sourcePack);
@@ -509,7 +503,8 @@ export function ensureRunLedger(
   }
 }
 
-function appendFact(root: string, fact: RunFact): RunLedgerV1 {
+/** Append-only ledger write with factId dedupe; shared by every fact recorder. */
+export function appendFact(root: string, fact: RunFact): RunLedgerV1 {
   return mutateLedger(root, (current) => {
     if (current.facts.some((item) => item.factId === fact.factId)) return current;
     return { ...current, updatedAt: fact.at, facts: [...current.facts, fact] };
@@ -530,6 +525,37 @@ export function recordReferenceChunk(
   });
 }
 
+export function recordMaterialChunk(
+  root: string,
+  context: RunToolContext,
+  input: Omit<MaterialChunkFact, "type" | "factId" | "at" | "contextEpochId">,
+): void {
+  const { chunkCount, ...identity } = input;
+  const payload = { ...identity, contextEpochId: context.contextEpochId };
+  appendFact(root, {
+    type: "material.chunk-returned",
+    factId: factId("material.chunk-returned", payload),
+    at: nowIso(),
+    ...payload,
+    ...(chunkCount !== undefined ? { chunkCount } : {}),
+  });
+}
+
+/** `material:<id>` design-source chunks already returned in this context epoch. */
+export function materialChunksRead(root: string, contextEpochId: string): ReadonlySet<string> {
+  const ledger = readRunLedger(root);
+  if (!ledger) return new Set();
+  return new Set(
+    ledger.facts
+      .filter(
+        (fact): fact is MaterialChunkFact =>
+          fact.type === "material.chunk-returned" &&
+          (!contextEpochId || fact.contextEpochId === contextEpochId),
+      )
+      .map((fact) => `${fact.materialId}#${fact.chunkIndex}`),
+  );
+}
+
 export function recordTodo(
   root: string,
   context: RunToolContext,
@@ -546,70 +572,21 @@ export function recordTodo(
     ...(pageIds.length ? { pageIds } : {}),
     pagePlan,
   };
+  // Returning to an earlier declaration is still a new ordered planning event.
   appendFact(root, {
     type: "todo.committed",
-    factId: factId("todo.committed", payload),
+    factId: factId("todo.committed", { ...payload, precedingFactId: ledger.facts.at(-1)?.factId }),
     at: nowIso(),
     ...payload,
   });
   return pagePlan;
 }
 
-function latestPageFacts(ledger: RunLedgerV1): Map<string, PageRevisionFact> {
-  const pages = new Map<string, PageRevisionFact>();
-  for (const fact of ledger.facts) {
-    if (fact.type === "page.revision-committed") pages.set(fact.pageId, fact);
-  }
-  return pages;
-}
-
-export function recordPageRevision(
-  root: string,
-  context: RunToolContext,
-  pageId: string,
-  page: unknown,
-): PageRevisionFact {
-  const ledger = readRunLedger(root);
-  if (!ledger) throw new Error("run ledger is not initialized");
-  const current = latestPageFacts(ledger).get(pageId);
-  const pageSha256 = stableSha256(page);
-  if (current?.pageSha256 === pageSha256) {
-    const lastReview = [...ledger.facts]
-      .reverse()
-      .find(
-        (fact): fact is VisualReviewFact =>
-          fact.type === "page.visual-review-recorded" &&
-          fact.pageId === pageId &&
-          fact.revision === current.revision &&
-          fact.pageSha256 === pageSha256,
-      );
-    if (lastReview?.verdict === "revise") {
-      throw new Error(`${pageId} must change after a revise review`);
-    }
-    return current;
-  }
-  const payload = {
-    contextEpochId: context.contextEpochId,
-    pageId,
-    revision: (current?.revision ?? 0) + 1,
-    pageSha256,
-  };
-  const fact: PageRevisionFact = {
-    type: "page.revision-committed",
-    factId: factId("page.revision-committed", payload),
-    at: nowIso(),
-    ...payload,
-  };
-  appendFact(root, fact);
-  return fact;
-}
-
-export function currentPageRevision(root: string, pageId: string): PageRevisionFact | undefined {
-  const ledger = readRunLedger(root);
-  if (!ledger) return undefined;
-  const pages = latestPageFacts(ledger);
-  return pages.get(pageId) ?? pages.get(persistPageKey(pageId));
-}
+export {
+  currentPageRevision,
+  latestPageFacts,
+  recordPageRevision,
+} from "./page-revision-ledger.js";
 
 /**
  * Authorize one editor-originated Agent rewrite of an exact page revision.
@@ -617,334 +594,7 @@ export function currentPageRevision(root: string, pageId: string): PageRevisionF
  * successful write changes the revision, the same grant cannot unlock another
  * write. Generation-time repaint protection therefore remains intact.
  */
-export function authorizePageEdits(
-  root: string,
-  inputs: readonly PageEditAuthorizationInput[],
-): readonly PageEditAuthorizationFact[] {
-  if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 64) {
-    throw new Error("editor edit pages must contain between 1 and 64 exact page revisions");
-  }
-  const ids = new Set<string>();
-  const normalized = inputs.map((input) => {
-    const authorizationId = input.authorizationId.trim();
-    const pageId = input.pageId.trim();
-    if (!authorizationId || authorizationId.length > 200) {
-      throw new Error("editor edit authorizationId is required and must be at most 200 characters");
-    }
-    if (!pageId || !Number.isSafeInteger(input.revision) || input.revision < 1) {
-      throw new Error("editor edit pageId and revision are required");
-    }
-    if (ids.has(pageId)) throw new Error(`editor edit page is duplicated: ${pageId}`);
-    ids.add(pageId);
-    if (!/^[a-f0-9]{64}$/.test(input.pageSha256)) {
-      throw new Error("editor edit pageSha256 must be the current 64-character sha256");
-    }
-    return { ...input, authorizationId, pageId };
-  });
-  let committed: readonly PageEditAuthorizationFact[] = [];
-  mutateLedger(root, (ledger) => {
-    const pages = latestPageFacts(ledger);
-    const at = nowIso();
-    const facts = normalized.map((input) => {
-      const current = pages.get(input.pageId);
-      if (
-        !current ||
-        current.revision !== input.revision ||
-        current.pageSha256 !== input.pageSha256
-      ) {
-        throw new Error(`${input.pageId} changed before the editor Agent turn started`);
-      }
-      const ttlMs = Math.min(15 * 60_000, Math.max(30_000, input.ttlMs ?? 10 * 60_000));
-      const payload = {
-        authorizationId: input.authorizationId,
-        source: "editor-agent" as const,
-        pageId: input.pageId,
-        revision: current.revision,
-        pageSha256: current.pageSha256,
-        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-      };
-      return {
-        type: "page.edit-authorized" as const,
-        factId: factId("page.edit-authorized", payload),
-        at,
-        ...payload,
-      };
-    });
-    committed = facts;
-    const newFacts = facts.filter(
-      (fact) => !ledger.facts.some((existing) => existing.factId === fact.factId),
-    );
-    return newFacts.length
-      ? { ...ledger, updatedAt: at, facts: [...ledger.facts, ...newFacts] }
-      : ledger;
-  });
-  return committed;
-}
-
-export function authorizePageEdit(
-  root: string,
-  input: PageEditAuthorizationInput,
-): PageEditAuthorizationFact {
-  return authorizePageEdits(root, [input])[0]!;
-}
-
-export type PageRewriteGate = Readonly<{
-  allowed: boolean;
-  pageId: string;
-  revision?: number;
-  reason: string;
-}>;
-
-type PageRewriteLifecycle =
-  | { state: "no-revision" }
-  | { state: "layout-open"; revision: number; reason: string }
-  | { state: "editor-auth"; revision: number; authorizationId: string }
-  | { state: "visual-revise"; revision: number }
-  | { state: "structural-fail"; revision: number }
-  | { state: "structural-pass"; revision: number }
-  | { state: "open"; revision: number };
-
-function structuralPassLockReason(pageId: string, revision: number): string {
-  return (
-    `${pageId} revision ${revision} already has a structural review pass. ` +
-    "Do not rewrite or append to this page. Move to the next committed todo page. " +
-    "A later write is allowed only when review_pages names this page as failing, or review_page explicitly returns revise for this current revision."
-  );
-}
-
-function namesPageForRepair(pageId: string, issues: readonly string[]): boolean {
-  return issues.some(
-    (issue) => issue === pageId || issue.startsWith(`${pageId}:`) || issue.includes(`[${pageId}]`),
-  );
-}
-
-function classifyPageRewrite(root: string, pageId: string): PageRewriteLifecycle {
-  const ledger = readRunLedger(root);
-  const current = ledger ? latestPageFacts(ledger).get(pageId) : undefined;
-  if (!ledger || !current) return { state: "no-revision" };
-
-  const raster = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is RasterFact =>
-        fact.type === "page.raster-committed" &&
-        fact.pageId === current.pageId &&
-        fact.revision === current.revision &&
-        fact.pageSha256 === current.pageSha256 &&
-        fact.layoutGateVersion === RENDERED_LAYOUT_GATE_VERSION,
-    );
-  if (!raster || raster.layoutStatus !== "pass") {
-    return {
-      state: "layout-open",
-      revision: current.revision,
-      reason: raster
-        ? `current deterministic layout is ${raster.layoutStatus}`
-        : "current revision has no deterministic raster",
-    };
-  }
-
-  const editorAuthorization = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is PageEditAuthorizationFact =>
-        fact.type === "page.edit-authorized" &&
-        fact.source === "editor-agent" &&
-        fact.pageId === current.pageId &&
-        fact.revision === current.revision &&
-        fact.pageSha256 === current.pageSha256 &&
-        Date.parse(fact.expiresAt) > Date.now(),
-    );
-  if (editorAuthorization) {
-    return {
-      state: "editor-auth",
-      revision: current.revision,
-      authorizationId: editorAuthorization.authorizationId,
-    };
-  }
-
-  const pageReview = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is VisualReviewFact =>
-        fact.type === "page.visual-review-recorded" &&
-        fact.pageId === current.pageId &&
-        fact.revision === current.revision &&
-        fact.pageSha256 === current.pageSha256 &&
-        fact.rasterSha256 === raster.rasterSha256,
-    );
-  if (pageReview?.verdict === "revise") {
-    return { state: "visual-revise", revision: current.revision };
-  }
-
-  const snapshot = currentRevisionSnapshot(ledger);
-  const structuralFail = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is StructuralReviewFact =>
-        fact.type === "deck.structural-review-recorded" &&
-        fact.reviewGateVersion === STRUCTURAL_REVIEW_GATE_VERSION &&
-        !fact.ok &&
-        sameRevisionSnapshot(fact.pageRevisions, snapshot),
-    );
-  if (structuralFail && namesPageForRepair(current.pageId, structuralFail.issues)) {
-    return { state: "structural-fail", revision: current.revision };
-  }
-  const structuralPass = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is StructuralReviewFact =>
-        fact.type === "deck.structural-review-recorded" &&
-        fact.reviewGateVersion === STRUCTURAL_REVIEW_GATE_VERSION &&
-        fact.ok &&
-        sameRevisionSnapshot(fact.pageRevisions, snapshot) &&
-        fact.pageRevisions[current.pageId] === current.pageSha256,
-    );
-  if (structuralPass) {
-    return { state: "structural-pass", revision: current.revision };
-  }
-  return { state: "open", revision: current.revision };
-}
-
-function gateFromRewriteLifecycle(pageId: string, life: PageRewriteLifecycle): PageRewriteGate {
-  switch (life.state) {
-    case "no-revision":
-      return { allowed: true, pageId, reason: "page has no committed revision" };
-    case "layout-open":
-      return { allowed: true, pageId, revision: life.revision, reason: life.reason };
-    case "editor-auth":
-      return {
-        allowed: true,
-        pageId,
-        revision: life.revision,
-        reason: `editor Agent edit ${life.authorizationId} authorized this exact revision`,
-      };
-    case "visual-revise":
-      return {
-        allowed: true,
-        pageId,
-        revision: life.revision,
-        reason: "current image review explicitly requires revision",
-      };
-    case "structural-fail":
-      return {
-        allowed: true,
-        pageId,
-        revision: life.revision,
-        reason: "current structural review explicitly names this page for repair",
-      };
-    case "structural-pass":
-      return {
-        allowed: false,
-        pageId,
-        revision: life.revision,
-        reason: structuralPassLockReason(pageId, life.revision),
-      };
-    case "open":
-      return {
-        allowed: true,
-        pageId,
-        revision: life.revision,
-        reason: "current revision has no structural review pass",
-      };
-  }
-}
-
-export function pageRewriteGate(root: string, pageId: string): PageRewriteGate {
-  return gateFromRewriteLifecycle(pageId, classifyPageRewrite(root, pageId));
-}
-
-export function recordRaster(
-  root: string,
-  page: PageRevisionFact,
-  input: Readonly<{
-    bytes: Buffer;
-    src: string;
-    width: number;
-    height: number;
-    layoutStatus: RasterFact["layoutStatus"];
-    layoutIssues: readonly PageLayoutIssue[];
-  }>,
-): { fact: RasterFact; deliveryToken: string } {
-  const rasterSha256 = bytesSha256(input.bytes);
-  const payload = {
-    pageId: page.pageId,
-    revision: page.revision,
-    pageSha256: page.pageSha256,
-    rasterSha256,
-    src: input.src,
-    width: input.width,
-    height: input.height,
-    layoutGateVersion: RENDERED_LAYOUT_GATE_VERSION,
-    layoutStatus: input.layoutStatus,
-    layoutIssues: input.layoutIssues,
-  };
-  const fact: RasterFact = {
-    type: "page.raster-committed",
-    factId: factId("page.raster-committed", payload),
-    at: nowIso(),
-    ...payload,
-  };
-  appendFact(root, fact);
-  return { fact, deliveryToken: crypto.randomUUID() };
-}
-
-export function recordImagePrepared(
-  root: string,
-  context: RunToolContext,
-  raster: RasterFact,
-  deliveryToken: string,
-): ImagePreparedFact {
-  const payload = {
-    contextEpochId: context.contextEpochId,
-    pageId: raster.pageId,
-    revision: raster.revision,
-    pageSha256: raster.pageSha256,
-    rasterSha256: raster.rasterSha256,
-    deliveryToken,
-  };
-  const fact: ImagePreparedFact = {
-    type: "page.image-result-prepared",
-    factId: factId("page.image-result-prepared", payload),
-    at: nowIso(),
-    ...payload,
-  };
-  appendFact(root, fact);
-  return fact;
-}
-
-export function recordImageEmitted(
-  root: string,
-  context: RunToolContext,
-  deliveryToken: string,
-): ImageEmittedFact {
-  const ledger = readRunLedger(root);
-  if (!ledger) throw new Error("run ledger is not initialized");
-  const prepared = [...ledger.facts]
-    .reverse()
-    .find(
-      (fact): fact is ImagePreparedFact =>
-        fact.type === "page.image-result-prepared" &&
-        fact.deliveryToken === deliveryToken,
-    );
-  if (!prepared) throw new Error("image delivery token is not prepared for this context epoch");
-  const payload = {
-    contextEpochId: context.contextEpochId,
-    commandId: context.commandId,
-    pageId: prepared.pageId,
-    revision: prepared.revision,
-    pageSha256: prepared.pageSha256,
-    rasterSha256: prepared.rasterSha256,
-    deliveryToken,
-  };
-  const fact: ImageEmittedFact = {
-    type: "page.image-content-emitted",
-    factId: factId("page.image-content-emitted", payload),
-    at: nowIso(),
-    ...payload,
-  };
-  appendFact(root, fact);
-  return fact;
-}
+export { authorizePageEdit, authorizePageEdits } from "./page-edit-authorization.js";
 
 export function recordVisualReview(
   root: string,
@@ -1012,9 +662,7 @@ export function recordVisualReview(
     );
   if (!raster) throw new Error("page review has no matching raster evidence");
   if (input.verdict === "pass" && raster.layoutStatus !== "pass") {
-    const issues = raster.layoutIssues
-      .map((issue) => `${issue.code}: ${issue.detail}`)
-      .join("; ");
+    const issues = raster.layoutIssues.map((issue) => `${issue.code}: ${issue.detail}`).join("; ");
     throw new Error(
       `review_page cannot pass while rendered layout is ${raster.layoutStatus}: ${issues || "no trustworthy layout result"}. ` +
         "Record verdict=revise with these issues, rewrite the page, render it again, and review the new revision.",
@@ -1039,9 +687,13 @@ export function recordVisualReview(
     verdict: input.verdict,
     issues: input.issues,
   };
+  // A pass after a revise must not deduplicate into the older, superseded pass.
   const fact: VisualReviewFact = {
     type: "page.visual-review-recorded",
-    factId: factId("page.visual-review-recorded", payload),
+    factId: factId("page.visual-review-recorded", {
+      ...payload,
+      precedingFactId: ledger.facts.at(-1)?.factId,
+    }),
     at: nowIso(),
     ...payload,
   };
@@ -1049,9 +701,9 @@ export function recordVisualReview(
   return fact;
 }
 
-function currentRevisionSnapshot(ledger: RunLedgerV1): Record<string, string> {
+export function currentRevisionSnapshot(ledger: RunLedgerV1, root: string): Record<string, string> {
   return Object.fromEntries(
-    [...latestPageFacts(ledger).values()]
+    [...currentDiskPageFacts(root, ledger).values()]
       .sort((a, b) => a.pageId.localeCompare(b.pageId))
       .map((page) => [page.pageId, page.pageSha256]),
   );
@@ -1066,7 +718,7 @@ export function recordStructuralReview(
   if (!ledger) throw new Error("run ledger is not initialized");
   const payload = {
     reviewGateVersion: STRUCTURAL_REVIEW_GATE_VERSION,
-    pageRevisions: currentRevisionSnapshot(ledger),
+    pageRevisions: currentRevisionSnapshot(ledger, root),
     ok,
     issues,
   };
@@ -1080,8 +732,7 @@ export function recordStructuralReview(
   return fact;
 }
 
-
-function sameRevisionSnapshot(
+export function sameRevisionSnapshot(
   expected: Readonly<Record<string, string>>,
   actual: Readonly<Record<string, string>>,
 ): boolean {
@@ -1131,9 +782,7 @@ export function inspectRunLedger(
     "";
   const reads = new Set(
     ledger.facts
-      .filter(
-        (fact): fact is ReferenceChunkFact => fact.type === "reference.chunk-returned",
-      )
+      .filter((fact): fact is ReferenceChunkFact => fact.type === "reference.chunk-returned")
       .map((fact) => `${fact.sourceId}:${fact.fileSha256}:${fact.chunkIndex}:${fact.chunkSha256}`),
   );
   const missingReferenceChunks: { sourceId: string; chunkIndex: number }[] = [];
@@ -1154,55 +803,16 @@ export function inspectRunLedger(
   const todo = [...ledger.facts]
     .reverse()
     .find((fact): fact is TodoFact => fact.type === "todo.committed");
-  const currentPages = latestPageFacts(ledger);
-  const pages: PageEvidenceStatus[] = [];
-  for (const page of currentPages.values()) {
-    const raster = [...ledger.facts]
-      .reverse()
-      .find(
-        (fact): fact is RasterFact =>
-          fact.type === "page.raster-committed" &&
-          fact.pageId === page.pageId &&
-          fact.revision === page.revision &&
-          fact.pageSha256 === page.pageSha256 &&
-          fact.layoutGateVersion === RENDERED_LAYOUT_GATE_VERSION,
-      );
-    const emitted = raster
-      ? [...ledger.facts]
-          .reverse()
-          .find(
-            (fact): fact is ImageEmittedFact =>
-              fact.type === "page.image-content-emitted" &&
-              fact.pageId === page.pageId &&
-              fact.revision === page.revision &&
-              fact.pageSha256 === page.pageSha256 &&
-              fact.rasterSha256 === raster.rasterSha256,
-          )
-      : undefined;
-    const review = emitted
-      ? [...ledger.facts]
-          .reverse()
-          .find(
-            (fact): fact is VisualReviewFact =>
-              fact.type === "page.visual-review-recorded" &&
-              fact.pageId === page.pageId &&
-              fact.revision === page.revision &&
-              fact.pageSha256 === page.pageSha256 &&
-              fact.rasterSha256 === raster?.rasterSha256,
-          )
-      : undefined;
-    pages.push({
-      pageId: page.pageId,
-      revision: page.revision,
-      pageSha256: page.pageSha256,
-      raster: Boolean(raster),
-      imageEmitted: Boolean(emitted),
-      visualReview: review?.verdict ?? "missing",
-      layout: raster?.layoutStatus ?? "missing",
-    });
-  }
-  pages.sort((a, b) => a.pageId.localeCompare(b.pageId));
-  const revisionSnapshot = currentRevisionSnapshot(ledger);
+  const currentPages = currentDiskPageFacts(root, ledger);
+  const project = diskProject(root);
+  const chromes = pageChromes(project);
+  const pages = inspectPageEvidence(
+    ledger,
+    currentPages.values(),
+    RENDERED_LAYOUT_GATE_VERSION,
+    chromes,
+  );
+  const revisionSnapshot = currentRevisionSnapshot(ledger, root);
   const structural = [...ledger.facts]
     .reverse()
     .find(
@@ -1221,53 +831,37 @@ export function inspectRunLedger(
   if (missingReferenceChunks.length) {
     blockers.push(`${missingReferenceChunks.length} required source chunks unread`);
   }
-  blockers.push(...yamlStructureBlockers(root, persistPageKey));
+  blockers.push(...yamlStructureBlockers(root));
   blockers.push(...leftoverComposeBlockers(root));
-  for (const page of pages) {
-    const raster = [...ledger.facts]
-      .reverse()
-      .find(
-        (fact): fact is RasterFact =>
-          fact.type === "page.raster-committed" &&
-          fact.pageId === page.pageId &&
-          fact.revision === page.revision &&
-          fact.pageSha256 === page.pageSha256 &&
-          fact.layoutGateVersion === RENDERED_LAYOUT_GATE_VERSION,
-      );
-    const layout = raster?.layoutStatus ?? "missing";
-    if (renderedLayoutBlocksCompose(layout, currentRenderedLayoutRequired)) {
-      const codes = (raster?.layoutIssues ?? [])
-        .filter((issue) => issue.severity === "error")
-        .map((issue) => issue.code);
-      const extra = codes.length ? ` (${codes.join(",")})` : "";
-      const required = currentRenderedLayoutRequired && layout !== "fail"
-        ? " (current deterministic raster pass required)"
-        : "";
-      blockers.push(`${page.pageId}: rendered layout ${layout}${extra}${required}`);
-    }
-  }
+  blockers.push(
+    ...renderedLayoutBlockers(
+      ledger,
+      pages,
+      currentRenderedLayoutRequired,
+      RENDERED_LAYOUT_GATE_VERSION,
+    ),
+  );
+  blockers.push(...layoutComposeBlockers(project, ledger, pages));
   // Plan coverage is kernel-agnostic: a text-only model still owes an explicit
   // todo and every planned page on disk. Only the image-delivery and visual
   // review ceremony is excused when the model cannot see images.
   if (!todo) blockers.push("write_todo missing");
   if (todo) {
-    const planned = Array.isArray(todo.pageIds) && todo.pageIds.length
-      ? todo.pageIds.map((pageId) => persistPageKey(pageId)).filter((key) => key.length > 0)
-      : undefined;
-    if (planned) {
-      const current = pages.map((page) => persistPageKey(page.pageId));
-      const missing = planned.filter((key) => !current.includes(key));
-      const extra = current.filter((key) => !planned.includes(key));
-      if (missing.length) blockers.push(`todo missing pages: ${missing.join(",")}`);
-      if (extra.length) blockers.push(`pages not in todo: ${extra.join(",")}`);
+    if (Array.isArray(todo.pageIds) && todo.pageIds.length) {
+      blockers.push(...planCoverageBlockers(root, todo, currentPages));
     } else if (pages.length !== todo.itemCount) {
-      blockers.push(`todo has ${todo.itemCount} pages but ${pages.length} current page revisions exist`);
+      blockers.push(
+        `todo has ${todo.itemCount} pages but ${pages.length} current page revisions exist`,
+      );
     }
   }
   if (claimVisual) {
-    for (const page of pages) {
-      if (!page.imageEmitted) blockers.push(`${page.pageId}: image content not emitted to the model`);
-      if (page.visualReview !== "pass") blockers.push(`${page.pageId}: visual review ${page.visualReview}`);
+    // A page whose layout changed needs render_page first; its image and review come after that.
+    for (const page of pages.filter((item) => !item.chromeStale)) {
+      if (!page.imageEmitted)
+        blockers.push(`${page.pageId}: image content not emitted to the model`);
+      if (page.visualReview !== "pass")
+        blockers.push(`${page.pageId}: visual review ${page.visualReview}`);
     }
   }
   if (executionPolicy.structuralReviewRequired) {
@@ -1280,13 +874,16 @@ export function inspectRunLedger(
   ) {
     blockers.push(MISSING_HOSTED_WEB_SEARCH_RECEIPT);
   }
+  // A layout edit leaves page revisions alone, so the layout chrome is part of what was composed.
+  const layoutChromeNow = composeLayoutChromes(chromes, root);
   const composedFact = [...ledger.facts]
     .reverse()
     .find(
       (fact): fact is DeckComposedFact =>
         fact.type === "deck.composed" &&
         (!epoch || fact.contextEpochId === epoch) &&
-        sameRevisionSnapshot(fact.pageRevisions, revisionSnapshot),
+        sameRevisionSnapshot(fact.pageRevisions, revisionSnapshot) &&
+        stableSha256(fact.pageChromes ?? {}) === stableSha256(layoutChromeNow),
     );
   return {
     initialized: true,
@@ -1313,9 +910,16 @@ export function requireReferencesComplete(root: string, contextEpochId: string):
 }
 
 export function readCommittedPagePlan(root: string): readonly CanonicalPlanPage[] {
-  const todo = readRunLedger(root)?.facts.filter((fact): fact is TodoFact => fact.type === "todo.committed").at(-1);
-  try { return parseCanonicalPagePlan(todo?.pagePlan); }
-  catch { throw new Error("write_todo must commit a complete page plan before write_page; legacy ID-only plans require replan"); }
+  const todo = readRunLedger(root)
+    ?.facts.filter((fact): fact is TodoFact => fact.type === "todo.committed")
+    .at(-1);
+  try {
+    return parseCanonicalPagePlan(todo?.pagePlan);
+  } catch {
+    throw new Error(
+      "write_todo must commit a complete page plan before write_page; legacy ID-only plans require replan",
+    );
+  }
 }
 
 export function requireTodo(root: string): void {
@@ -1328,7 +932,8 @@ export function requireComposeReady(
   env: NodeJS.ProcessEnv = process.env,
 ): RunLedgerInspection {
   const status = inspectRunLedger(root, contextEpochId, env);
-  if (!status.composeReady) throw new Error(`compose gate failed: ${status.composeBlockers.join("; ")}`);
+  if (!status.composeReady)
+    throw new Error(`compose gate failed: ${status.composeBlockers.join("; ")}`);
   return status;
 }
 
@@ -1364,12 +969,15 @@ export function recordCompose(
   requireComposeReady(root, context.contextEpochId);
   const ledger = readRunLedger(root);
   if (!ledger) throw new Error("run ledger is not initialized");
-  const pageRevisions = currentRevisionSnapshot(ledger);
+  const pageRevisions = currentRevisionSnapshot(ledger, root);
+  const pageChromeRecord = composePageChromes(diskProject(root), root);
+  const chromes = Object.keys(pageChromeRecord).length ? { pageChromes: pageChromeRecord } : {};
   const payload = {
     contextEpochId: context.contextEpochId,
     title,
-    deckSha256: stableSha256({ title, pageRevisions }),
+    deckSha256: stableSha256({ title, pageRevisions, ...chromes }),
     pageRevisions,
+    ...chromes,
   };
   const fact: DeckComposedFact = {
     type: "deck.composed",
@@ -1406,8 +1014,7 @@ export function contextFromToolArgs(args: Record<string, unknown>): {
 } {
   const meta = asRecord(args.__openSlideStudio);
   const commandId = typeof meta?.commandId === "string" ? meta.commandId.trim() : "";
-  const contextEpochId =
-    typeof meta?.contextEpochId === "string" ? meta.contextEpochId.trim() : "";
+  const contextEpochId = typeof meta?.contextEpochId === "string" ? meta.contextEpochId.trim() : "";
   if (!commandId || !contextEpochId) {
     throw new Error("agent execution context is missing");
   }

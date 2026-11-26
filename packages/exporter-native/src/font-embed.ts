@@ -10,6 +10,7 @@ import {
   type PptdProject,
   type TextElement,
 } from "@open-slidestudio/pptd-v2";
+import { pinZipEntryDates } from "./export-timestamps.js";
 
 /** One vendored face of a family: a font file plus its css font-weight. */
 export type FontFaceSource = {
@@ -141,9 +142,7 @@ export function sfntFsType(sfnt: Uint8Array): number | undefined {
     if (off + 16 > buf.byteLength) return undefined;
     if (buf.toString("ascii", off, off + 4) === "OS/2") {
       const tableOff = buf.readUInt32BE(off + 8);
-      return tableOff + 10 <= buf.byteLength
-        ? buf.readUInt16BE(tableOff + 8)
-        : undefined;
+      return tableOff + 10 <= buf.byteLength ? buf.readUInt16BE(tableOff + 8) : undefined;
     }
   }
   return undefined;
@@ -199,8 +198,7 @@ function rewriteNameTable(
     return;
   }
   const ascii =
-    family.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
-    `EmbeddedFont${index}`;
+    family.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `EmbeddedFont${index}`;
   name.fontFamily = family;
   name.preferredFamily = family;
   name.preferredSubFamily = subFamily;
@@ -223,10 +221,7 @@ function closestWeight(
   let best: FontFaceSource | undefined;
   for (const entry of entries) {
     if (!accept(entry.weight)) continue;
-    if (
-      !best ||
-      Math.abs(entry.weight - target) < Math.abs(best.weight - target)
-    ) {
+    if (!best || Math.abs(entry.weight - target) < Math.abs(best.weight - target)) {
       best = entry;
     }
   }
@@ -257,8 +252,7 @@ export async function buildEmbeddedFonts(
       plan.skipped.push({ typeface: family, reason: "not in fonts.css" });
       continue;
     }
-    const regularEntry =
-      closestWeight(entries, 400, (w) => w <= 500) ?? entries[0]!;
+    const regularEntry = closestWeight(entries, 400, (w) => w <= 500) ?? entries[0]!;
     const boldEntry = closestWeight(entries, 700, (w) => w > 500);
     const picks: {
       entry: FontFaceSource;
@@ -295,9 +289,7 @@ export async function buildEmbeddedFonts(
           index,
           pick.subFamily,
         );
-        const ttf = Buffer.from(
-          font.write({ type: "ttf", toBuffer: true }) as Buffer,
-        );
+        const ttf = Buffer.from(font.write({ type: "ttf", toBuffer: true }) as Buffer);
         plan.fonts.push({
           typeface: family,
           weight: pick.weight,
@@ -345,7 +337,7 @@ export async function embedFontsIntoPptx(
   const relsPath = "ppt/_rels/presentation.xml.rels";
   const relsFile = zip.file(relsPath);
   if (!relsFile) throw new Error(`native exporter: ${relsPath} missing`);
-  const rels = await relsFile.async("string");
+  let rels = await relsFile.async("string");
   let maxRid = 0;
   for (const m of rels.matchAll(/Id="rId(\d+)"/g)) {
     maxRid = Math.max(maxRid, Number(m[1]));
@@ -408,6 +400,7 @@ export async function embedFontsIntoPptx(
   for (const [name, entry] of Object.entries(zip.files)) {
     if (entry.dir) delete zip.files[name];
   }
+  pinZipEntryDates(zip);
   const data = (await zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",

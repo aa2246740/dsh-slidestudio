@@ -1,42 +1,96 @@
 import fs from "node:fs";
-import { iconOutline } from "./icon-outline.js";
 import path from "node:path";
+import type JSZip from "jszip";
 import pptxgenjs from "pptxgenjs";
 import type PptxGenJS from "pptxgenjs";
-import type JSZip from "jszip";
+import { iconOutline } from "./icon-outline.js";
 import {
   loadProject,
   chartKind,
   canonicalShapeName,
-  placeScatterLabels,
+  CUSTOM_SHAPE_NAME,
+  DEFAULT_BORDER_WIDTH_PX,
+  resolvedLineBorder,
   parseRichText,
   resolveTextStyle,
   scatterChartModel,
-  colorAlpha,
   elementFillPaint,
+  pageSurface,
+  probeImageSize,
+  sanitizeProjectColors,
+  tableCellSolidHex,
+  tableCellTextHex,
+  TABLE_BODY_FILL,
+  TABLE_HEADER_FILL,
   toRgbHex,
-  waterfallChartModel,
   type ChartElement,
   type Fill,
   type IconElement,
   type LineElement,
+  type Page,
   type PptdElement,
   type PptdProject,
   type ShapeElement,
   type TableElement,
   type TextElement,
   CHART_FONT_FACE,
-  CHART_GRID,
-  CHART_INK,
   CHART_TEXT_PX,
-  chartLayout,
+  chartChrome,
   chartZeroHiddenFormatCode,
-  formatChartValue,
-  resolveChartLegend,
-  type LegendPosition,
+  isDarkChartSurface,
   type Rect,
 } from "@open-slidestudio/pptd-v2";
-import { chartSwatch, hexNoHash, mapChartElement } from "./chart-map.js";
+import { hexNoHash, mapChartElement } from "./chart-map.js";
+import { colorFallbackDegradations } from "./export-color-fallback.js";
+import { barLabelPosition, chartKindOptions, chartSeriesFills, SLICE_LABEL_FORMAT_CODE } from "./export-chart-kinds.js";
+import { exportedChartSurface } from "./export-chart-surface.js";
+import { fractionOfChart, mapScatterChart, mapWaterfallChart } from "./export-chart-special.js";
+import { patchChartXml, type ChartPatch } from "./export-chart-xml.js";
+import { customPathForExport, patchCustomGeometry, type CustomGeometryPatch } from "./export-custom-geometry.js";
+import {
+  applyShadowPatches,
+  pageBackgroundFill,
+  patchPageBackground,
+  shadowPatchFor,
+  type BackgroundPatch,
+  type ShadowPatch,
+} from "./export-effects.js";
+import {
+  applyImageClipPatches,
+  pictureClipPatch,
+  shapeBaseFill,
+  shapeImageFillPatch,
+  type SlideImageClipPatch,
+} from "./export-image-clip.js";
+import {
+  encodeXmlName,
+  fillToPptx,
+  ooxmlGradientFill,
+  pptxInk,
+  pptxSolidFill,
+  type PptxGradientFill,
+} from "./export-fill.js";
+import {
+  layoutExportOf,
+  layoutMasterName,
+  ownColorFallbacks,
+  pageElementsToDraw,
+  pageMasterName,
+  transplantLayouts,
+  type LayoutExport,
+} from "./export-layouts.js";
+import {
+  applyPageNumberPatches,
+  isPageNumberText,
+  isPageOwnNumber,
+  pageNumberNotes,
+  pageNumberPatchFor,
+  type PageNumberPatch,
+} from "./export-page-number.js";
+import { presetPrst } from "./export-preset-names.js";
+import { patchSlideXml } from "./export-slide-xml.js";
+import { applyNoStrokePatches, type NoStrokePatch } from "./export-stroke.js";
+import { pinPackageTimestamps } from "./export-timestamps.js";
 import {
   buildEmbeddedFonts,
   embedFontsIntoPptx,
@@ -44,6 +98,9 @@ import {
   type FontEmbedOptions,
   type SkippedFont,
 } from "./font-embed.js";
+import { pxToIn } from "./export-units.js";
+import { AREA_OUTLINE_PT, cssPxToPt, HAIRLINE_PT, LINE_SERIES_PT } from "./stroke-units.js";
+import { applyThemeXmlPatch } from "./theme-xml.js";
 
 export type Degradation = {
   slideIndex: number;
@@ -61,13 +118,9 @@ export const HARD_DEGRADATION_KINDS = [
 ] as const;
 
 export type ExportReportValidation =
-  | { ok: true; report: ExportReport }
-  | { ok: false; reason: string; hardDegradation?: Degradation };
+  { ok: true; report: ExportReport } | { ok: false; reason: string; hardDegradation?: Degradation };
 
-export function validateExportReport(
-  raw: unknown,
-  options: { minSlideCount?: number } = {},
-): ExportReportValidation {
+export function validateExportReport(raw: unknown, options: { minSlideCount?: number } = {}): ExportReportValidation {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, reason: "export report is not an object" };
   }
@@ -164,70 +217,21 @@ function hex(color: string, theme?: PptdProject["presentation"]["theme"]): strin
   return toRgbHex(color, theme).replace("#", "");
 }
 
+/**
+ * The page surface the chart ink reads, as `#RRGGBB`. The rule is pptd-v2 `pageSurface`, the one the
+ * editor paints (ruling 131): a picture page background, its own or inherited, reads as its
+ * placeholder colour, and a gradient as its first stop, so a dark overlay still counts as dark.
+ * The colour is the shared element paint of that fill, as every other exported fill takes it.
+ */
 function pageSurfaceColor(
   page: PptdProject["pages"][number]["page"],
   theme: PptdProject["presentation"]["theme"],
   size: [number, number],
 ): string {
-  const backdrop = page.elements.find((element) => {
-    if (element.elementType !== "shape") return false;
-    const [x, y, width, height] = element.bounds;
-    return x <= 0 && y <= 0 && width >= size[0] && height >= size[1];
-  });
-  if (backdrop?.elementType === "shape") {
-    const color = exportedFillColor(backdrop.fill as Fill | undefined, theme);
-    if (color) return color;
-  }
-  const color = exportedFillColor(page.background as Fill | undefined, theme);
-  if (color) return color;
-  return "#FFFFFF";
+  const surface = pageSurface(page, size);
+  const paint = surface ? elementFillPaint("shape", surface.fill, undefined, theme) : undefined;
+  return paint?.type === "solid" ? paint.hex : "#FFFFFF";
 }
-
-/**
- * Surface contrast uses the first gradient stop, matching canvas paint.
- * A dark overlay must still count as a dark page for exported chart ink.
- */
-function exportedFillColor(
-  fill: Fill | undefined,
-  theme: PptdProject["presentation"]["theme"],
-): string | undefined {
-  const paint = elementFillPaint("shape", fill, undefined, theme);
-  return paint.type === "solid" ? paint.hex : undefined;
-}
-
-function isDarkHex(color: string): boolean {
-  const value = color.replace(/^#/, "");
-  if (!/^[0-9A-F]{6}$/i.test(value)) return false;
-  const red = Number.parseInt(value.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(value.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(value.slice(4, 6), 16) / 255;
-  const linear = (channel: number) =>
-    channel <= 0.04045
-      ? channel / 12.92
-      : ((channel + 0.055) / 1.055) ** 2.4;
-  const luminance =
-    0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
-  return luminance < 0.24;
-}
-
-type PptxGradientStop = {
-  pos: number;
-  color: string;
-  alpha?: number;
-};
-
-type PptxGradientFill = {
-  type: "gradient";
-  gradientType: "linear" | "radial";
-  angle: number;
-  stops: PptxGradientStop[];
-  fallback: { color: string; transparency?: number };
-};
-
-type PptxMappedFill =
-  | { type: "none" }
-  | { type: "solid"; color: string; transparency?: number }
-  | PptxGradientFill;
 
 type ImageSrcRectPatch = {
   slideIndex: number;
@@ -241,149 +245,6 @@ type GradientPatch = {
   objectName: string;
   fill: PptxGradientFill;
 };
-
-type LooseFill = {
-  type?: string;
-  color?: string;
-  gradientType?: string;
-  angle?: number;
-  stops?: { color?: string; position?: number }[];
-};
-
-function ooxmlStopPos(position: number | undefined, index: number, count: number): number {
-  if (typeof position === "number" && Number.isFinite(position)) {
-    if (position >= 0 && position <= 1) return Math.round(position * 100000);
-    if (position > 1 && position <= 100000) return Math.round(position);
-  }
-  return Math.round((index / Math.max(1, count - 1)) * 100000);
-}
-
-function encodeXmlName(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function mapGradientStops(
-  stops: NonNullable<LooseFill["stops"]>,
-  theme: PptdProject["presentation"]["theme"],
-  opacity?: number,
-): PptxGradientStop[] {
-  const elementOpacity =
-    opacity == null || Number.isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
-  return stops.map((stop, index) => {
-    const raw = String(stop.color ?? "#000000");
-    const stopAlpha = (colorAlpha(raw, theme) ?? 1) * elementOpacity;
-    return {
-      pos: ooxmlStopPos(stop.position, index, stops.length),
-      color: toRgbHex(raw, theme).replace("#", ""),
-      alpha: stopAlpha >= 0.995 ? undefined : Math.round(stopAlpha * 100000),
-    };
-  });
-}
-
-function solidFromPaint(
-  fill: Fill | undefined,
-  theme: PptdProject["presentation"]["theme"],
-  opacity: number | undefined,
-  elementType: string,
-): { color: string; transparency?: number } | undefined {
-  const paint = elementFillPaint(elementType, fill, opacity, theme);
-  if (paint.type === "none") return undefined;
-  return {
-    color: paint.hex.replace("#", ""),
-    transparency:
-      paint.alpha < 0.995 ? Math.round((1 - paint.alpha) * 100) : undefined,
-  };
-}
-
-function fillToPptx(
-  fill: Fill | undefined,
-  theme: PptdProject["presentation"]["theme"],
-  deg: Degradation[],
-  slideIndex: number,
-  elementId?: string,
-  opacity?: number,
-  elementType = "shape",
-): PptxMappedFill {
-  const loose = fill as LooseFill | undefined;
-  if (loose?.type === "image") {
-    deg.push({
-      slideIndex,
-      elementId,
-      kind: "image-fill-as-solid",
-      reason: "fill not fully mapped; solid placeholder",
-    });
-    return { type: "solid", color: "E5E7EB" };
-  }
-  if (loose?.type === "gradient") {
-    const stops = Array.isArray(loose.stops) ? loose.stops : [];
-    if (elementType === "shape" && stops.length >= 2) {
-      const mappedStops = mapGradientStops(stops, theme, opacity);
-      const fallback = solidFromPaint(fill, theme, opacity, elementType) ?? {
-        color: mappedStops[0]!.color,
-      };
-      return {
-        type: "gradient",
-        gradientType: loose.gradientType === "radial" ? "radial" : "linear",
-        angle: typeof loose.angle === "number" && Number.isFinite(loose.angle) ? loose.angle : 0,
-        stops: mappedStops,
-        fallback,
-      };
-    }
-    deg.push({
-      slideIndex,
-      elementId,
-      kind: "gradient-as-solid",
-      reason: "gradient collapsed to first stop; 8-digit alpha kept as transparency",
-    });
-  }
-  const solid = solidFromPaint(fill, theme, opacity, elementType);
-  if (!solid) return { type: "none" };
-  return { type: "solid", ...solid };
-}
-
-function pptxSolidFill(fill: PptxMappedFill): PptxGenJS.ShapeFillProps | undefined {
-  if (fill.type === "none") return undefined;
-  if (fill.type === "gradient") {
-    return {
-      type: "solid",
-      color: fill.fallback.color,
-      transparency: fill.fallback.transparency,
-    };
-  }
-  return {
-    type: "solid",
-    color: fill.color,
-    transparency: fill.transparency,
-  };
-}
-
-function pptxInk(fill: PptxMappedFill, fallback = "FFFFFF"): string {
-  if (fill.type === "none") return fallback;
-  if (fill.type === "gradient") return fill.fallback.color;
-  return fill.color;
-}
-
-function ooxmlGradientFill(fill: PptxGradientFill): string {
-  const stops = fill.stops
-    .map((stop) => {
-      const color =
-        stop.alpha == null
-          ? `<a:srgbClr val="${stop.color}"/>`
-          : `<a:srgbClr val="${stop.color}"><a:alpha val="${stop.alpha}"/></a:srgbClr>`;
-      return `<a:gs pos="${stop.pos}">${color}</a:gs>`;
-    })
-    .join("");
-  const shade =
-    fill.gradientType === "radial"
-      ? `<a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/></a:path>`
-      : `<a:lin ang="${Math.round(fill.angle * 60000)}" scaled="1"/>`;
-  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst>${shade}</a:gradFill>`;
-}
 
 function patchShapeGradient(xml: string, objectName: string, fill: PptxGradientFill): string {
   const name = encodeXmlName(objectName);
@@ -413,16 +274,11 @@ function patchShapeGradient(xml: string, objectName: string, fill: PptxGradientF
  * pptxgenjs writes one itself when `sizing` is used, so replace whatever is
  * there — a second srcRect would corrupt the part.
  */
-function patchImageSrcRect(
-  xml: string,
-  objectName: string,
-  crop: ImageSrcRectPatch["crop"],
-): string {
+function patchImageSrcRect(xml: string, objectName: string, crop: ImageSrcRectPatch["crop"]): string {
   const name = encodeXmlName(objectName);
   const chunks = xml.split(/(?=<p:pic>)/);
   let found = false;
-  const attr = (v: number) =>
-    `="${Math.round(Math.max(0, Math.min(1, v)) * 100000)}"`;
+  const attr = (v: number) => `="${Math.round(Math.max(0, Math.min(1, v)) * 100000)}"`;
   const srcRect = `<a:srcRect l${attr(crop.l)} t${attr(crop.t)} r${attr(crop.r)} b${attr(crop.b)}/>`;
   const next = chunks.map((chunk) => {
     if (!chunk.startsWith("<p:pic>")) return chunk;
@@ -444,260 +300,83 @@ function patchImageSrcRect(
   return next.join("");
 }
 
-/** Rewind docProps timestamps so identical input exports byte-identically. */
-function patchCoreTimestamps(xml: string): string {
-  const epoch = "2000-01-01T00:00:00Z";
-  return xml
-    .replace(
-      /(<dcterms:(?:created|modified)[^>]*>)[^<]*(<\/dcterms:(?:created|modified)>)/g,
-      `$1${epoch}$2`,
-    );
-}
-
 type PostProcessPatches = {
+  /** Applied before gradients: a custom path replaces the placeholder geometry first. */
+  customGeometries?: CustomGeometryPatch[];
   gradients?: GradientPatch[];
   srcRects?: ImageSrcRectPatch[];
-  /** docProps timestamps pinned for reproducible output. */
+  /** Picture clips and shape image fills, applied after srcRects so clipped pictures keep their crop. */
+  imageClips?: SlideImageClipPatch[];
+  /** Zero-width outlines drawn as no fill, applied before the shadows that add their effect list. */
+  noStrokes?: NoStrokePatch[];
+  /** Shape and picture shadows, applied after the clips so a clipped picture keeps its effect. */
+  shadows?: ShadowPatch[];
+  /** Gradient page backgrounds, replacing the solid p:bg that pptxgenjs writes. */
+  backgrounds?: BackgroundPatch[];
+  /** A page's own number text, filled after the shape patches and before the slide-level patch. */
+  pageNumbers?: PageNumberPatch[];
+  /** Masters and layouts: their carrier slides are moved into the layout parts after every patch. */
+  layouts?: LayoutExport;
+  /** docProps and zip entry timestamps pinned for reproducible output (export-timestamps.ts). */
   fixedTimestamps?: boolean;
-  /** Split `latin***ea` font markers into separate `<a:latin>`/`<a:ea>` typefaces. */
-  slideFonts?: boolean;
   /** One entry per addChart call, in slide order (chart1.xml..chartN.xml). */
   charts?: ChartPatch[];
+  theme?: PptdProject["presentation"]["theme"];
 };
 
-/** Escape an XML attribute value the same way pptxgenjs does. */
-function xmlAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/**
- * pptxgenjs takes one fontFace, so a pair travels as `latin***ea`. It then
- * writes that string onto `<a:latin>`, and sometimes onto `<a:ea>` / `<a:cs>`
- * as well, with extra attributes such as pitchFamily. Rewrite each tag in
- * place: latin and cs keep the Latin face, ea keeps the East Asian face.
- * When a rewritten latin tag has no ea sibling yet, insert one. A face
- * without the marker is left untouched.
- */
-function splitFontMarkers(xml: string): string {
-  const withLatin = xml.replace(
-    /<a:latin\b([^>]*?)typeface="([^"]*)\*\*\*([^"]*)"([^>]*?)\/>/g,
-    (full, before: string, latin: string, ea: string, after: string, offset: number, source: string) => {
-      const rest = source.slice(offset + full.length, offset + full.length + 500);
-      const end = rest.search(/<\/a:(?:defRPr|rPr|endParaRPr)>/);
-      const scope = end >= 0 ? rest.slice(0, end) : rest;
-      let extra = "";
-      if (!/<a:ea\b/.test(scope)) extra += `<a:ea typeface="${ea || latin}"/>`;
-      if (!/<a:cs\b/.test(scope)) extra += `<a:cs typeface="${latin}"/>`;
-      return `<a:latin${before}typeface="${latin}"${after}/>${extra}`;
-    },
-  );
-  return withLatin.replace(
-    /<a:(ea|cs)\b([^>]*?)typeface="([^"]*)\*\*\*([^"]*)"([^>]*?)\/>/g,
-    (_full, tag: string, before: string, latin: string, ea: string, after: string) =>
-      `<a:${tag}${before}typeface="${tag === "ea" ? ea || latin : latin}"${after}/>`,
-  );
-}
-
-function patchChartFonts(xml: string): string {
-  return splitFontMarkers(xml);
-}
-
-function patchSlideFonts(xml: string): string {
-  return splitFontMarkers(xml);
-}
-
-/**
- * pptxgenjs writes one chart-level `dataLabelFormatCode` under each series'
- * `dLbls`. Per-series precision differs (0.091 vs 8.641 in the same chart), so
- * rewrite each `<c:ser>`'s `dLbls/numFmt` with the series' own format code.
- */
-function patchSeriesFormatCodes(xml: string, formatCodes: string[]): string {
-  let index = 0;
-  return xml.replace(/<c:ser>([\s\S]*?)<\/c:ser>/g, (match, body: string) => {
-    const code = formatCodes[index];
-    index += 1;
-    if (!code) return match;
-    const replaced = body.replace(
-      /<c:dLbls>([\s\S]*?)<\/c:dLbls>/,
-      (block, inner: string) =>
-        `<c:dLbls>${inner.replace(
-          /<c:numFmt formatCode="[^"]*" sourceLinked="0"\/>/,
-          `<c:numFmt formatCode="${xmlAttr(code)}" sourceLinked="0"/>`,
-        )}</c:dLbls>`,
-    );
-    return `<c:ser>${replaced}</c:ser>`;
-  });
-}
-
-/**
- * Pptxgenjs never writes a legend manualLayout, so PowerPoint drops the
- * legend wherever it wants. Inject the shared layout rect so legend position
- * matches the canvas, right after `<c:legendPos>` per the schema.
- */
-function patchLegendLayout(xml: string, patch: ChartPatch): string {
-  if (!patch.legend?.layout) return xml;
-  const { x, y, w, h } = patch.legend.layout;
-  const manual =
-    `<c:layout><c:manualLayout>` +
-    `<c:layoutTarget val="outer"/>` +
-    `<c:xMode val="edge"/><c:yMode val="edge"/>` +
-    `<c:x val="${x.toFixed(6)}"/><c:y val="${y.toFixed(6)}"/>` +
-    `<c:w val="${w.toFixed(6)}"/><c:h val="${h.toFixed(6)}"/>` +
-    `</c:manualLayout></c:layout>`;
-  // CT_Legend: legendPos → legendEntry → layout → overlay → txPr …
-  return xml.replace(
-    /<c:legend>([\s\S]*?)<\/c:legend>/,
-    (match, inner: string) =>
-      inner.includes("<c:layout>")
-        ? match
-        : `<c:legend>${inner.replace(
-            /(<c:legendPos val="[a-z]+"\/>)/,
-            `$1${manual}`,
-          )}</c:legend>`,
-  );
-}
-
-/**
- * Pie labels: the canvas renders "name pct%". pptxgenjs only writes
- * `showCatName`/`showPercent`; without a separator PowerPoint jams them.
- */
-function patchPieSeparator(xml: string): string {
-  return xml.replace(
-    /(<c:showPercent val="1"\/>)/g,
-    `$1<c:separator val=" "/>`,
-  );
-}
-
-/**
- * Horizontal bars use a `maxMin` category axis; PowerPoint then pins the
- * value axis to the top unless the value axis crosses at max.
- */
-function patchHorizontalBarCrossing(xml: string): string {
-  return xml.replace(
-    /<c:valAx>([\s\S]*?)<\/c:valAx>/g,
-    (match) =>
-      match.includes("<c:crosses")
-        ? match.replace(/<c:crosses val="[^"]*"\/>/, '<c:crosses val="max"/>')
-        : match.replace(/(<c:axId[^/]*\/>)/, `$1<c:crosses val="max"/>`),
-  );
-}
-
-/**
- * The canvas draws bar labels just past the bar end and line labels above the
- * point. OOXML allows `outEnd` on clustered bars (not stacked), but the
- * pptxgenjs 3.12 validator has that rule inverted and drops `outEnd` from
- * clustered bars, so the chart is generated with `inEnd` and corrected here.
- * Line labels get `t`; pptxgenjs writes none for a standalone line (PowerPoint
- * then defaults to the right) and the shared combo position for a combo line.
- */
-function patchDataLabelPositions(xml: string): string {
-  const setPos = (block: string, pos: string) =>
-    block.replace(/<c:dLbls>([\s\S]*?)<\/c:dLbls>/g, (_match, inner: string) => {
-      const next = /<c:dLblPos val="[^"]*"\/>/.test(inner)
-        ? inner.replace(/<c:dLblPos val="[^"]*"\/>/, `<c:dLblPos val="${pos}"/>`)
-        : inner.replace(/(\s*<c:showLegendKey)/, `<c:dLblPos val="${pos}"/>$1`);
-      return `<c:dLbls>${next}</c:dLbls>`;
-    });
-  return xml
-    .replace(/<c:barChart>[\s\S]*?<\/c:barChart>/g, (block) =>
-      /<c:grouping val="clustered"\/>/.test(block) ? setPos(block, "outEnd") : block,
-    )
-    .replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/g, (block) => setPos(block, "t"));
-}
-
-/** Apply every chart patch to `ppt/charts/chart*.xml`, in slide order. */
-async function patchChartXml(
-  zip: JSZip,
-  charts: ChartPatch[],
-): Promise<void> {
-  if (!charts.length) return;
-  // pptxgenjs names chart parts chart1.xml…chartN.xml in addChart order.
-  // A stacked waterfall can be split into two chart parts for one call, so
-  // the part count may exceed the call count. The slide-order pairing still
-  // holds: walk parts in the same order as `charts` and reuse the last
-  // pending patch for any extra part belonging to the same call.
-  const partNames = Object.keys(zip.files)
-    .filter((name) => /^ppt\/charts\/chart\d+\.xml$/.test(name))
-    .sort(
-      (a, b) =>
-        Number(a.match(/chart(\d+)\.xml/)?.[1]) -
-        Number(b.match(/chart(\d+)\.xml/)?.[1]),
-    );
-  if (partNames.length < charts.length) {
-    throw new Error(
-      `native exporter: expected at least ${charts.length} chart parts, found ${partNames.length}`,
-    );
-  }
-  // Pair each part to the chart whose series names it contains. A split
-  // stacked chart shares names across its parts, so the first matching
-  // unconsumed patch wins and stays available for the extra part.
-  const pending = charts.map((patch) => ({ patch, matched: false }));
-  for (const [index, rel] of partNames.entries()) {
-    const file0 = zip.file(rel);
-    if (!file0) continue;
-    const preview = await file0.async("string");
-    const owner =
-      pending.find(
-        (entry) =>
-          !entry.matched &&
-          entry.patch.seriesNames.some((name) => preview.includes(xmlAttr(name))),
-      ) ?? pending.find((entry) => entry.matched);
-    const patch = owner?.patch ?? charts[Math.min(index, charts.length - 1)]!;
-    if (owner && !owner.matched) owner.matched = true;
-    const file = zip.file(rel);
-    if (!file) {
-      throw new Error(
-        `native exporter: ${rel} missing while patching ${patch.elementId}`,
-      );
-    }
-    let xml = await file.async("string");
-    xml = patchChartFonts(xml);
-    xml = patchSeriesFormatCodes(xml, patch.seriesFormatCodes);
-    xml = patchLegendLayout(xml, patch);
-    xml = patchDataLabelPositions(xml);
-    if (patch.pie) xml = patchPieSeparator(xml);
-    if (patch.barHorizontal) xml = patchHorizontalBarCrossing(xml);
-    zip.file(rel, xml);
-  }
-}
-
-async function postProcessPptx(
-  buffer: Buffer,
-  patches: PostProcessPatches,
-): Promise<Buffer> {
+async function postProcessPptx(buffer: Buffer, patches: PostProcessPatches): Promise<Buffer> {
+  const customGeometries = patches.customGeometries ?? [];
   const gradients = patches.gradients ?? [];
   const srcRects = patches.srcRects ?? [];
   const charts = patches.charts ?? [];
-  if (
-    gradients.length === 0 &&
-    srcRects.length === 0 &&
-    charts.length === 0 &&
-    !patches.fixedTimestamps &&
-    !patches.slideFonts
-  ) {
-    return buffer;
-  }
+  const imageClips = patches.imageClips ?? [];
+  const noStrokes = patches.noStrokes ?? [];
+  const shadows = patches.shadows ?? [];
+  const backgrounds = patches.backgrounds ?? [];
+  const pageNumbers = patches.pageNumbers ?? [];
+  // Every slide part goes through patchSlideXml, patched or not, so no picture keeps its path.
   const { default: JSZipCtor } = await import("jszip");
   const zip = await JSZipCtor.loadAsync(buffer);
   const bySlide = new Map<
     number,
-    { gradients: GradientPatch[]; srcRects: ImageSrcRectPatch[] }
+    {
+      customGeometries: CustomGeometryPatch[];
+      gradients: GradientPatch[];
+      srcRects: ImageSrcRectPatch[];
+      imageClips: SlideImageClipPatch[];
+      noStrokes: NoStrokePatch[];
+      shadows: ShadowPatch[];
+      backgrounds: BackgroundPatch[];
+      pageNumbers: PageNumberPatch[];
+    }
   >();
   const bucket = (slideIndex: number) => {
     let entry = bySlide.get(slideIndex);
     if (!entry) {
-      entry = { gradients: [], srcRects: [] };
+      entry = {
+        customGeometries: [],
+        gradients: [],
+        srcRects: [],
+        imageClips: [],
+        noStrokes: [],
+        shadows: [],
+        backgrounds: [],
+        pageNumbers: [],
+      };
       bySlide.set(slideIndex, entry);
     }
     return entry;
   };
-  for (const patch of gradients) bucket(patch.slideIndex).gradients.push(patch);
-  for (const patch of srcRects) bucket(patch.slideIndex).srcRects.push(patch);
+  groupSlidePatches(bucket, {
+    customGeometries,
+    gradients,
+    srcRects,
+    imageClips,
+    noStrokes,
+    shadows,
+    backgrounds,
+    pageNumbers,
+  });
   for (const [slideIndex, slidePatches] of bySlide) {
     const rel = `ppt/slides/slide${slideIndex + 1}.xml`;
     const file = zip.file(rel);
@@ -705,31 +384,32 @@ async function postProcessPptx(
       throw new Error(`native exporter: ${rel} missing while patching slides`);
     }
     let xml = await file.async("string");
+    for (const patch of slidePatches.customGeometries) {
+      xml = patchCustomGeometry(xml, patch);
+    }
     for (const patch of slidePatches.gradients) {
       xml = patchShapeGradient(xml, patch.objectName, patch.fill);
     }
     for (const patch of slidePatches.srcRects) {
       xml = patchImageSrcRect(xml, patch.objectName, patch.crop);
     }
-    xml = patchSlideFonts(xml);
+    xml = applyImageClipPatches(xml, slidePatches.imageClips);
+    xml = applyNoStrokePatches(xml, slidePatches.noStrokes);
+    xml = applyShadowPatches(xml, slidePatches.shadows);
+    for (const patch of slidePatches.backgrounds) {
+      xml = patchPageBackground(xml, patch.fill);
+    }
+    xml = applyPageNumberPatches(xml, slidePatches.pageNumbers);
+    xml = patchSlideXml(xml);
     zip.file(rel, xml);
   }
-  const slideParts = Object.keys(zip.files).filter((name) =>
-    /^ppt\/slides\/slide\d+\.xml$/.test(name),
-  );
-  for (const rel of slideParts) {
-    if (bySlide.has(Number(rel.match(/slide(\d+)\.xml/)?.[1]) - 1)) continue;
-    const file = zip.file(rel);
-    if (!file) continue;
-    zip.file(rel, patchSlideFonts(await file.async("string")));
-  }
+  await patchUntouchedSlides(zip, bySlide);
   if (charts.length) {
     await patchChartXml(zip, charts);
   }
-  if (patches.fixedTimestamps) {
-    const core = zip.file("docProps/core.xml");
-    if (core) zip.file("docProps/core.xml", patchCoreTimestamps(await core.async("string")));
-  }
+  if (patches.layouts) await transplantLayouts(zip, patches.layouts);
+  if (patches.fixedTimestamps) await pinPackageTimestamps(zip);
+  await applyThemeXmlPatch(zip, patches.theme);
   for (const [name, entry] of Object.entries(zip.files)) {
     if (entry.dir) delete zip.files[name];
   }
@@ -739,31 +419,57 @@ async function postProcessPptx(
   }) as Promise<Buffer>;
 }
 
-/**
- * PPTD fontFamily resolves to a `{latin, ea}` pair. pptxgenjs takes one
- * fontFace, so the pair travels as a `latin***ea` marker and `splitFontMarkers`
- * splits it into `<a:latin>` and `<a:ea>` after the package is built.
- * Characters that would break the XML attribute, or that pptxgenjs reads as
- * a body/heading separator, are stripped from both names.
- */
-function singleFontFace(
-  family: string | { latin: string; ea: string } | undefined,
-): string | undefined {
+type SlidePatchBucket = {
+  customGeometries: CustomGeometryPatch[];
+  gradients: GradientPatch[];
+  srcRects: ImageSrcRectPatch[];
+  imageClips: SlideImageClipPatch[];
+  noStrokes: NoStrokePatch[];
+  shadows: ShadowPatch[];
+  backgrounds: BackgroundPatch[];
+  pageNumbers: PageNumberPatch[];
+};
+
+function groupSlidePatches(bucket: (slideIndex: number) => SlidePatchBucket, patches: SlidePatchBucket): void {
+  for (const patch of patches.customGeometries) bucket(patch.slideIndex).customGeometries.push(patch);
+  for (const patch of patches.gradients) bucket(patch.slideIndex).gradients.push(patch);
+  for (const patch of patches.srcRects) bucket(patch.slideIndex).srcRects.push(patch);
+  for (const patch of patches.imageClips) bucket(patch.slideIndex).imageClips.push(patch);
+  for (const patch of patches.noStrokes) bucket(patch.slideIndex).noStrokes.push(patch);
+  for (const patch of patches.shadows) bucket(patch.slideIndex).shadows.push(patch);
+  for (const patch of patches.backgrounds) bucket(patch.slideIndex).backgrounds.push(patch);
+  for (const patch of patches.pageNumbers) bucket(patch.slideIndex).pageNumbers.push(patch);
+}
+
+async function patchUntouchedSlides(zip: JSZip, bySlide: Map<number, SlidePatchBucket>): Promise<void> {
+  const slideParts = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+  for (const rel of slideParts) {
+    if (bySlide.has(Number(rel.match(/slide(\d+)\.xml/)?.[1]) - 1)) continue;
+    const file = zip.file(rel);
+    if (!file) continue;
+    zip.file(rel, patchSlideXml(await file.async("string")));
+  }
+}
+
+/** `latin***ea` survives pptxgenjs as one fontFace; export-slide-xml.ts writes latin and ea. */
+function singleFontFace(family: string | { latin: string; ea: string } | undefined): string | undefined {
   if (!family) return undefined;
   const pair = typeof family === "string" ? { latin: family, ea: family } : family;
-  const clean = (name: string) => name.replace(/[<>&"'|*]/g, "").trim().slice(0, 64);
+  const clean = (name: string) =>
+    name
+      .replace(/[<>&"'|*]/g, "")
+      .trim()
+      .slice(0, 64);
   const latin = clean(pair.latin);
   const ea = clean(pair.ea);
   if (!latin && !ea) return undefined;
   return `${latin}***${ea || latin}`;
 }
 
-function pxToIn(px: number, slidePx: number, slideIn: number): number {
-  return (px / slidePx) * slideIn;
-}
-
-function cssPxToPt(px: number): number {
-  return (px * 72) / 96;
+function textBullet(list: string | undefined): PptxGenJS.TextPropsOptions["bullet"] {
+  if (list === "number") return { type: "number" };
+  if (list === "bullet") return true;
+  return undefined;
 }
 
 function isMicroscopicHiddenChart(element: PptdElement): boolean {
@@ -781,10 +487,7 @@ function mapText(
 ): void {
   const [x, y, w, h] = el.bounds;
   const st = resolveTextStyle(el.content ?? { text: "" }, theme);
-  const lineFontSizePx = Math.max(
-    st.fontSize,
-    ...st.runs.map((run) => run.fontSize ?? st.fontSize),
-  );
+  const lineFontSizePx = Math.max(st.fontSize, ...st.runs.map((run) => run.fontSize ?? st.fontSize));
   const opts: PptxGenJS.TextPropsOptions = {
     x: pxToIn(x, size[0], layout.w),
     y: pxToIn(y, size[1], layout.h),
@@ -809,12 +512,14 @@ function mapText(
     // CSS line box as an absolute point value instead.
     lineSpacing: cssPxToPt(lineFontSizePx * st.lineHeight),
     underline: st.underline ? { style: "sng" } : undefined,
+    // A page-number box is named by its element ID, so its own number can be written into it.
+    ...(isPageNumberText(el) ? { objectName: el.elementId } : {}),
   };
   const face = singleFontFace(st.fontFamily);
   if (face) opts.fontFace = face;
   if (st.letterSpacing) opts.charSpacing = cssPxToPt(st.letterSpacing);
-  if (st.list === "number") opts.bullet = { type: "number" };
-  else if (st.list === "bullet") opts.bullet = true;
+  const bullet = textBullet(st.list);
+  if (bullet !== undefined) opts.bullet = bullet;
   if (st.href) opts.hyperlink = { url: st.href };
   const runs = parseRichText(el.content?.text ?? "");
   const styledRuns: PptxGenJS.TextProps[] = [];
@@ -826,9 +531,7 @@ function mapText(
       italic: run.italic ?? st.italic,
       fontFace: face,
       charSpacing: st.letterSpacing ? cssPxToPt(st.letterSpacing) : undefined,
-      underline: (run.underline ?? st.underline)
-        ? { style: "sng" }
-        : undefined,
+      underline: (run.underline ?? st.underline) ? { style: "sng" } : undefined,
     };
     const parts = run.text.split("\n");
     parts.forEach((text, index) => {
@@ -848,19 +551,15 @@ function mapText(
     });
   }
   const needsRuns =
-    runs.length > 1 ||
-    st.text.includes("\n") ||
-    Boolean(runs[0] && (runs[0].fontSize || runs[0].color));
+    runs.length > 1 || st.text.includes("\n") || Boolean(runs[0] && (runs[0].fontSize || runs[0].color));
   if (needsRuns && !st.list) {
-    slide.addText(
-      styledRuns,
-      opts,
-    );
+    slide.addText(styledRuns, opts);
     return;
   }
   slide.addText(st.text, opts);
 }
 
+/** Adds the shape to the slide. Returns false when nothing visible is drawn, so no shape exists. */
 function mapShape(
   slide: PptxGenJS.Slide,
   nativeShapeTypes: Readonly<Record<string, PptxGenJS.SHAPE_NAME>>,
@@ -871,96 +570,27 @@ function mapShape(
   deg: Degradation[],
   slideIndex: number,
   gradientPatches: GradientPatch[],
-): void {
+  customPatches: CustomGeometryPatch[],
+  strokePatches: NoStrokePatch[],
+): boolean {
   const [x, y, w, h] = el.bounds;
-  const fill = fillToPptx(el.fill, theme, deg, slideIndex, el.elementId, el.opacity, "shape");
-  const hasLine = Boolean(el.border?.color) && (el.border?.width ?? 1) > 0;
-  if (fill.type === "none" && !hasLine) return;
-  const shapeName = canonicalShapeName(el.shapeName ?? "rect");
-  const pptxNames: Record<string, string> = {
-    rect: "rect",
-    roundRect: "roundRect",
-    ellipse: "ellipse",
-    triangle: "triangle",
-    rtTriangle: "rtTriangle",
-    diamond: "diamond",
-    parallelogram: "parallelogram",
-    trapezoid: "trapezoid",
-    pentagon: "pentagon",
-    hexagon: "hexagon",
-    heptagon: "heptagon",
-    octagon: "octagon",
-    plus: "plus",
-    chevron: "chevron",
-    rightArrow: "rightArrow",
-    leftArrow: "leftArrow",
-    upArrow: "upArrow",
-    downArrow: "downArrow",
-    bentArrow: "bentArrow",
-    homePlate: "homePlate",
-    pie: "pie",
-    donut: "donut",
-    can: "can",
-    cube: "cube",
-    bevel: "bevel",
-    folderCorner: "folderCorner",
-    heart: "heart",
-    lightningBolt: "lightningBolt",
-    sun: "sun",
-    moon: "moon",
-    smileyFace: "smileyFace",
-    cloud: "cloud",
-    arc: "arc",
-    teardrop: "teardrop",
-    frame: "frame",
-    halfFrame: "halfFrame",
-    corner: "corner",
-    diagStripe: "diagStripe",
-    chord: "chord",
-    star4: "star4",
-    star5: "star5",
-    star6: "star6",
-    star7: "star7",
-    star8: "star8",
-    star10: "star10",
-    star12: "star12",
-    star16: "star16",
-    star24: "star24",
-    star32: "star32",
-    ribbon: "ribbon",
-    ribbon2: "ribbon2",
-    ellipseRibbon: "ellipseRibbon",
-    ellipseRibbon2: "ellipseRibbon2",
-    verticalScroll: "verticalScroll",
-    horizontalScroll: "horizontalScroll",
-    wave: "wave",
-    doubleWave: "doubleWave",
-    leftRightArrow: "leftRightArrow",
-    upDownArrow: "upDownArrow",
-    quadArrow: "quadArrow",
-    leftRightUpArrow: "leftRightUpArrow",
-    bentUpArrow: "bentUpArrow",
-    leftUpArrow: "leftUpArrow",
-    circularArrow: "circularArrow",
-    notchedRightArrow: "notchedRightArrow",
-    stripedRightArrow: "stripedRightArrow",
-    callout1: "wedgeRectCallout",
-    callout2: "wedgeRectCallout",
-    wedgeRectCallout: "wedgeRectCallout",
-    wedgeRoundRectCallout: "wedgeRoundRectCallout",
-    wedgeEllipseCallout: "wedgeEllipseCallout",
-    cloudCallout: "cloudCallout",
-    borderCallout1: "borderCallout1",
-    borderCallout2: "borderCallout2",
-    accentCallout1: "accentCallout1",
-    accentBorderCallout1: "accentBorderCallout1",
-    actionButtonBlank: "actionButtonBlank",
-    flowChartProcess: "flowChartProcess",
-    flowChartDecision: "flowChartDecision",
-    flowChartTerminator: "flowChartTerminator",
-    flowChartDocument: "flowChartDocument",
-  };
-  const type = pptxNames[shapeName] ?? nativeShapeTypes[shapeName];
+  // An image fill starts as a placeholder; shapeImageFillPatch writes the picture over it.
+  const fill = fillToPptx(shapeBaseFill(el.fill, theme), theme, deg, slideIndex, el.elementId, el.opacity, "shape");
+  const decor = shapeDecor(el, theme);
+  if (fill.type === "none" && !decor.drawn) return false;
+  // A custom path is written as a rectangle at its bounds; export-custom-geometry.ts swaps in the path.
+  const custom = el.shapeName === CUSTOM_SHAPE_NAME ? customPathForExport(el.geometry) : undefined;
+  if (custom && "issue" in custom) {
+    deg.push({
+      slideIndex,
+      elementId: el.elementId,
+      kind: "shape-as-rect",
+      reason: `custom path exported as rect: ${custom.issue}`,
+    });
+  }
+  const path = custom && "segments" in custom ? custom : undefined;
+  const shapeName = custom ? "rect" : canonicalShapeName(el.shapeName ?? "rect");
+  const type = presetPrst(shapeName, nativeShapeTypes);
   if (!type) {
     deg.push({
       slideIndex,
@@ -975,32 +605,45 @@ function mapShape(
     w: pxToIn(w, size[0], layout.w),
     h: pxToIn(h, size[1], layout.h),
     fill: pptxSolidFill(fill),
-    // The authored border must survive the export — a shape with a border
-    // but no fill previously dropped the stroke entirely.
-    ...(hasLine
-      ? {
-          line: {
-            color: hex(el.border!.color!, theme),
-            width: cssPxToPt(el.border!.width ?? 1),
-            dashType: lineDashType(el.border!.style),
-            ...(el.opacity !== undefined
-              ? {
-                  transparency: Math.round(
-                    (1 - Math.max(0, Math.min(1, el.opacity))) * 100,
-                  ),
-                }
-              : {}),
-          } satisfies PptxGenJS.ShapeLineProps,
-        }
-      : {}),
+    ...decor.props,
     objectName: el.elementId,
-    ...(el.rotation ? { rotate: el.rotation } : {}),
-    ...(el.flipH ? { flipH: true } : {}),
-    ...(el.flipV ? { flipV: true } : {}),
   });
+  // pptxgenjs would draw a zero width as 1 pt, so the outline is patched to no fill instead.
+  if (el.border?.width === 0) strokePatches.push({ slideIndex, objectName: el.elementId });
   if (fill.type === "gradient") {
     gradientPatches.push({ slideIndex, objectName: el.elementId, fill });
   }
+  if (path) customPatches.push({ slideIndex, objectName: el.elementId, path });
+  return true;
+}
+
+function shapeDecor(
+  el: ShapeElement,
+  theme: PptdProject["presentation"]["theme"],
+): { drawn: boolean; props: Partial<PptxGenJS.ShapeProps> } {
+  // border.width is PPTD px for every shape kind (ruling 112): a:ln w = width × 9 525 EMU.
+  const hasLine = Boolean(el.border?.color) && (el.border?.width ?? 1) > 0;
+  const line = hasLine
+    ? {
+        color: hex(el.border!.color!, theme),
+        width: cssPxToPt(el.border?.width ?? DEFAULT_BORDER_WIDTH_PX),
+        dashType: lineDashType(el.border!.style),
+        ...(el.opacity !== undefined
+          ? { transparency: Math.round((1 - Math.max(0, Math.min(1, el.opacity))) * 100) }
+          : {}),
+      }
+    : undefined;
+  return {
+    drawn: hasLine,
+    props: {
+      // The authored border must survive the export — a shape with a border
+      // but no fill previously dropped the stroke entirely.
+      ...(line ? { line } : {}),
+      ...(el.rotation ? { rotate: el.rotation } : {}),
+      ...(el.flipH ? { flipH: true } : {}),
+      ...(el.flipV ? { flipV: true } : {}),
+    },
+  };
 }
 
 function mapTable(
@@ -1035,24 +678,16 @@ function mapTable(
         // Row 0 gets the canvas's is-header defaults when the author did not
         // pin explicit cell paint/bold.
         const isHeader = r === 0;
-        const explicitFill =
-          cell.fill && cell.fill.type === "solid"
-            ? hex(cell.fill.color, theme)
-            : undefined;
+        const fillHex = tableCellSolidHex(cell.fill, theme) ?? (isHeader ? TABLE_HEADER_FILL : TABLE_BODY_FILL);
         const options: PptxGenJS.TableCellProps = {
           bold: cell.bold ?? isHeader,
-          color: hex(cell.color ?? "#1A1917", theme),
-          fill: { color: explicitFill ?? (isHeader ? "F3F4F6" : "FFFFFF") },
+          color: tableCellTextHex(cell.color, theme).replace("#", ""),
+          fill: { color: fillHex.replace("#", "") },
           valign: "middle",
           align: (cell.align?.[0] as PptxGenJS.HAlign) ?? "left",
           // CSS .el-table td pads 4px vertical / 6px horizontal at 96 CSS px
           // per inch. pptxgenjs TableCellProps.margin is in inches here.
-          margin: [
-            (4 / 96),
-            (6 / 96),
-            (4 / 96),
-            (6 / 96),
-          ],
+          margin: [4 / 96, 6 / 96, 4 / 96, 6 / 96],
           fontFace: CHART_FONT_FACE,
           fontSize: cssPxToPt(13),
         };
@@ -1069,24 +704,23 @@ function mapTable(
       .filter((cell) => !cell.covered)
       .map(({ text, options }) => ({ text, options })),
   );
+  // Decks without the neutral flag keep the cool .el-table grey.
+  const rule = theme?.neutralChrome ? "CCCCCC" : "D1D5DB";
   slide.addTable(rows, {
     x: pxToIn(x, size[0], layout.w),
     y: pxToIn(y, size[1], layout.h),
     w: tableW,
     h: tableH,
-    colW:
-      colSum > 0
-        ? el.columnWidths!.map((c) => (c / colSum) * tableW)
-        : undefined,
+    colW: colSum > 0 ? el.columnWidths!.map((c) => (c / colSum) * tableW) : undefined,
     rowH:
       rowSum > 0 && el.rowHeights!.length === el.rows.length
         ? el.rowHeights!.map((r) => (r / rowSum) * tableH)
         : undefined,
     border: [
-      { type: "solid", pt: 0.75, color: "D1D5DB" },
-      { type: "solid", pt: 0.75, color: "D1D5DB" },
-      { type: "solid", pt: 0.75, color: "D1D5DB" },
-      { type: "solid", pt: 0.75, color: "D1D5DB" },
+      { type: "solid", pt: HAIRLINE_PT, color: rule },
+      { type: "solid", pt: HAIRLINE_PT, color: rule },
+      { type: "solid", pt: HAIRLINE_PT, color: rule },
+      { type: "solid", pt: HAIRLINE_PT, color: rule },
     ],
     fontFace: CHART_FONT_FACE,
     fontSize: cssPxToPt(13),
@@ -1094,481 +728,23 @@ function mapTable(
   });
 }
 
-function formatChartNumber(value: number, signed = false): string {
-  const absolute = Math.abs(value);
-  const body = Number.isInteger(absolute)
-    ? absolute.toLocaleString("en-US")
-    : absolute.toLocaleString("en-US", { maximumFractionDigits: 3 });
-  if (!signed || value === 0) return body;
-  return `${value > 0 ? "+" : "−"}${body}`;
+function comboChartPlan(mapped: {
+  series: { axis?: string; pptxType: string }[];
+  grouping?: string;
+  barDir?: string;
+}): { combo: boolean; hasSecondary: boolean; seriesKinds: Set<string> } {
+  const hasSecondary = mapped.series.some((series) => series.axis === "secondary");
+  const seriesKinds = new Set(mapped.series.map((series) => series.pptxType));
+  const clusteredBarLine =
+    !hasSecondary &&
+    mapped.grouping === "clustered" &&
+    mapped.barDir !== "bar" &&
+    seriesKinds.size === 2 &&
+    seriesKinds.has("bar") &&
+    seriesKinds.has("line");
+  const combo = (seriesKinds.size >= 2 && (hasSecondary || mapped.grouping !== "clustered")) || clusteredBarLine;
+  return { combo, hasSecondary, seriesKinds };
 }
-
-type ChartSurfaceStyle = {
-  ink: string;
-  grid: string;
-  background: string;
-};
-
-function relativeLuminance(color: string): number {
-  const value = color.replace(/^#/, "");
-  if (!/^[0-9A-F]{6}$/i.test(value)) return 1;
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255);
-  const linear = (channel: number) =>
-    channel <= 0.04045
-      ? channel / 12.92
-      : ((channel + 0.055) / 1.055) ** 2.4;
-  return 0.2126 * linear(channels[0]!) + 0.7152 * linear(channels[1]!) + 0.0722 * linear(channels[2]!);
-}
-
-function contrastRatio(foreground: string, background: string): number {
-  const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)].sort((a, b) => b - a);
-  return (lighter! + 0.05) / (darker! + 0.05);
-}
-
-/** Composite an exported semi-transparent shape over its actual surface. */
-function compositeHex(foreground: string, background: string, transparency: number): string {
-  const alpha = Math.max(0, Math.min(1, 1 - transparency / 100));
-  const fg = foreground.replace(/^#/, "");
-  const bg = background.replace(/^#/, "");
-  const component = (offset: number) => {
-    const value =
-      Number.parseInt(fg.slice(offset, offset + 2), 16) * alpha +
-      Number.parseInt(bg.slice(offset, offset + 2), 16) * (1 - alpha);
-    return Math.round(value).toString(16).padStart(2, "0");
-  };
-  return `#${component(0)}${component(2)}${component(4)}`.toUpperCase();
-}
-
-type ScatterLabelStyle = { foreground: string; backplate: string; transparency: number };
-
-/**
- * Labels sit above semi-transparent quadrant fills, so the page color alone
- * is not enough for legibility. Pick a direct readable ink when possible and
- * place it on a high-contrast plate to keep that result stable in PowerPoint.
- */
-function readableScatterLabelStyle(underlay: string): ScatterLabelStyle {
-  const dark = "0F172A";
-  const light = "F8FAFC";
-  const darkOnUnderlay = contrastRatio(`#${dark}`, underlay);
-  const lightOnUnderlay = contrastRatio(`#${light}`, underlay);
-  const foreground = darkOnUnderlay >= lightOnUnderlay ? dark : light;
-  const backplate = foreground === dark ? light : dark;
-  const transparency = 12;
-  const effectiveBackplate = compositeHex(`#${backplate}`, underlay, transparency);
-  return contrastRatio(`#${foreground}`, effectiveBackplate) >= 4.5
-    ? { foreground, backplate, transparency }
-    : { foreground, backplate, transparency: 0 };
-}
-
-function mapWaterfallChart(
-  slide: PptxGenJS.Slide,
-  el: ChartElement,
-  size: [number, number],
-  layout: { w: number; h: number },
-  surface: ChartSurfaceStyle,
-  tickPt: number,
-  catPt: number,
-  labelPt: number,
-  axisTitlePt: number,
-): void {
-  const [x, y, w, h] = el.bounds;
-  const model = waterfallChartModel(el);
-  const labels = model.bars.map((bar) => bar.label);
-  const data: PptxGenJS.OptsChartData[] = [
-    {
-      name: "基线",
-      labels,
-      values: model.bars.map((bar) =>
-        bar.kind === "total" ? 0 : Math.min(bar.start, bar.end),
-      ),
-    },
-    {
-      name: "增加",
-      labels,
-      values: model.bars.map((bar) => (bar.kind === "increase" ? Math.abs(bar.value) : 0)),
-    },
-    {
-      name: "减少",
-      labels,
-      values: model.bars.map((bar) => (bar.kind === "decrease" ? Math.abs(bar.value) : 0)),
-    },
-    {
-      name: "合计",
-      labels,
-      values: model.bars.map((bar) =>
-        bar.kind === "total"
-          ? Math.abs(bar.end)
-          : bar.kind === "subtotal"
-            ? Math.abs(bar.value)
-            : 0,
-      ),
-    },
-  ];
-  const valueRange = Math.max(1e-9, model.valueMax - model.valueMin);
-  const wfLayout = waterfallLayoutFor(el, model, w, h);
-  slide.addChart("bar", data, {
-    x: pxToIn(x, size[0], layout.w),
-    y: pxToIn(y, size[1], layout.h),
-    w: pxToIn(w, size[0], layout.w),
-    h: pxToIn(h, size[1], layout.h),
-    layout: {
-      x: wfLayout.plot.x / w,
-      y: wfLayout.plot.y / h,
-      w: wfLayout.plot.w / w,
-      h: wfLayout.plot.h / h,
-    },
-    barDir: "col",
-    barGrouping: "stacked",
-    barOverlapPct: 100,
-    showLegend: false,
-    showValue: false,
-    dataLabelColor: surface.ink,
-    dataLabelFontFace: CHART_FONT_FACE,
-    dataLabelFontSize: labelPt,
-    showTitle: false,
-    showCatAxisTitle: Boolean(el.axis?.x),
-    catAxisTitle: el.axis?.x,
-    catAxisTitleColor: surface.ink,
-    catAxisTitleFontFace: CHART_FONT_FACE,
-    catAxisTitleFontSize: axisTitlePt,
-    catAxisLabelColor: surface.ink,
-    catAxisLabelFontFace: CHART_FONT_FACE,
-    catAxisLabelFontSize: catPt,
-    catAxisLineColor: surface.grid,
-    catGridLine: { style: "none" },
-    showValAxisTitle: Boolean(el.axis?.y),
-    valAxisTitle: el.axis?.y,
-    valAxisTitleColor: surface.ink,
-    valAxisTitleFontFace: CHART_FONT_FACE,
-    valAxisTitleFontSize: axisTitlePt,
-    valAxisLabelColor: surface.ink,
-    valAxisLabelFontFace: CHART_FONT_FACE,
-    valAxisLabelFontSize: tickPt,
-    valAxisLineColor: surface.grid,
-    valAxisLabelFormatCode: "#,##0" + (model.scale.tickDecimals > 0 ? `.${"0".repeat(model.scale.tickDecimals)}` : ""),
-    valAxisMinVal: model.valueMin,
-    valAxisMaxVal: model.valueMax,
-    valAxisMajorUnit: model.scale.step,
-    chartColors: ["transparent", "10B981", "EF4444", "F59E0B"],
-    valGridLine: { color: surface.grid, size: 0.5 },
-  });
-  if (el.title && wfLayout.title) {
-    const t = wfLayout.title;
-    slide.addText(typeof el.title === "string" ? el.title : el.title.text ?? "", {
-      x: pxToIn(x + t.x, size[0], layout.w),
-      y: pxToIn(y + t.y, size[1], layout.h),
-      w: pxToIn(t.w, size[0], layout.w),
-      h: pxToIn(t.h, size[1], layout.h),
-      fontFace: CHART_FONT_FACE,
-      fontSize: Math.round(cssPxToPt(CHART_TEXT_PX.title) * 100) / 100,
-      color: surface.ink,
-      align: "left",
-      valign: "middle",
-      margin: 0,
-      wrap: false,
-    });
-  }
-
-  // Connector lines and labels stay editable while the embedded workbook
-  // remains the source for bar geometry. The plot rect is the same one the
-  // canvas painter computed through the shared layout.
-  const plot = {
-    x: x + wfLayout.plot.x,
-    y: y + wfLayout.plot.y,
-    w: wfLayout.plot.w,
-    h: wfLayout.plot.h,
-  };
-  const group = plot.w / Math.max(1, model.bars.length);
-  const yFor = (value: number) =>
-    plot.y + ((model.valueMax - value) / valueRange) * plot.h;
-  model.bars.forEach((bar, index) => {
-    const centerX = plot.x + group * (index + 0.5);
-    const topValue = Math.max(bar.start, bar.end);
-    slide.addText(
-      formatChartNumber(
-        bar.value,
-        bar.kind === "increase" || bar.kind === "decrease",
-      ),
-      {
-        x: pxToIn(centerX - group * 0.42, size[0], layout.w),
-        y: pxToIn(Math.max(plot.y, yFor(topValue) - 13), size[1], layout.h),
-        w: pxToIn(group * 0.84, size[0], layout.w),
-        h: pxToIn(12, size[1], layout.h),
-        fontFace: CHART_FONT_FACE,
-        fontSize: labelPt,
-        color: surface.ink,
-        align: "center",
-        margin: 0,
-        fit: "shrink",
-      },
-    );
-    if (index >= model.bars.length - 1) return;
-    const next = model.bars[index + 1]!;
-    const connectorValue = next.kind === "total" ? bar.end : next.start;
-    const connectorY = yFor(connectorValue);
-    slide.addShape("line", {
-      x: pxToIn(centerX + group * 0.32, size[0], layout.w),
-      y: pxToIn(connectorY, size[1], layout.h),
-      w: pxToIn(group * 0.36, size[0], layout.w),
-      h: 0,
-      line: { color: "9CA3AF", width: 0.75, dashType: "dash" },
-    });
-  });
-}
-
-function mapScatterChart(
-  slide: PptxGenJS.Slide,
-  el: ChartElement,
-  size: [number, number],
-  layout: { w: number; h: number },
-  surface: ChartSurfaceStyle,
-  tickPt: number,
-  catPt: number,
-  axisTitlePt: number,
-): void {
-  const [x, y, w, h] = el.bounds;
-  const model = scatterChartModel(el);
-  const color = hexNoHash(chartSwatch(el, 0));
-  const data: PptxGenJS.OptsChartData[] = [
-    { name: model.xName, values: model.points.map((point) => point.x) },
-    {
-      name: el.series[0]?.name ?? model.yName,
-      values: model.points.map((point) => point.y),
-    },
-  ];
-  const scLayout = scatterLayoutFor(el, model, w, h);
-  const plot = {
-    x: x + scLayout.plot.x,
-    y: y + scLayout.plot.y,
-    w: scLayout.plot.w,
-    h: scLayout.plot.h,
-  };
-  const thresholdX = plot.x + plot.w * 0.7;
-  const thresholdY = plot.y + plot.h * 0.3;
-  const quadrants = [
-    { x: plot.x, y: plot.y, w: thresholdX - plot.x, h: thresholdY - plot.y, color: "FEF3C7", transparency: 55 },
-    { x: thresholdX, y: plot.y, w: plot.x + plot.w - thresholdX, h: thresholdY - plot.y, color: "FEE2E2", transparency: 35 },
-    { x: plot.x, y: thresholdY, w: thresholdX - plot.x, h: plot.y + plot.h - thresholdY, color: "ECFDF5", transparency: 35 },
-    { x: thresholdX, y: thresholdY, w: plot.x + plot.w - thresholdX, h: plot.y + plot.h - thresholdY, color: "FEF3C7", transparency: 55 },
-  ];
-  for (const quadrant of quadrants) {
-    slide.addShape("rect", {
-      x: pxToIn(quadrant.x, size[0], layout.w),
-      y: pxToIn(quadrant.y, size[1], layout.h),
-      w: pxToIn(quadrant.w, size[0], layout.w),
-      h: pxToIn(quadrant.h, size[1], layout.h),
-      fill: { color: quadrant.color, transparency: quadrant.transparency },
-      line: { color: quadrant.color, transparency: 100 },
-    });
-  }
-  slide.addChart("scatter", data, {
-    x: pxToIn(x, size[0], layout.w),
-    y: pxToIn(y, size[1], layout.h),
-    w: pxToIn(w, size[0], layout.w),
-    h: pxToIn(h, size[1], layout.h),
-    layout: {
-      x: scLayout.plot.x / w,
-      y: scLayout.plot.y / h,
-      w: scLayout.plot.w / w,
-      h: scLayout.plot.h / h,
-    },
-    showTitle: false,
-    showLegend: resolveChartLegend(el.legend).show,
-    legendColor: surface.ink,
-    legendFontFace: CHART_FONT_FACE,
-    legendFontSize: Math.round(cssPxToPt(CHART_TEXT_PX.legend) * 100) / 100,
-    showLabel: false,
-    showValue: false,
-    dataLabelColor: surface.ink,
-    chartColors: [color],
-    lineSize: 0,
-    lineDataSymbol: "circle",
-    lineDataSymbolSize: 8,
-    lineDataSymbolLineColor: color,
-    lineDataSymbolLineSize: 1,
-    catAxisMinVal: model.xMin,
-    catAxisMaxVal: model.xMax,
-    catAxisMajorUnit: model.xScale.step,
-    valAxisMinVal: model.yMin,
-    valAxisMaxVal: model.yMax,
-    valAxisMajorUnit: model.yScale.step,
-    showCatAxisTitle: true,
-    catAxisTitle: el.axis?.x ?? model.xName,
-    catAxisTitleColor: surface.ink,
-    catAxisTitleFontFace: CHART_FONT_FACE,
-    catAxisTitleFontSize: axisTitlePt,
-    catAxisLabelColor: surface.ink,
-    catAxisLabelFontFace: CHART_FONT_FACE,
-    catAxisLabelFontSize: catPt,
-    catAxisLineColor: surface.grid,
-    showValAxisTitle: true,
-    valAxisTitle: el.axis?.y ?? model.yName,
-    valAxisTitleColor: surface.ink,
-    valAxisTitleFontFace: CHART_FONT_FACE,
-    valAxisTitleFontSize: axisTitlePt,
-    valAxisLabelColor: surface.ink,
-    valAxisLabelFontFace: CHART_FONT_FACE,
-    valAxisLabelFontSize: tickPt,
-    valAxisLineColor: surface.grid,
-    valAxisLabelFormatCode: "#,##0" + (model.yScale.tickDecimals > 0 ? `.${"0".repeat(model.yScale.tickDecimals)}` : ""),
-    catLabelFormatCode: "#,##0" + (model.xScale.tickDecimals > 0 ? `.${"0".repeat(model.xScale.tickDecimals)}` : ""),
-    valGridLine: { color: surface.grid, size: 0.5 },
-    catGridLine: { color: surface.grid, size: 0.5 },
-    chartArea: {
-      fill: { color: "FFFFFF", transparency: 100 },
-      border: { color: "FFFFFF", pt: 0 },
-    },
-    plotArea: {
-      fill: { color: "FFFFFF", transparency: 100 },
-      border: { color: surface.grid, pt: 0.5 },
-    },
-  });
-  if (el.title && scLayout.title) {
-    const t = scLayout.title;
-    slide.addText(typeof el.title === "string" ? el.title : el.title.text ?? "", {
-      x: pxToIn(x + t.x, size[0], layout.w),
-      y: pxToIn(y + t.y, size[1], layout.h),
-      w: pxToIn(t.w, size[0], layout.w),
-      h: pxToIn(t.h, size[1], layout.h),
-      fontFace: CHART_FONT_FACE,
-      fontSize: Math.round(cssPxToPt(CHART_TEXT_PX.title) * 100) / 100,
-      color: surface.ink,
-      align: "left",
-      valign: "middle",
-      margin: 0,
-      wrap: false,
-    });
-  }
-  const xRange = Math.max(1e-9, model.xMax - model.xMin);
-  const yRange = Math.max(1e-9, model.yMax - model.yMin);
-  const placements = placeScatterLabels(
-    model.points.map((point) => ({
-      label: point.label,
-      x: plot.x + ((point.x - model.xMin) / xRange) * plot.w,
-      y: plot.y + ((model.yMax - point.y) / yRange) * plot.h,
-    })),
-    { left: x + 2, top: y + 4, right: x + w - 2, bottom: y + h - 3 },
-    9,
-  );
-  for (const placement of placements) {
-    const quadrant = quadrants.find(
-      (candidate) =>
-        placement.pointX >= candidate.x &&
-        placement.pointX <= candidate.x + candidate.w &&
-        placement.pointY >= candidate.y &&
-        placement.pointY <= candidate.y + candidate.h,
-    );
-    const underlay = quadrant
-      ? compositeHex(`#${quadrant.color}`, surface.background, quadrant.transparency)
-      : surface.background;
-    const labelStyle = readableScatterLabelStyle(underlay);
-    const plateLeft = placement.box.left - 3;
-    const plateTop = placement.box.top - 1;
-    const plateWidth = placement.box.right - placement.box.left + 6;
-    const plateHeight = placement.box.bottom - placement.box.top + 5;
-    slide.addShape("roundRect", {
-      x: pxToIn(plateLeft, size[0], layout.w),
-      y: pxToIn(plateTop, size[1], layout.h),
-      w: pxToIn(plateWidth, size[0], layout.w),
-      h: pxToIn(plateHeight, size[1], layout.h),
-      fill: { color: labelStyle.backplate, transparency: labelStyle.transparency },
-      line: { color: labelStyle.backplate, transparency: 100 },
-    });
-    slide.addText(placement.label, {
-      x: pxToIn(placement.box.left, size[0], layout.w),
-      y: pxToIn(placement.box.top, size[1], layout.h),
-      w: pxToIn(placement.box.right - placement.box.left, size[0], layout.w),
-      h: pxToIn(placement.box.bottom - placement.box.top + 3, size[1], layout.h),
-      fontFace: CHART_FONT_FACE,
-      fontSize: Math.round(cssPxToPt(CHART_TEXT_PX.scatterLabel) * 100) / 100,
-      bold: true,
-      color: labelStyle.foreground,
-      margin: 0,
-      wrap: false,
-      fit: "none",
-      valign: "middle",
-    });
-  }
-}
-
-/** Shared element-relative layout for scatter and its label overlays. */
-function scatterLayoutFor(
-  el: ChartElement,
-  model: ReturnType<typeof scatterChartModel>,
-  w: number,
-  h: number,
-): ReturnType<typeof chartLayout> {
-  const tickLabels = model.yScale.ticks.map((t) =>
-    formatChartValue(t, model.yScale.tickDecimals),
-  );
-  const widestTickLabel = tickLabels.reduce(
-    (best, label) => (label.length > best.length ? label : best),
-    "0",
-  );
-  return chartLayout(
-    { w, h },
-    {
-      title: typeof el.title === "string" ? el.title : el.title?.text ?? "",
-      legend: resolveChartLegend(el.legend),
-      legendItems: [el.series[0]?.name ?? model.yName],
-      widestTickLabel,
-      widestCategoryLabel: "",
-      categoryCount: 1,
-      axis: { x: el.axis?.x ?? model.xName, y: el.axis?.y ?? model.yName },
-    },
-  );
-}
-
-/** Shared element-relative layout for waterfall and the overlay labels. */
-function waterfallLayoutFor(
-  el: ChartElement,
-  model: ReturnType<typeof waterfallChartModel>,
-  w: number,
-  h: number,
-): ReturnType<typeof chartLayout> {
-  const tickLabels = model.scale.ticks.map((t) =>
-    formatChartValue(t, model.scale.tickDecimals),
-  );
-  const widestTickLabel = tickLabels.reduce(
-    (best, label) => (label.length > best.length ? label : best),
-    "0",
-  );
-  const widestCategoryLabel = model.bars
-    .map((bar) => bar.label)
-    .reduce((best, label) => (String(label).length > best.length ? String(label) : best), "");
-  return chartLayout(
-    { w, h },
-    {
-      title: typeof el.title === "string" ? el.title : el.title?.text ?? "",
-      legend: resolveChartLegend(el.legend),
-      legendItems: [],
-      widestTickLabel,
-      widestCategoryLabel,
-      categoryCount: Math.max(1, model.bars.length),
-      axis: el.axis,
-    },
-  );
-}
-/** px-in-slide fraction → pptxgenjs manualLayout fraction of the chart area. */
-function fractionOfChart(px: number, span: number): number {
-  return Math.max(0, Math.min(1, px / Math.max(1, span)));
-}
-
-type ChartPatch = {
-  slideIndex: number;
-  elementId: string;
-  /** Per-series Excel format codes, in declared series order. */
-  seriesFormatCodes: string[];
-  /** Series names written into the chart, used to pair a part back here. */
-  seriesNames: string[];
-  legend?: { position: LegendPosition; layout?: Rect };
-  /** ManualLayout fractions of the chart element for the plot area. */
-  plotLayout?: { x: number; y: number; w: number; h: number };
-  barHorizontal?: boolean;
-  pie?: boolean;
-  /** MiSans needs matching ea/cs typefaces for CJK labels. */
-  fontFace: string;
-};
 
 function mapChart(
   slide: PptxGenJS.Slide,
@@ -1579,7 +755,7 @@ function mapChart(
   deg: Degradation[],
   slideIndex: number,
   editData: { ok: string[]; failed: string[] },
-  pageSurface: string,
+  surface: string,
   chartPatches: ChartPatch[],
 ): void {
   const [x, y, w, h] = el.bounds;
@@ -1597,10 +773,11 @@ function mapChart(
         });
       }
     }
-    const chartSurfaceColor = exportedFillColor(el.background, theme) ?? pageSurface;
-    const chartSurfaceDark = isDarkHex(chartSurfaceColor);
-    const ink = chartSurfaceDark ? CHART_INK.dark.slice(1) : CHART_INK.light.slice(1);
-    const grid = chartSurfaceDark ? CHART_GRID.dark.slice(1) : CHART_GRID.light.slice(1);
+    // The surface the editor reads its ink against (exportedChartSurface), so both sides agree.
+    const chartSurfaceDark = isDarkChartSurface(surface);
+    const chrome = chartChrome(theme);
+    const ink = (chartSurfaceDark ? chrome.ink.dark : chrome.ink.light).slice(1);
+    const grid = (chartSurfaceDark ? chrome.grid.dark : chrome.grid.light).slice(1);
     const kind = chartKind(el);
     const fontPt = (px: number) => Math.round(cssPxToPt(px) * 100) / 100;
     const tickPt = fontPt(CHART_TEXT_PX.tick);
@@ -1611,7 +788,17 @@ function mapChart(
     const axisTitlePt = fontPt(CHART_TEXT_PX.axisTitle);
 
     if (kind === "waterfall") {
-      mapWaterfallChart(slide, el, size, layout, { ink, grid, background: chartSurfaceColor }, tickPt, catPt, labelPt, axisTitlePt);
+      mapWaterfallChart(
+        slide,
+        el,
+        size,
+        layout,
+        { ink, grid, background: surface },
+        tickPt,
+        catPt,
+        labelPt,
+        axisTitlePt,
+      );
       chartPatches.push({
         slideIndex,
         elementId: el.elementId,
@@ -1623,7 +810,7 @@ function mapChart(
       return;
     }
     if (kind === "scatter") {
-      mapScatterChart(slide, el, size, layout, { ink, grid, background: chartSurfaceColor }, tickPt, catPt, axisTitlePt);
+      mapScatterChart(slide, el, size, layout, { ink, grid, background: surface }, tickPt, catPt, axisTitlePt);
       chartPatches.push({
         slideIndex,
         elementId: el.elementId,
@@ -1636,14 +823,20 @@ function mapChart(
     }
     const mapped = mapChartElement(el);
     const type = (el.series[0]?.type ?? "bar").toLowerCase();
+    // Pie and doughnut slices both label as "name pct%", so both take the separator and the
+    // percent format (a value format would print "0" for a share).
+    const sliced = mapped.pptxType === "pie" || mapped.pptxType === "doughnut";
     const patch: ChartPatch = {
       slideIndex,
       elementId: el.elementId,
-      seriesFormatCodes: mapped.series.map((s) => s.formatCode),
+      seriesFormatCodes: mapped.series.map((s) => (sliced ? SLICE_LABEL_FORMAT_CODE : s.formatCode)),
       seriesNames: mapped.series.map((s) => s.name),
       fontFace: CHART_FONT_FACE,
-      pie: mapped.pptxType === "pie",
+      pie: sliced,
+      radar: mapped.pptxType === "radar",
+      labels: mapped.showValue,
       barHorizontal: mapped.barDir === "bar",
+      seriesFills: chartSeriesFills(mapped, theme),
       plotLayout: {
         x: fractionOfChart(mapped.layout.plot.x, w),
         y: fractionOfChart(mapped.layout.plot.y, h),
@@ -1670,9 +863,7 @@ function mapChart(
       layout: patch.plotLayout,
       showTitle: false,
       showLegend: mapped.showLegend,
-      legendPos: ({ top: "t", bottom: "b", left: "l", right: "r" } as const)[
-        mapped.legend.position
-      ],
+      legendPos: ({ top: "t", bottom: "b", left: "l", right: "r" } as const)[mapped.legend.position],
       showValue: mapped.showValue,
       dataLabelFormatCode: mapped.dataLabelFormatCode,
       dataLabelColor: ink,
@@ -1683,6 +874,7 @@ function mapChart(
       catAxisLabelFontFace: CHART_FONT_FACE,
       catAxisLabelFontSize: catPt,
       catAxisLineColor: grid,
+      catAxisLineSize: HAIRLINE_PT,
       catAxisTitleColor: ink,
       catAxisTitleFontFace: CHART_FONT_FACE,
       catAxisTitleFontSize: axisTitlePt,
@@ -1691,11 +883,13 @@ function mapChart(
       valAxisLabelFontFace: CHART_FONT_FACE,
       valAxisLabelFontSize: tickPt,
       valAxisLineColor: grid,
+      valAxisLineSize: HAIRLINE_PT,
       valAxisTitleColor: ink,
       valAxisTitleFontFace: CHART_FONT_FACE,
       valAxisTitleFontSize: axisTitlePt,
-      valGridLine: { color: grid, size: 0.5 },
-      valAxisLabelFormatCode: "#,##0" + (mapped.scale.tickDecimals > 0 ? `.${"0".repeat(mapped.scale.tickDecimals)}` : ""),
+      valGridLine: { color: grid, size: HAIRLINE_PT },
+      valAxisLabelFormatCode:
+        "#,##0" + (mapped.scale.tickDecimals > 0 ? `.${"0".repeat(mapped.scale.tickDecimals)}` : ""),
       valAxisMinVal: mapped.scale.min,
       valAxisMaxVal: mapped.scale.max,
       valAxisMajorUnit: mapped.scale.step,
@@ -1713,13 +907,8 @@ function mapChart(
       barOverlapPct: -8,
     };
     if (mapped.pptxType === "line" || mapped.pptxType === "area") {
-      opts.lineSize = 2.25;
+      opts.lineSize = mapped.pptxType === "area" ? AREA_OUTLINE_PT : LINE_SERIES_PT;
       opts.lineDataSymbol = "none";
-    }
-    if (mapped.pptxType === "pie") {
-      opts.showLabel = true;
-      opts.showPercent = true;
-      opts.dataLabelPosition = "ctr";
     }
     if (mapped.barDir) opts.barDir = mapped.barDir;
     if (mapped.barDir === "bar") {
@@ -1735,11 +924,40 @@ function mapChart(
       // patchDataLabelPositions for the post-write correction.
       opts.dataLabelPosition = "inEnd";
     }
-    // pptxgenjs only splits a chart into parts when one series uses a
-    // secondary axis, and it rejects the split otherwise.
-    const combo =
-      new Set(mapped.series.map((series) => series.pptxType)).size >= 2 &&
-      mapped.series.some((series) => series.axis === "secondary");
+    // Radar, doughnut and stacked bar settings win over the shared defaults above.
+    Object.assign(opts, chartKindOptions(mapped, grid));
+    if (mapped.grouping === "percentStacked") {
+      deg.push({
+        slideIndex,
+        elementId: el.elementId,
+        kind: "chart-percent-labels-as-values",
+        reason: "percent-stacked data labels show source values, not shares",
+      });
+    }
+    // pptxgenjs only splits a chart into parts for a secondary axis, and it
+    // rejects the split otherwise. A stacked bar with lines keeps one axis pair,
+    // because the editor draws those lines on the bars' own scale. So does a
+    // clustered column chart with lines; the single-chart path would write them as bars.
+    const { combo, hasSecondary, seriesKinds } = comboChartPlan(mapped);
+    // The chart title is a native text box on the shared layout rect: the
+    // canvas paints it identically, and pptxgenjs' titlePos math is broken.
+    const addChartTitle = () => {
+      if (!mapped.title || !mapped.layout.title) return;
+      const t = mapped.layout.title;
+      slide.addText(mapped.title, {
+        x: pxToIn(x + t.x, size[0], layout.w),
+        y: pxToIn(y + t.y, size[1], layout.h),
+        w: pxToIn(t.w, size[0], layout.w),
+        h: pxToIn(t.h, size[1], layout.h),
+        fontFace: CHART_FONT_FACE,
+        fontSize: titlePt,
+        color: ink,
+        align: "left",
+        valign: "middle",
+        margin: 0,
+        wrap: false,
+      });
+    };
     if (combo) {
       const groups = new Map<string, typeof mapped.series>();
       for (const series of mapped.series) {
@@ -1748,6 +966,14 @@ function mapChart(
         group.push(series);
         groups.set(key, group);
       }
+      // The part lists series group by group and the format patch walks it in that
+      // order, so a bar, line, bar declaration must not hand the line the bars' format.
+      const written = [...groups.values()].flat();
+      patch.seriesFormatCodes = written.map((series) => patch.seriesFormatCodes[mapped.series.indexOf(series)]!);
+      // pptxgenjs numbers c:idx/c:order over the concatenated groups, which
+      // renumbers an interleaved declaration; the XML patch restores the
+      // model's declared order per written series.
+      patch.seriesIndexes = written.map((series) => mapped.series.indexOf(series));
       const multi: PptxGenJS.IChartMulti[] = [...groups.values()].map((group) => ({
         type: group[0]!.pptxType as PptxGenJS.CHART_NAME,
         data: group.map((series) => ({
@@ -1769,64 +995,74 @@ function mapChart(
           // pptxgenjs shares one position across all parts and validates it
           // against the first; patchDataLabelPositions then sets outEnd on
           // the bar part and `t` on the line part.
-          dataLabelPosition: "inEnd",
+          dataLabelPosition: group[0]!.pptxType === "bar" ? barLabelPosition(mapped.grouping) : "inEnd",
           chartColors: group.map((series) => hexNoHash(series.color)),
           ...(group[0]!.pptxType === "bar" ? { barDir: "col" as const } : {}),
+          ...(group[0]!.pptxType === "bar" && mapped.grouping !== "clustered"
+            ? { barGrouping: mapped.grouping, barOverlapPct: 100 }
+            : {}),
           ...(group[0]!.pptxType === "line" || group[0]!.pptxType === "area"
-            ? { lineSize: 2.25, lineDataSymbol: "none" as const }
+            ? {
+                lineSize: group[0]!.pptxType === "area" ? AREA_OUTLINE_PT : LINE_SERIES_PT,
+                lineDataSymbol: "none" as const,
+              }
             : {}),
         },
       }));
-      opts.catAxes = [
-        {
-          catAxisLabelColor: ink,
-          catAxisLineColor: grid,
-          catAxisLabelFontSize: catPt,
-          catAxisLabelFontFace: CHART_FONT_FACE,
-          catAxisLabelPos: "low",
-          catAxisTitleFontFace: CHART_FONT_FACE,
-          catAxisTitleFontSize: axisTitlePt,
-        },
-        {
-          catAxisHidden: true,
-          catAxisLabelPos: "none",
-          catAxisLineShow: false,
-        },
-      ];
+      const primaryCatAxis: PptxGenJS.IChartPropsAxisCat = {
+        catAxisLabelColor: ink,
+        catAxisLineColor: grid,
+        catAxisLineSize: HAIRLINE_PT,
+        catAxisLabelFontSize: catPt,
+        catAxisLabelFontFace: CHART_FONT_FACE,
+        catAxisLabelPos: "low",
+        catAxisTitleFontFace: CHART_FONT_FACE,
+        catAxisTitleFontSize: axisTitlePt,
+      };
+      const secondaryCatAxis: PptxGenJS.IChartPropsAxisCat = {
+        catAxisHidden: true,
+        catAxisLabelPos: "none",
+        catAxisLineShow: false,
+      };
       const secondaryScale = mapped.secondaryScale ?? mapped.scale;
-      opts.valAxes = [
-        {
-          valAxisMinVal: mapped.scale.min,
-          valAxisMaxVal: mapped.scale.max,
-          valAxisMajorUnit: mapped.scale.step,
-          valAxisLabelFormatCode: opts.valAxisLabelFormatCode,
-          valAxisLabelFontSize: tickPt,
-          valAxisLabelFontFace: CHART_FONT_FACE,
-          showValAxisTitle: Boolean(el.axis?.y),
-          valAxisTitle: el.axis?.y,
-          valAxisTitleFontFace: CHART_FONT_FACE,
-          valAxisTitleFontSize: axisTitlePt,
-        },
-        {
-          valAxisMinVal: secondaryScale.min,
-          valAxisMaxVal: secondaryScale.max,
-          valAxisMajorUnit: secondaryScale.step,
-          valAxisLabelPos: "high",
-          valGridLine: { style: "none" },
-          valAxisLabelFormatCode: opts.valAxisLabelFormatCode,
-          valAxisLabelFontSize: tickPt,
-          valAxisLabelFontFace: CHART_FONT_FACE,
-          showValAxisTitle: Boolean(el.axis?.secondaryY),
-          valAxisTitle: el.axis?.secondaryY,
-          valAxisTitleFontFace: CHART_FONT_FACE,
-          valAxisTitleFontSize: axisTitlePt,
-        },
-      ];
+      const primaryValAxis: PptxGenJS.IChartPropsAxisVal = {
+        valAxisMinVal: mapped.scale.min,
+        valAxisMaxVal: mapped.scale.max,
+        valAxisMajorUnit: mapped.scale.step,
+        valAxisLabelFormatCode: opts.valAxisLabelFormatCode,
+        valAxisLabelFontSize: tickPt,
+        valAxisLabelFontFace: CHART_FONT_FACE,
+        valAxisLineSize: HAIRLINE_PT,
+        showValAxisTitle: Boolean(el.axis?.y),
+        valAxisTitle: el.axis?.y,
+        valAxisTitleFontFace: CHART_FONT_FACE,
+        valAxisTitleFontSize: axisTitlePt,
+      };
+      const secondaryValAxis: PptxGenJS.IChartPropsAxisVal = {
+        valAxisMinVal: secondaryScale.min,
+        valAxisMaxVal: secondaryScale.max,
+        valAxisMajorUnit: secondaryScale.step,
+        valAxisLabelPos: "high",
+        valAxisLineSize: HAIRLINE_PT,
+        valGridLine: { style: "none" },
+        // Plain numbers. The top-level percent format of a percent-stacked bar must not reach it.
+        valAxisLabelFormatCode: "General",
+        valAxisLabelFontSize: tickPt,
+        valAxisLabelFontFace: CHART_FONT_FACE,
+        showValAxisTitle: Boolean(el.axis?.secondaryY),
+        valAxisTitle: el.axis?.secondaryY,
+        valAxisTitleFontFace: CHART_FONT_FACE,
+        valAxisTitleFontSize: axisTitlePt,
+      };
+      // One axis pair unless a series sits on the secondary axis.
+      opts.catAxes = hasSecondary ? [primaryCatAxis, secondaryCatAxis] : [primaryCatAxis];
+      opts.valAxes = hasSecondary ? [primaryValAxis, secondaryValAxis] : [primaryValAxis];
       const addMultiChart = slide.addChart.bind(slide) as unknown as (
         chartTypes: PptxGenJS.IChartMulti[],
         options: PptxGenJS.IChartOpts,
       ) => void;
       addMultiChart(multi, opts);
+      addChartTitle();
       chartPatches.push(patch);
       editData.ok.push(el.elementId);
       return;
@@ -1842,7 +1078,7 @@ function mapChart(
       opts,
     );
     chartPatches.push(patch);
-    if (["bar", "line", "pie", "area", "column"].includes(type)) {
+    if (["bar", "line", "pie", "area", "column", "radar", "doughnut"].includes(type)) {
       editData.ok.push(el.elementId);
     } else {
       editData.failed.push(el.elementId);
@@ -1853,24 +1089,7 @@ function mapChart(
         reason: `chart type ${type} may lack full Edit Data fidelity`,
       });
     }
-    // The chart title is a native text box on the shared layout rect: the
-    // canvas paints it identically, and pptxgenjs' titlePos math is broken.
-    if (mapped.title && mapped.layout.title) {
-      const t = mapped.layout.title;
-      slide.addText(mapped.title, {
-        x: pxToIn(x + t.x, size[0], layout.w),
-        y: pxToIn(y + t.y, size[1], layout.h),
-        w: pxToIn(t.w, size[0], layout.w),
-        h: pxToIn(t.h, size[1], layout.h),
-        fontFace: CHART_FONT_FACE,
-        fontSize: titlePt,
-        color: ink,
-        align: "left",
-        valign: "middle",
-        margin: 0,
-        wrap: false,
-      });
-    }
+    addChartTitle();
   } catch (e) {
     editData.failed.push(el.elementId);
     deg.push({
@@ -1944,10 +1163,13 @@ function mapLine(
   layout: { w: number; h: number },
   degradations: Degradation[],
   slideIndex: number,
+  strokePatches: NoStrokePatch[],
 ): EditableLineEvidence {
   const [x, y, w, h] = el.bounds;
-  const color = hex(el.border?.color ?? theme?.colors?.primary ?? "#111111", theme);
-  const pt = el.border?.width ?? 1.5;
+  // Unstyled-line defaults (rulings 100, 112) come from pptd-v2, the same values the canvas paints.
+  const lineBorder = resolvedLineBorder(el.border, theme);
+  const color = hex(lineBorder.color, theme);
+  const pt = cssPxToPt(lineBorder.width);
   const objectName = `PPTD line ${el.elementId}`;
   const source = {
     bounds: [...el.bounds] as [number, number, number, number],
@@ -1960,23 +1182,23 @@ function mapLine(
   };
   const points = parsePolylinePoints(el.points);
   const [viewWidth, viewHeight] = el.viewBox;
-  const viewBoxValid =
-    Number.isFinite(viewWidth) &&
-    Number.isFinite(viewHeight) &&
-    viewWidth > 0 &&
-    viewHeight > 0;
+  const viewBoxValid = Number.isFinite(viewWidth) && Number.isFinite(viewHeight) && viewWidth > 0 && viewHeight > 0;
   const curve = el.curve?.trim().toLowerCase();
-  const curvePreserved =
-    !points || points.length <= 2 || !curve || curve === "straight" || curve === "sharp";
+  const curvePreserved = !points || points.length <= 2 || !curve || curve === "straight" || curve === "sharp";
   const line: PptxGenJS.ShapeLineProps = {
     color,
     width: pt,
     dashType: lineDashType(el.border?.style),
-    ...(el.opacity !== undefined
-      ? { transparency: Math.round((1 - Math.max(0, Math.min(1, el.opacity))) * 100) }
-      : {}),
+    ...(el.opacity !== undefined ? { transparency: Math.round((1 - Math.max(0, Math.min(1, el.opacity))) * 100) } : {}),
     ...(el.arrow?.[0] ? { beginArrowType: el.arrow[0] } : {}),
     ...(el.arrow?.[1] ? { endArrowType: el.arrow[1] } : {}),
+  };
+  // A zero width draws no outline, and so no arrowhead, as the editor paints it. pptxgenjs would
+  // draw a zero width as 1 pt, so such a line gets no line option and a no-fill outline patch.
+  const drawn = lineBorder.width > 0;
+  const outline = drawn ? { line } : {};
+  const patchOutline = () => {
+    if (!drawn) strokePatches.push({ slideIndex, objectName });
   };
 
   if (points && viewBoxValid) {
@@ -1989,7 +1211,7 @@ function mapLine(
       h: heightInches,
       objectName,
       fill: { type: "none" },
-      line,
+      ...outline,
       ...(el.rotation !== undefined ? { rotate: el.rotation } : {}),
       ...(el.flipH !== undefined ? { flipH: el.flipH } : {}),
       ...(el.flipV !== undefined ? { flipV: el.flipV } : {}),
@@ -1999,6 +1221,7 @@ function mapLine(
         ...(index === 0 ? { moveTo: true } : {}),
       })),
     });
+    patchOutline();
     if (!curvePreserved) {
       degradations.push({
         slideIndex,
@@ -2035,7 +1258,7 @@ function mapLine(
       w: pxToIn(w, size[0], layout.w),
       h: 0,
       objectName,
-      line,
+      ...outline,
       ...(el.rotation !== undefined ? { rotate: el.rotation } : {}),
       ...(el.flipH !== undefined ? { flipH: el.flipH } : {}),
       ...(el.flipV !== undefined ? { flipV: el.flipV } : {}),
@@ -2047,12 +1270,13 @@ function mapLine(
       w: 0,
       h: pxToIn(h, size[1], layout.h),
       objectName,
-      line,
+      ...outline,
       ...(el.rotation !== undefined ? { rotate: el.rotation } : {}),
       ...(el.flipH !== undefined ? { flipH: el.flipH } : {}),
       ...(el.flipV !== undefined ? { flipV: el.flipV } : {}),
     });
   }
+  patchOutline();
   return {
     slideIndex,
     elementId: el.elementId,
@@ -2075,11 +1299,7 @@ async function mapIcon(
   const fill = fillToPptx(el.fill, theme, degradations, slideIndex, el.elementId, el.opacity, "icon");
   const color = pptxInk(fill);
   const transparency =
-    fill.type === "solid"
-      ? fill.transparency
-      : fill.type === "gradient"
-        ? fill.fallback.transparency
-        : undefined;
+    fill.type === "solid" ? fill.transparency : fill.type === "gradient" ? fill.fallback.transparency : undefined;
   const width = pxToIn(w, size[0], layout.w);
   const height = pxToIn(h, size[1], layout.h);
   const points = await iconOutline(el.iconName || "fas:star", width, height);
@@ -2096,62 +1316,6 @@ async function mapIcon(
     ...(el.flipH !== undefined ? { flipH: el.flipH } : {}),
     ...(el.flipV !== undefined ? { flipV: el.flipV } : {}),
   });
-}
-
-/** Minimal natural-size probe — enough to convert crop fractions into OOXML
- * srcRect values that compose with cover fitting. */
-export function probeImageSize(
-  buf: Buffer,
-): { w: number; h: number } | undefined {
-  // PNG: signature + IHDR dims at byte 16.
-  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
-    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
-  }
-  // GIF: logical screen descriptor.
-  if (buf.length > 10 && buf.toString("ascii", 0, 6).startsWith("GIF")) {
-    return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
-  }
-  // JPEG: walk segments to the first SOF marker.
-  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
-    let off = 2;
-    while (off + 9 < buf.length) {
-      if (buf[off] !== 0xff) {
-        off++;
-        continue;
-      }
-      const marker = buf[off + 1]!;
-      if (
-        marker >= 0xc0 &&
-        marker <= 0xcf &&
-        marker !== 0xc4 &&
-        marker !== 0xc8 &&
-        marker !== 0xcc
-      ) {
-        return { h: buf.readUInt16BE(off + 5), w: buf.readUInt16BE(off + 7) };
-      }
-      const len = buf.readUInt16BE(off + 2);
-      off += 2 + len;
-    }
-  }
-  // WebP: RIFF container — VP8/VP8L/VP8X headers.
-  if (
-    buf.length > 30 &&
-    buf.toString("ascii", 0, 4) === "RIFF" &&
-    buf.toString("ascii", 8, 12) === "WEBP"
-  ) {
-    const fourcc = buf.toString("ascii", 12, 16);
-    if (fourcc === "VP8X") {
-      return { w: 1 + buf.readUIntLE(24, 3), h: 1 + buf.readUIntLE(27, 3) };
-    }
-    if (fourcc === "VP8 ") {
-      return { w: buf.readUInt16LE(26) & 0x3fff, h: buf.readUInt16LE(28) & 0x3fff };
-    }
-    if (fourcc === "VP8L") {
-      const bits = buf.readUInt32LE(21);
-      return { w: (bits & 0x3fff) + 1, h: ((bits >> 14) & 0x3fff) + 1 };
-    }
-  }
-  return undefined;
 }
 
 const clamp01 = (v: number | undefined) =>
@@ -2174,14 +1338,7 @@ function srcRectForCrop(
   const r = clamp01(crop.right);
   const b = clamp01(crop.bottom);
   if (l + r >= 1 || t + b >= 1) return { l: 0.5, t: 0.5, r: 0.5, b: 0.5 };
-  if (
-    fitMode === "cover" &&
-    natural &&
-    natural.w > 0 &&
-    natural.h > 0 &&
-    boxW > 0 &&
-    boxH > 0
-  ) {
+  if (fitMode === "cover" && natural && natural.w > 0 && natural.h > 0 && boxW > 0 && boxH > 0) {
     const scale = Math.max(boxW / natural.w, boxH / natural.h);
     // Fraction of the source that the cover fit shows.
     const fw = Math.min(1, boxW / (natural.w * scale));
@@ -2200,6 +1357,28 @@ function srcRectForCrop(
   return { l, t, r, b };
 }
 
+function locatedImage(
+  src: string,
+  rootDir: string,
+): { src: string; natural?: { w: number; h: number }; missing?: true } {
+  if (src.startsWith("http")) return { src };
+  if (src.startsWith("data:")) {
+    const comma = src.indexOf(",");
+    try {
+      return { src, natural: probeImageSize(Buffer.from(src.slice(comma + 1), "base64")) };
+    } catch {
+      return { src };
+    }
+  }
+  const local = path.join(rootDir, src);
+  if (!fs.existsSync(local)) return { src, missing: true };
+  try {
+    return { src: local, natural: probeImageSize(fs.readFileSync(local)) };
+  } catch {
+    return { src: local };
+  }
+}
+
 function mapImage(
   slide: PptxGenJS.Slide,
   el: Extract<PptdElement, { elementType: "image" }>,
@@ -2209,42 +1388,26 @@ function mapImage(
   deg: Degradation[],
   slideIndex: number,
   srcRectPatches: ImageSrcRectPatch[],
+  clipPatches: SlideImageClipPatch[],
+  nativeShapeTypes: Readonly<Record<string, string>>,
 ): void {
   const [x, y, w, h] = el.bounds;
-  let src = el.src;
-  let natural: { w: number; h: number } | undefined;
-  if (!src.startsWith("http") && !src.startsWith("data:")) {
-    const local = path.join(rootDir, src);
-    if (fs.existsSync(local)) {
-      src = local;
-      try {
-        natural = probeImageSize(fs.readFileSync(local));
-      } catch {
-        natural = undefined;
-      }
-    } else {
-      deg.push({
-        slideIndex,
-        elementId: el.elementId,
-        kind: "missing-image",
-        reason: `image not found: ${el.src}`,
-      });
-      return;
-    }
-  } else if (src.startsWith("data:")) {
-    const comma = src.indexOf(",");
-    try {
-      natural = probeImageSize(Buffer.from(src.slice(comma + 1), "base64"));
-    } catch {
-      natural = undefined;
-    }
+  const resolved = locatedImage(el.src, rootDir);
+  if (resolved.missing) {
+    deg.push({
+      slideIndex,
+      elementId: el.elementId,
+      kind: "missing-image",
+      reason: `image not found: ${el.src}`,
+    });
+    return;
   }
+  const src = resolved.src;
+  const natural = resolved.natural;
   const boxW = pxToIn(w, size[0], layout.w);
   const boxH = pxToIn(h, size[1], layout.h);
   const fitMode = el.fit?.mode ?? "cover";
-  const hasCrop = Boolean(
-    el.crop && (el.crop.left || el.crop.top || el.crop.right || el.crop.bottom),
-  );
+  const hasCrop = Boolean(el.crop && (el.crop.left || el.crop.top || el.crop.right || el.crop.bottom));
   const image: PptxGenJS.ImageProps = {
     path: src.startsWith("data:") ? undefined : src,
     data: src.startsWith("data:") ? src : undefined,
@@ -2281,13 +1444,18 @@ function mapImage(
     image.sizing = { type: fitMode, w: boxW, h: boxH };
   }
   slide.addImage(image);
+  const clip = pictureClipPatch(el, slideIndex, deg, nativeShapeTypes);
+  if (clip) clipPatches.push(clip);
 }
 
 export async function exportProjectToPptx(
   source: string | PptdProject,
   opts: ExportPptxOptions = {},
 ): Promise<ExportResult> {
-  const project = typeof source === "string" ? loadProject(source) : source;
+  // A stored colour the exporter cannot resolve is written as its inherited or default colour and
+  // reported as a degradation; it never fails the export. The loaded project itself is unchanged.
+  const colors = sanitizeProjectColors(typeof source === "string" ? loadProject(source) : source);
+  const project = colors.project;
   const size = project.presentation.size;
   const layout = { w: 10, h: (10 * size[1]) / size[0] };
   const pptx = createPptx();
@@ -2296,19 +1464,33 @@ export async function exportProjectToPptx(
   pptx.author = "DSH SlideStudio native exporter";
   pptx.title = project.presentation.title ?? "Deck";
 
-  const degradations: Degradation[] = [];
+  const layoutExport = layoutExportOf(project);
+  const degradations: Degradation[] = [
+    ...colorFallbackDegradations(ownColorFallbacks(project.pages, colors.fallbacks)),
+    ...(layoutExport?.notes ?? []),
+    ...pageNumberNotes(project.pages),
+  ];
   const gradientPatches: GradientPatch[] = [];
+  const customGeometryPatches: CustomGeometryPatch[] = [];
   const srcRectPatches: ImageSrcRectPatch[] = [];
+  const imageClipPatches: SlideImageClipPatch[] = [];
+  const strokePatches: NoStrokePatch[] = [];
+  const shadowPatches: ShadowPatch[] = [];
+  const backgroundPatches: BackgroundPatch[] = [];
+  const pageNumberPatches: PageNumberPatch[] = [];
+  const nativeShapeTypes = pptx.ShapeType as unknown as Readonly<Record<string, string>>;
   const chartPatches: ChartPatch[] = [];
   const editDataCharts = { ok: [] as string[], failed: [] as string[] };
   const editableLines: EditableLineEvidence[] = [];
   let mapped = 0;
   let failed = 0;
 
-  for (const [slideIndex, lp] of project.pages.entries()) {
-    const slide = pptx.addSlide();
-    const pageSurface = pageSurfaceColor(lp.page, project.presentation.theme, size);
-    const bg = lp.page.background as
+  // PptxGenJS binds a page to its layout by name when the page is added, so layouts come first.
+  for (const definition of project.presentation.layouts ?? []) {
+    pptx.defineSlideMaster({ title: layoutMasterName(definition.id) });
+  }
+  const drawBackground = (slide: PptxGenJS.Slide, fill: Fill | undefined, slideIndex: number): void => {
+    const bg = fill as
       | {
           type?: string;
           color?: string;
@@ -2351,31 +1533,35 @@ export async function exportProjectToPptx(
           }
         }
       } else if (bg.type === "gradient") {
-        degradations.push({
-          slideIndex,
-          kind: "gradient-as-solid",
-          reason: "page gradient collapsed to first stop",
-        });
-        const c = bg.stops?.[0]?.color ?? "#FFFFFF";
-        slide.background = { color: hex(c, project.presentation.theme) };
+        const page = pageBackgroundFill(bg as Fill, project.presentation.theme, degradations, slideIndex);
+        slide.background = { color: page.color };
+        if (page.gradient) backgroundPatches.push({ slideIndex, fill: page.gradient });
       }
     }
-    for (const el of lp.page.elements) {
+  };
+  const drawElements = async (
+    slide: PptxGenJS.Slide,
+    elements: readonly PptdElement[],
+    page: Page,
+    slideIndex: number,
+  ): Promise<void> => {
+    const pageSurface = pageSurfaceColor(page, project.presentation.theme, size);
+    for (const el of elements) {
       if (isMicroscopicHiddenChart(el)) continue;
+      const shadow = shadowPatchFor(el, slideIndex, project.presentation.theme, degradations);
+      if (shadow) shadowPatches.push(shadow);
       try {
         switch (el.elementType) {
           case "text":
-            mapText(
-              slide,
-              el as TextElement,
-              project.presentation.theme,
-              size,
-              layout,
-            );
+            mapText(slide, el as TextElement, project.presentation.theme, size, layout);
             mapped++;
+            // Only a page's own slide takes its number; carrier slides follow the pages.
+            if (slideIndex < project.pages.length && isPageOwnNumber(el)) {
+              pageNumberPatches.push(pageNumberPatchFor(el, slideIndex, project.pages.length));
+            }
             break;
-          case "shape":
-            mapShape(
+          case "shape": {
+            const drawn = mapShape(
               slide,
               pptx.ShapeType as unknown as Readonly<Record<string, PptxGenJS.SHAPE_NAME>>,
               el as ShapeElement,
@@ -2385,17 +1571,19 @@ export async function exportProjectToPptx(
               degradations,
               slideIndex,
               gradientPatches,
+              customGeometryPatches,
+              strokePatches,
             );
+            // The picture patch needs the shape's p:sp, so it exists only where mapShape drew one.
+            const imageFill = drawn
+              ? shapeImageFillPatch(slide, el as ShapeElement, project.rootDir, slideIndex, degradations)
+              : undefined;
+            if (imageFill) imageClipPatches.push(imageFill);
             mapped++;
             break;
+          }
           case "table":
-            mapTable(
-              slide,
-              el as TableElement,
-              project.presentation.theme,
-              size,
-              layout,
-            );
+            mapTable(slide, el as TableElement, project.presentation.theme, size, layout);
             mapped++;
             break;
           case "chart":
@@ -2408,7 +1596,7 @@ export async function exportProjectToPptx(
               degradations,
               slideIndex,
               editDataCharts,
-              pageSurface,
+              exportedChartSurface(page.elements, el as ChartElement, pageSurface, project.presentation.theme),
               chartPatches,
             );
             mapped++;
@@ -2423,11 +1611,13 @@ export async function exportProjectToPptx(
               degradations,
               slideIndex,
               srcRectPatches,
+              imageClipPatches,
+              nativeShapeTypes,
             );
             mapped++;
             break;
-          case "line":
-            editableLines.push(mapLine(
+          case "line": {
+            const evidence = mapLine(
               slide,
               el as LineElement,
               project.presentation.theme,
@@ -2435,20 +1625,16 @@ export async function exportProjectToPptx(
               layout,
               degradations,
               slideIndex,
-            ));
+              strokePatches,
+            );
+            // A line on a layout or master lives in that part, so it is not evidence about a slide.
+            if (slideIndex < project.pages.length) editableLines.push(evidence);
             mapped++;
             break;
+          }
           case "icon": {
             const ic = el as IconElement;
-            await mapIcon(
-              slide,
-              ic,
-              project.presentation.theme,
-              size,
-              layout,
-              degradations,
-              slideIndex,
-            );
+            await mapIcon(slide, ic, project.presentation.theme, size, layout, degradations, slideIndex);
             mapped++;
             break;
           }
@@ -2471,48 +1657,67 @@ export async function exportProjectToPptx(
         });
       }
     }
+  };
+  for (const [slideIndex, lp] of project.pages.entries()) {
+    const masterName = pageMasterName(project.presentation, lp.page);
+    const slide = pptx.addSlide(masterName === undefined ? undefined : { masterName });
+    // An inherited background is drawn by the layout, so the page's own slide leaves it out.
+    if (lp.page.backgroundInherited !== true) drawBackground(slide, lp.page.background, slideIndex);
+    await drawElements(slide, pageElementsToDraw(lp.page, layoutExport), lp.page, slideIndex);
     if (lp.page.notes) {
       slide.addNotes(lp.page.notes);
     }
   }
+  // The carrier slides follow the pages, in the order layoutExportOf numbered them.
+  for (const carrier of layoutExport?.carriers ?? []) {
+    const slide = pptx.addSlide(
+      carrier.layoutId === undefined ? undefined : { masterName: layoutMasterName(carrier.layoutId) },
+    );
+    const content = { elements: carrier.elements, background: carrier.background };
+    drawBackground(slide, carrier.background, carrier.slideIndex);
+    await drawElements(slide, carrier.elements, content, carrier.slideIndex);
+  }
 
-  let raw = await postProcessPptx(
-    (await pptx.write({ outputType: "nodebuffer" })) as Buffer,
-    {
-      gradients: gradientPatches,
-      srcRects: srcRectPatches,
-      fixedTimestamps: true,
-      slideFonts: true,
-      charts: chartPatches,
-    },
-  );
+  let raw = await postProcessPptx((await pptx.write({ outputType: "nodebuffer" })) as Buffer, {
+    customGeometries: customGeometryPatches,
+    gradients: gradientPatches,
+    srcRects: srcRectPatches,
+    imageClips: imageClipPatches,
+    noStrokes: strokePatches,
+    shadows: shadowPatches,
+    backgrounds: backgroundPatches,
+    pageNumbers: pageNumberPatches,
+    layouts: layoutExport,
+    fixedTimestamps: true,
+    charts: chartPatches,
+    theme: project.presentation.theme,
+  });
   let embeddedFonts: EmbeddedFontInfo[] | undefined;
   let skippedFonts: SkippedFont[] | undefined;
   if (opts.embedFonts) {
     // One bad face must never abort the export: plan-level failures degrade
     // to an empty embed set instead.
-    const plan = await buildEmbeddedFonts(
-      project,
-      opts.embedFonts.families,
-      opts.embedFonts.fontsDir,
-    ).catch((error) => ({
-      fonts: [],
-      skipped: [
-        {
-          typeface: "*",
-          reason: error instanceof Error ? error.message : String(error),
-        },
-      ],
-    }));
+    const plan = await buildEmbeddedFonts(project, opts.embedFonts.families, opts.embedFonts.fontsDir).catch(
+      (error) => ({
+        fonts: [],
+        skipped: [
+          {
+            typeface: "*",
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        ],
+      }),
+    );
     const packed = await embedFontsIntoPptx(raw, plan);
     raw = packed.data;
     embeddedFonts = packed.embedded;
     skippedFonts = plan.skipped;
   }
   const total = mapped + failed;
-  const hard = degradations.filter((d) =>
-    (HARD_DEGRADATION_KINDS as readonly string[]).includes(d.kind) ||
-    /full-page|raster slide|screenshot slide/i.test(d.reason ?? ""),
+  const hard = degradations.filter(
+    (d) =>
+      (HARD_DEGRADATION_KINDS as readonly string[]).includes(d.kind) ||
+      /full-page|raster slide|screenshot slide/i.test(d.reason ?? ""),
   );
   const report: ExportReport = {
     ok: hard.length === 0 && editDataCharts.failed.length === 0,
@@ -2526,7 +1731,7 @@ export async function exportProjectToPptx(
     ...(skippedFonts ? { skippedFonts } : {}),
   };
 
-  const filename = `${(project.presentation.title ?? "deck").replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_+|_+$/g, "") || "deck"}.pptx`;
+  const filename = `${(project.presentation.title ?? "deck").replace(/[^\w\u4e00-\u9fff-]+/g, "_")}.pptx`;
   return { data: raw, report, filename };
 }
 
