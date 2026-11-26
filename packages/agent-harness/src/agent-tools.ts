@@ -75,8 +75,7 @@ export const GENERATE_TOOLS: LlmToolSpec[] = [
     type: "function",
     function: {
       name: "read_playbook",
-      description:
-        "Read one playbook section. Do not guess the category rules — read them.",
+      description: "Read one playbook section. Do not guess the category rules — read them.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -381,7 +380,12 @@ function writtenPages(state: AgentToolState): SkillPageInput[] {
 }
 
 function scopedPageKey(id: string): string {
-  const key = id.trim().replace(/\\/g, "/").split("/").pop()!.replace(/\.page$/i, "");
+  const key = id
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop()!
+    .replace(/\.page$/i, "");
   if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new Error(`invalid page id: ${id}`);
   return key;
 }
@@ -389,8 +393,7 @@ function scopedPageKey(id: string): string {
 function scopedPagePath(state: AgentToolState, page: SkillPageInput): string {
   const key = scopedPageKey(page.id);
   const historicalIndex = writtenPages(state).findIndex((item) => item.id === page.id);
-  const role =
-    (page.pageType || "page").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24) || "page";
+  const role = (page.pageType || "page").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24) || "page";
   // The legacy skill writer uses ordinal paths (01_cover.page). Keep that
   // stable for existing projects, while accepting id-shaped paths for newer
   // projects. Either way only this page is touched.
@@ -417,10 +420,11 @@ function scopedPersistedPage(page: SkillPageInput): Page {
 function deckTitleFromCover(project: PptdProject): string {
   const coverPage = project.pages[0]?.page as { elements?: unknown } | undefined;
   const elements = Array.isArray(coverPage?.elements)
-    ? coverPage!.elements as Array<Record<string, unknown>>
+    ? (coverPage!.elements as Array<Record<string, unknown>>)
     : [];
-  const headline = elements.find((element) => element?.elementId === "title")
-    ?? elements.find((element) => element?.elementType === "text");
+  const headline =
+    elements.find((element) => element?.elementId === "title") ??
+    elements.find((element) => element?.elementType === "text");
   const content = headline?.content as { text?: unknown } | undefined;
   return typeof content?.text === "string" ? content.text.trim() : "";
 }
@@ -435,7 +439,9 @@ export function persistWrittenPages(
   if (!pages.length && !pageScope) return;
   withProjectWriteLock(state.projectRoot, () => {
     const title = state.skillDeck?.title || state.brief.slice(0, 40) || "生成中";
-    const hasPptd = fs.existsSync(state.projectRoot!) && fs.readdirSync(state.projectRoot!).some((name) => name.endsWith(".pptd"));
+    const hasPptd =
+      fs.existsSync(state.projectRoot!) &&
+      fs.readdirSync(state.projectRoot!).some((name) => name.endsWith(".pptd"));
     const project = hasPptd
       ? loadProject(state.projectRoot!)
       : createEmptyProject(state.projectRoot!, { title });
@@ -452,7 +458,10 @@ export function persistWrittenPages(
           const itemPath = item.path.replace(/\\/g, "/").toLowerCase();
           return itemPath === rel.toLowerCase() || itemPath === `pages/${key}.page`.toLowerCase();
         });
-        const next = { path: index >= 0 ? project.pages[index]!.path : rel, page: scopedPersistedPage(page) };
+        const next = {
+          path: index >= 0 ? project.pages[index]!.path : rel,
+          page: scopedPersistedPage(page),
+        };
         if (index >= 0) project.pages[index] = next;
         else project.pages.push(next);
       }
@@ -461,11 +470,13 @@ export function persistWrittenPages(
       // Precedence: an explicitly authored deck title, then the cover's own
       // headline, then a title already on the project. The raw prompt only ever
       // names a brand-new project.
-      const keepCurrent = Boolean(currentTitle)
-        && currentTitle !== briefPrefix
-        && currentTitle !== title
-        && currentTitle !== coverTitle;
-      project.presentation.title = explicitTitle || coverTitle || (keepCurrent ? currentTitle : title);
+      const keepCurrent =
+        Boolean(currentTitle) &&
+        currentTitle !== briefPrefix &&
+        currentTitle !== title &&
+        currentTitle !== coverTitle;
+      project.presentation.title =
+        explicitTitle || coverTitle || (keepCurrent ? currentTitle : title);
     } else {
       applySkillDeck(
         project,
@@ -485,11 +496,7 @@ function isClassroomBrief(brief: string): boolean {
   return inferDeckIntent(brief) === "teach";
 }
 
-function mergedTodoExhibits(
-  todo: AgentTodo,
-  index: number,
-  brief: string,
-): TodoExhibitKind[] {
+function mergedTodoExhibits(todo: AgentTodo, index: number, brief: string): TodoExhibitKind[] {
   return resolveTodoExhibits(todo, index, brief);
 }
 
@@ -499,9 +506,7 @@ function reviewCurrent(
   mode: "compose" | "strict" = "strict",
 ): LayoutReview {
   const classroom = isClassroomBrief(state.brief);
-  const tasteContract = state.projectRoot
-    ? readDesignContract(state.projectRoot)
-    : undefined;
+  const tasteContract = state.projectRoot ? readDesignContract(state.projectRoot) : undefined;
   const review = reviewSkillPages(pages, {
     projectRoot: state.projectRoot,
     researchHadGap: researchHadGap(state),
@@ -604,7 +609,10 @@ function playbookSection(bundle: PlaybookBundle, section: string): string {
 function filterLines(lines: string[], query?: string): string[] {
   const q = query?.trim();
   if (!q) return lines;
-  const tokens = q.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+  const tokens = q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 1);
   return lines.filter((line) => {
     const low = line.toLowerCase();
     return low.includes(q.toLowerCase()) || tokens.some((t) => low.includes(t));
@@ -733,9 +741,7 @@ export function executeGenerateTool(
       if (!title) continue;
       const note = String((item as { note?: unknown }).note ?? "").trim();
       const pageId = String((item as { pageId?: unknown }).pageId ?? "").trim();
-      const layoutFamily = String(
-        (item as { layoutFamily?: unknown }).layoutFamily ?? "",
-      ).trim();
+      const layoutFamily = String((item as { layoutFamily?: unknown }).layoutFamily ?? "").trim();
       const supplied = Array.isArray((item as { exhibits?: unknown }).exhibits)
         ? (item as { exhibits: unknown[] }).exhibits.filter(isTodoExhibitKind)
         : [];
@@ -806,10 +812,7 @@ export function executeGenerateTool(
   }
 
   if (name === "review_pages") {
-    const pages =
-      writtenPages(state).length
-        ? writtenPages(state)
-        : state.skillDeck?.pages ?? [];
+    const pages = writtenPages(state).length ? writtenPages(state) : (state.skillDeck?.pages ?? []);
     if (pages.length < 2) {
       return {
         name,
@@ -842,7 +845,7 @@ export function executeGenerateTool(
     try {
       const buffered = writtenPages(state);
       const incoming = parseSkillDeck(args);
-      const skill =
+      let skill =
         incoming ??
         (buffered.length
           ? {
@@ -947,33 +950,7 @@ export function executeGenerateTool(
   };
 }
 
-export function toolStepMeta(name: string): { tool: string; label: string } {
-  switch (name) {
-    case "think":
-      return { tool: "think", label: "Think" };
-    case "read_playbook":
-    case "read_file":
-      return { tool: "read_file", label: "Read" };
-    case "research":
-      return { tool: "research", label: "Research" };
-    case "write_todo":
-      return { tool: "write_todo", label: "Write Todo" };
-    case "compose_deck":
-      return { tool: "compose_deck", label: "Compose Deck" };
-    case "generate_image":
-      return { tool: "generate_image", label: "Image" };
-    case "search_image":
-      return { tool: "search_image", label: "Search Image" };
-    case "write_page":
-      return { tool: "write_page", label: "Write Page" };
-    case "render_page":
-      return { tool: "render_page", label: "Render" };
-    case "review_pages":
-      return { tool: "review_pages", label: "Review" };
-    default:
-      return { tool: name, label: name };
-  }
-}
+export { toolStepMeta } from "./agent-tool-meta.js";
 
 export async function executeGenerateToolAsync(
   name: string,
@@ -1002,7 +979,10 @@ export async function executeGenerateToolAsync(
       };
     }
     const port = state.image ?? createImagePort({ enabled: false });
-    const image = await port.generate(prompt, typeof args.aspect === "string" ? args.aspect : undefined);
+    const image = await port.generate(
+      prompt,
+      typeof args.aspect === "string" ? args.aspect : undefined,
+    );
     const saved = saveMediaFile(state.projectRoot, id, image.bytes, "png");
     return {
       name,
@@ -1064,7 +1044,14 @@ export async function executeGenerateToolAsync(
         payload: { error: "no projectRoot" },
       };
     }
-    const found = hit as { bytes: Buffer; mime: string; width?: number; height?: number; attribution?: string; note: string };
+    const found = hit as {
+      bytes: Buffer;
+      mime: string;
+      width?: number;
+      height?: number;
+      attribution?: string;
+      note: string;
+    };
     const ext = found.mime === "image/jpeg" ? "jpg" : found.mime === "image/webp" ? "webp" : "png";
     const saved = saveMediaFile(state.projectRoot, id, found.bytes, ext);
     return {

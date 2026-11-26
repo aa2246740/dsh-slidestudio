@@ -11,12 +11,10 @@ import {
   writePageSchemaError,
   EMPTY_CLOSER_PRODUCE_NEXT,
   backgroundColorWriteAuthority,
-  listSourceReceipts,
-  packColorWriteContextFrom,
+  projectPackColorContext,
   type SkillPageInput,
 } from "@open-slidestudio/presentation-run";
 import type { WritePageDecision } from "./protocol.js";
-import { readSliceRuntimeFile } from "./runtime.js";
 
 export type WritePageLedgerView = {
   readonly pageId: string;
@@ -156,15 +154,11 @@ export type WritePageDiskView = {
   readonly backgroundColors?: readonly { pageId: string; color: string }[];
 };
 
-function imageSrcsFromLoadedPages(
-  pages: ReturnType<typeof loadProject>["pages"],
-): { pageId: string; src: string }[] {
+function imageSrcsFromLoadedPages(pages: ReturnType<typeof loadProject>["pages"]): { pageId: string; src: string }[] {
   const rows: { pageId: string; src: string }[] = [];
   for (const loaded of pages) {
     const rec = loaded.page as Record<string, unknown>;
-    const pageId =
-      path.basename(loaded.path, ".page") ||
-      (typeof rec.id === "string" ? rec.id.trim() : "");
+    const pageId = path.basename(loaded.path, ".page") || (typeof rec.id === "string" ? rec.id.trim() : "");
     if (!pageId) continue;
     for (const el of loaded.page.elements) {
       if (el.elementType === "image" && typeof el.src === "string" && el.src) {
@@ -190,24 +184,7 @@ function backgroundColorsFromLoadedPages(
 }
 
 function packColorContextFromProject(projectRoot: string) {
-  const adoptedSourceIds: string[] = [];
-  let designSystemId: string | undefined;
-  try {
-    const rec = readSliceRuntimeFile(projectRoot);
-    if (typeof rec.designSystemId === "string" && rec.designSystemId.trim()) {
-      designSystemId = rec.designSystemId.trim();
-    }
-  } catch {
-    designSystemId = undefined;
-  }
-  try {
-    for (const row of listSourceReceipts(projectRoot)) {
-      if (row.state === "adopted" || row.state === "executed") adoptedSourceIds.push(row.sourceId);
-    }
-  } catch {
-    /* receipts are optional until commit_design */
-  }
-  return packColorWriteContextFrom({ designSystemId, adoptedSourceIds });
+  return projectPackColorContext(projectRoot);
 }
 
 export function readWritePageDisk(projectRoot: string): WritePageDiskView | undefined {
@@ -234,9 +211,7 @@ export function decideWritePage(
   current: WritePageLedgerView | undefined,
   disk?: WritePageDiskView,
 ): WritePageDecision {
-  const normalizedArgs = isCanonicalWritePageArgs(args)
-    ? structuredClone(args)
-    : normalizeWritePageArgs(args);
+  const normalizedArgs = isCanonicalWritePageArgs(args) ? structuredClone(args) : normalizeWritePageArgs(args);
   const parsed = parseSkillPage(normalizedArgs, 0);
   if (!parsed?.id) {
     return {
@@ -272,15 +247,7 @@ export function decideWritePage(
     }),
     ...(siblingImageSrcs.length ? { siblingImageSrcs } : {}),
   };
-  const schemaError = writePageSchemaError(
-    writePageSchemaIssues(
-      parsed,
-      schemaCtx,
-      normalizedArgs,
-    ),
-    parsed,
-    schemaCtx,
-  );
+  const schemaError = writePageSchemaError(writePageSchemaIssues(parsed, schemaCtx, normalizedArgs), parsed, schemaCtx);
   if (schemaError) {
     return {
       action: "reject",

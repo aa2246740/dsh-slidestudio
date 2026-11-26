@@ -3,17 +3,8 @@
  * Product generate is the agent clock: write_todo → write_page → render_page → review → compose.
  */
 import { saveProject, type PptdProject } from "@open-slidestudio/pptd-v2";
-import {
-  briefToOutline,
-  inferDeckIntent,
-  resolveGenerateDesign,
-  resolvePlaybookCategory,
-} from "./compose-ir.js";
-import {
-  classifyExhibit,
-  paintExhibit,
-  type HostPageCopy,
-} from "./exhibit-paint.js";
+import { briefToOutline, inferDeckIntent, resolveGenerateDesign, resolvePlaybookCategory } from "./compose-ir.js";
+import { classifyExhibit, paintExhibit, type HostPageCopy } from "./exhibit-paint.js";
 import { evidencePagesFromReference, maybePlaceImage, wantsPhoto } from "./host-media.js";
 import type { ImagePort } from "./image-port.js";
 import type { ImageSearchPort } from "./image-search-port.js";
@@ -57,11 +48,13 @@ export type HostBrain = {
   run: (hooks: AgentRunHooks) => Promise<void>;
 };
 
-const SKIP_PLACE =
-  /生成|一份|做一份|帮我|攻略|旅游|旅行|行程|必去|地方|吃喝|玩乐|方面|10月|十月|去$|日本|PPT|ppt/;
+const SKIP_PLACE = /生成|一份|做一份|帮我|攻略|旅游|旅行|行程|必去|地方|吃喝|玩乐|方面|10月|十月|去$|日本|PPT|ppt/;
 
 export function extractPlaces(brief: string): string[] {
-  const chunks = brief.split(/[、，,]/).map((s) => s.trim()).filter(Boolean);
+  const chunks = brief
+    .split(/[、，,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   const out: string[] = [];
   for (const chunk of chunks) {
     const afterColon = chunk.split(/[:：]/).pop()?.trim() || chunk;
@@ -73,76 +66,9 @@ export function extractPlaces(brief: string): string[] {
   return out.slice(0, 8);
 }
 
-function titleFromBlock(heading: string, body: string, n: number): string {
-  const headingTitle = heading.split(/[:：]/).pop()?.trim() || heading;
-  if (headingTitle && !/^(封面|目录|附录)$/.test(headingTitle) && headingTitle.length >= 3) {
-    return headingTitle.slice(0, 36);
-  }
-  const brand = body.match(/品牌名[「『]([^」』]+)/);
-  const named = body.match(/[「『]([^」』]{2,28})[」』]/);
-  const sub = body.match(/副标题[「『:：]\s*([^」』\n]+)/);
-  const brandName = (brand?.[1] || named?.[1] || "").replace(/\s*Chengguang.*$/i, "").trim();
-  const subName = (sub?.[1] || "").replace(/[」』]/g, "").trim();
-  const joined = [brandName, subName].filter(Boolean).join(" ");
-  if (joined) return joined.slice(0, 36);
-  return (headingTitle || `第${n}页`).slice(0, 36);
-}
+import { parsePagedScript } from "./host-produce-script.js";
+export { parsePagedScript };
 
-function scriptBodyLines(body: string): string[] {
-  const out: string[] = [];
-  for (const raw of body.split(/\n+/)) {
-    let line = raw.trim();
-    if (!line) continue;
-    if (/^(输出格式|【|—{2,}|硬性要求)/.test(line)) continue;
-    if (/^版式[:：]/.test(line)) continue;
-    line = line.replace(/^结论[:：]\s*/, "").replace(/^[-•●]\s*/, "");
-    if (line.length < 2) continue;
-    out.push(line.slice(0, 120));
-    if (out.length >= 24) break;
-  }
-  return out;
-}
-
-/** 【第N页 标题】… blocks — a finished script, not a one-line topic. */
-export function parsePagedScript(brief: string): HostPageCopy[] {
-  const re = /【第\s*(\d+)\s*页\s*([^】]*)】/g;
-  const hits: { n: number; heading: string; headEnd: number; start: number }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(brief))) {
-    hits.push({
-      n: Number(match[1]),
-      heading: match[2]!.trim(),
-      start: match.index,
-      headEnd: match.index + match[0].length,
-    });
-  }
-  if (hits.length < 3) return [];
-  return hits.map((hit, i) => {
-    const end = i + 1 < hits.length ? hits[i + 1]!.start : brief.length;
-    const body = brief.slice(hit.headEnd, end).trim();
-    const conclusion = body.match(/结论[:：]\s*(.+)/);
-    const pageType =
-      hit.n === 1 || /封面/.test(hit.heading)
-        ? "cover"
-        : /目录/.test(hit.heading)
-          ? "toc"
-          : i === hits.length - 1
-            ? "close"
-            : "content";
-    const page: HostPageCopy = {
-      id: `page-${String(hit.n).padStart(2, "0")}`,
-      pageType,
-      title: titleFromBlock(hit.heading, body, hit.n),
-      kicker: conclusion?.[1]?.trim().slice(0, 72) || String(hit.n).padStart(2, "0"),
-      lines: scriptBodyLines(body),
-      body,
-    };
-    page.exhibit = classifyExhibit(page, i, hits.length);
-    return page;
-  });
-}
-
-/** Brief first, then attachment text — a pasted 月报 script is still a script. */
 function pagedScriptFromInputs(brief: string, referenceText?: string): HostPageCopy[] {
   const fromBrief = parsePagedScript(brief);
   if (fromBrief.length >= 3) return fromBrief;
@@ -191,17 +117,66 @@ export function outlineFromBrief(brief: string, referenceText?: string): HostPag
     ];
   } else if (intent === "teach") {
     pages = [
-      { id: "cover", pageType: "cover", title, kicker: "讲一讲", lines: ["一页一件事"], exhibit: "cover" },
-      { id: "route", pageType: "route", title: "路径", kicker: "02", lines: ["先看见", "再记住", "再会用"], exhibit: "path" },
-      { id: "concept", pageType: "concept", title: "它是什么", kicker: "03", lines: [title], exhibit: "content" },
-      { id: "method", pageType: "method", title: "怎么做", kicker: "04", lines: ["条件写清楚"], exhibit: "content" },
-      { id: "demo", pageType: "demo", title: "看一遍", kicker: "05", lines: ["一个例子"], exhibit: "content" },
-      { id: "transfer", pageType: "transfer", title: "你来试", kicker: "06", lines: ["离开课堂也能做"], exhibit: "close" },
+      {
+        id: "cover",
+        pageType: "cover",
+        title,
+        kicker: "讲一讲",
+        lines: ["一页一件事"],
+        exhibit: "cover",
+      },
+      {
+        id: "route",
+        pageType: "route",
+        title: "路径",
+        kicker: "02",
+        lines: ["先看见", "再记住", "再会用"],
+        exhibit: "path",
+      },
+      {
+        id: "concept",
+        pageType: "concept",
+        title: "它是什么",
+        kicker: "03",
+        lines: [title],
+        exhibit: "content",
+      },
+      {
+        id: "method",
+        pageType: "method",
+        title: "怎么做",
+        kicker: "04",
+        lines: ["条件写清楚"],
+        exhibit: "content",
+      },
+      {
+        id: "demo",
+        pageType: "demo",
+        title: "看一遍",
+        kicker: "05",
+        lines: ["一个例子"],
+        exhibit: "content",
+      },
+      {
+        id: "transfer",
+        pageType: "transfer",
+        title: "你来试",
+        kicker: "06",
+        lines: ["离开课堂也能做"],
+        exhibit: "close",
+      },
     ];
   } else {
     const claims = briefToOutline(brief).claims.slice(0, 4);
     pages = [
-      { id: "cover", pageType: "cover", title, kicker: "判断", lines: claims.slice(0, 1), exhibit: "cover" },
+      {
+        id: "cover",
+        pageType: "cover",
+        title,
+        kicker: "判断",
+        lines: claims.slice(0, 1),
+        exhibit: "cover",
+      },
       ...claims.map((c, i) => ({
         id: `p-${i + 1}`,
         pageType: "content",
@@ -210,7 +185,14 @@ export function outlineFromBrief(brief: string, referenceText?: string): HostPag
         lines: [c, "缺数据标占位"],
         exhibit: "content" as const,
       })),
-      { id: "close", pageType: "close", title: "下一步", kicker: "收束", lines: ["核对占位后再外传"], exhibit: "close" },
+      {
+        id: "close",
+        pageType: "close",
+        title: "下一步",
+        kicker: "收束",
+        lines: ["核对占位后再外传"],
+        exhibit: "close",
+      },
     ];
   }
   const evidence = evidencePagesFromReference(referenceText || "");
@@ -253,16 +235,9 @@ async function withTimeout<T>(ms: number, work: Promise<T>): Promise<T> {
   }
 }
 
-export function playbookForHostBrief(
-  brief: string,
-  opts: HostBrainOptions,
-): PlaybookBundle {
+export function playbookForHostBrief(brief: string, opts: HostBrainOptions): PlaybookBundle {
   const categoryId = resolvePlaybookCategory(brief, opts.categoryId);
-  const designSystemId = resolveGenerateDesign(
-    brief,
-    opts.designSystemId ?? DEFAULT_DESIGN_SYSTEM,
-    categoryId,
-  );
+  const designSystemId = resolveGenerateDesign(brief, opts.designSystemId ?? DEFAULT_DESIGN_SYSTEM, categoryId);
   return loadPlaybook({
     skillRoot: opts.skillRoot,
     designSystemId,
@@ -271,8 +246,11 @@ export function playbookForHostBrief(
 }
 
 function isScripted(outline: HostPageCopy[]): boolean {
-  return outline.length >= 3 && outline.every((p) => (p.body && p.body.length > 40) || p.lines.length >= 2) &&
-    (outline.length >= 8 || outline.some((p) => Boolean(p.body)));
+  return (
+    outline.length >= 3 &&
+    outline.every((p) => (p.body && p.body.length > 40) || p.lines.length >= 2) &&
+    (outline.length >= 8 || outline.some((p) => Boolean(p.body)))
+  );
 }
 
 /**
@@ -338,8 +316,7 @@ export function createHostBrain(opts: HostBrainOptions): HostBrain {
     project: PptdProject,
     hooks?: AgentRunHooks,
   ): Promise<SkillPageInput[]> => {
-    const scripted =
-      isScripted(outline) || pagedScriptFromInputs(brief, opts.referenceText).length >= 3;
+    const scripted = isScripted(outline) || pagedScriptFromInputs(brief, opts.referenceText).length >= 3;
     const intent = inferDeckIntent(brief);
     playbook = playbookForHostBrief(brief, opts);
     const painted: SkillPageInput[] = [];
@@ -387,15 +364,10 @@ export function createHostBrain(opts: HostBrainOptions): HostBrain {
         };
         hooks?.emit(renderStep);
         try {
-          const shot = await withTimeout(
-            8_000,
-            opts.raster.render({ projectRoot: root, pageIndex: i }),
-          );
+          const shot = await withTimeout(8_000, opts.raster.render({ projectRoot: root, pageIndex: i }));
           if (shot.bytes) savePageRaster(root, `page-${String(i + 1).padStart(2, "0")}`, shot.bytes);
           const visionOn =
-            process.env.SLIDESTUDIO_LLM_IMAGE !== "0" &&
-            Boolean(opts.llm?.completeJsonWithImages) &&
-            shot.bytes;
+            process.env.SLIDESTUDIO_LLM_IMAGE !== "0" && Boolean(opts.llm?.completeJsonWithImages) && shot.bytes;
           if (visionOn && shot.bytes) {
             try {
               const fix = await withTimeout(
@@ -461,8 +433,7 @@ export function createHostBrain(opts: HostBrainOptions): HostBrain {
           .map((p, i) => `${String(i + 1).padStart(2, "0")}  ${classifyExhibit(p, i, outline.length)}  ${p.title}`)
           .join("\n"),
       });
-      brain.usedLlm =
-        Boolean(opts.llm) && pagedScriptFromInputs(brief, opts.referenceText).length < 3;
+      brain.usedLlm = Boolean(opts.llm) && pagedScriptFromInputs(brief, opts.referenceText).length < 3;
       const painted = await producePages(brief, outline, hooks.project, hooks);
       const fidelity = qaScriptFidelity(painted, outline);
       const structural = painted.flatMap((p) => qaPaintedPage(p));
@@ -473,9 +444,7 @@ export function createHostBrain(opts: HostBrainOptions): HostBrain {
         label: "Review Pages",
         status: "completed",
         summary: issues.length ? `${issues.length} 项需复核` : `${painted.length} 页通过`,
-        detail: issues.length
-          ? issues.map((i) => `${i.pageId}  ${i.code}  ${i.message}`).join("\n")
-          : "structural ok",
+        detail: issues.length ? issues.map((i) => `${i.pageId}  ${i.code}  ${i.message}`).join("\n") : "structural ok",
       });
       hooks.emit({
         tool: "compose_deck",

@@ -8,7 +8,6 @@ import { execFile } from "node:child_process";
 import { npmInvocation } from "./lib/npm-command.mjs";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -38,7 +37,10 @@ const BROWSER_DIR_NAME = ${JSON.stringify(`chromium_headless_shell-${PINNED_CHRO
 const root = fileURLToPath(new URL(".", import.meta.url));
 const MODULE_DIR = join(root, "node_modules");
 const BROWSERS_DIR = join(root, "browsers");
-const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_DIR;
+const pinnedChromiumRoot = join(BROWSERS_DIR, BROWSER_DIR_NAME);
+const browsersPath = existsSync(pinnedChromiumRoot)
+  ? BROWSERS_DIR
+  : process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_DIR;
 const chromiumRoot = join(browsersPath, BROWSER_DIR_NAME);
 const modulePath = join(MODULE_DIR, "playwright", "index.mjs");
 const packagePath = join(MODULE_DIR, "playwright", "package.json");
@@ -119,8 +121,24 @@ function seedRuntimePath() {
 }
 
 async function copySeed(seedPath) {
-  const seed = await import(`${pathToFileURL(seedPath).href}?setup=${Date.now()}`);
-  const pinned = seed.verifyPinnedRuntime();
+  const seedLocalBrowsersPath = path.join(path.dirname(seedPath), "browsers");
+  const seedLocalChromiumRoot = path.join(seedLocalBrowsersPath, `chromium_headless_shell-${PINNED_CHROMIUM_REVISION}`);
+  // A seed that already contains the pinned browser must not be verified
+  // against the host PLAYWRIGHT_BROWSERS_PATH. Older seed runtime files
+  // still honor that variable.
+  const previousBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const isolateSeedBrowsers = existsSync(seedLocalChromiumRoot);
+  if (isolateSeedBrowsers) process.env.PLAYWRIGHT_BROWSERS_PATH = seedLocalBrowsersPath;
+  let pinned;
+  try {
+    const seed = await import(`${pathToFileURL(seedPath).href}?setup=${Date.now()}`);
+    pinned = seed.verifyPinnedRuntime();
+  } finally {
+    if (isolateSeedBrowsers) {
+      if (previousBrowsersPath === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = previousBrowsersPath;
+    }
+  }
   if (pinned.playwrightVersion !== PINNED_PLAYWRIGHT_VERSION || pinned.chromiumRevision !== PINNED_CHROMIUM_REVISION) {
     throw new Error(
       `Browser runtime seed mismatch: expected Playwright ${PINNED_PLAYWRIGHT_VERSION} / Chromium ${PINNED_CHROMIUM_REVISION}, found ${pinned.playwrightVersion} / ${pinned.chromiumRevision}`,
@@ -177,12 +195,14 @@ async function npmInstall() {
     maxBuffer: 10 * 1024 * 1024,
   });
   console.log(`[setup:browser] installing Chromium Headless Shell revision ${PINNED_CHROMIUM_REVISION}`);
+  const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browsersPath };
+  delete installEnv.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
   await execFileAsync(
     process.execPath,
     [path.join(runtimeRoot, "node_modules", "playwright", "cli.js"), "install", "chromium-headless-shell"],
     {
       cwd: ROOT,
-      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browsersPath },
+      env: installEnv,
       maxBuffer: 10 * 1024 * 1024,
     },
   );

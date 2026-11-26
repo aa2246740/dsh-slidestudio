@@ -9,10 +9,7 @@ describe("presentation playbook palette", () => {
   it("keeps paper-white courseware titles readable", () => {
     const root = loadPlaybook().skillRoot;
     const palette = extractPalette(
-      fs.readFileSync(
-        path.join(root, "reference/design_system/academic/paper-white-courseware/design.md"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(root, "reference/design_system/academic/paper-white-courseware/design.md"), "utf8"),
     );
 
     assert.equal(palette.background, "#FDFAF5");

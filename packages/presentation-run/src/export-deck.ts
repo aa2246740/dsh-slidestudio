@@ -2,16 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  exportProjectToPptx,
-  validateExportReport,
-  type ExportResult,
-} from "@open-slidestudio/exporter-native";
-import {
-  calculateMaterialFingerprint,
-  loadProject,
-  withProjectWriteLock,
-} from "@open-slidestudio/pptd-v2";
+import { exportProjectToPptx, validateExportReport, type ExportResult } from "@open-slidestudio/exporter-native";
+import { calculateMaterialFingerprint, loadProject, withProjectWriteLock } from "@open-slidestudio/pptd-v2";
 import { inspectRunLedger, readRunLedger, recordExportSucceeded } from "./domain/run-ledger.js";
 import { writeFileAtomic, writeJsonAtomic } from "./domain/atomic-file.js";
 import type { CommandContext, ExecutionDelivery } from "./types.js";
@@ -21,7 +13,9 @@ function sha256(bytes: Buffer): string {
 }
 
 export function readVerifiedDelivery(root: string): ExecutionDelivery | null {
-  const fact = readRunLedger(root)?.facts.filter((row) => row.type === "export.succeeded").at(-1);
+  const fact = readRunLedger(root)
+    ?.facts.filter((row) => row.type === "export.succeeded")
+    .at(-1);
   if (!fact || fact.type !== "export.succeeded") return null;
   const artifact = path.join(root, fact.artifactPath);
   const report = path.join(root, fact.reportPath);
@@ -58,6 +52,43 @@ function copyRegularFile(src: string, dest: string): void {
     throw new Error(`export snapshot refuses a non-regular file: ${path.basename(src)}`);
   }
   fs.copyFileSync(src, dest);
+}
+
+/**
+ * Copies the deck, pages and media into `snapDir`. A failed copy removes the
+ * partial snapshot before the error propagates, so nothing stays in the temp root.
+ */
+function copyExportSnapshot(root: string, snapDir: string): void {
+  try {
+    fs.mkdirSync(snapDir, { recursive: true });
+    copyRegularFile(path.join(root, "deck.pptd"), path.join(snapDir, "deck.pptd"));
+
+    const pagesDir = path.join(root, "pages");
+    const snapPagesDir = path.join(snapDir, "pages");
+    fs.mkdirSync(snapPagesDir, { recursive: true });
+    if (fs.existsSync(pagesDir)) {
+      for (const file of fs.readdirSync(pagesDir)) {
+        if (file.endsWith(".page")) {
+          copyRegularFile(path.join(pagesDir, file), path.join(snapPagesDir, file));
+        }
+      }
+    }
+
+    const mediaDir = path.join(root, "media");
+    const snapMediaDir = path.join(snapDir, "media");
+    fs.mkdirSync(snapMediaDir, { recursive: true });
+    if (fs.existsSync(mediaDir)) {
+      for (const file of fs.readdirSync(mediaDir)) {
+        const srcPath = path.join(mediaDir, file);
+        if (fs.lstatSync(srcPath).isFile() && !fs.lstatSync(srcPath).isSymbolicLink()) {
+          copyRegularFile(srcPath, path.join(snapMediaDir, file));
+        }
+      }
+    }
+  } catch (error) {
+    fs.rmSync(snapDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export async function exportEditablePptx(
@@ -99,38 +130,10 @@ export async function exportEditablePptx(
     const initialFingerprint = calculateMaterialFingerprint(root);
     const opId = `exp-${crypto.randomUUID()}`;
     const snapDir = path.join(os.tmpdir(), `pptd-export-snap-${opId}`);
-    fs.mkdirSync(snapDir, { recursive: true });
-
-    // Copy deck.pptd
-    copyRegularFile(path.join(root, "deck.pptd"), path.join(snapDir, "deck.pptd"));
-
-    // Copy pages
-    const pagesDir = path.join(root, "pages");
-    const snapPagesDir = path.join(snapDir, "pages");
-    fs.mkdirSync(snapPagesDir, { recursive: true });
-    if (fs.existsSync(pagesDir)) {
-      for (const file of fs.readdirSync(pagesDir)) {
-        if (file.endsWith(".page")) {
-          copyRegularFile(path.join(pagesDir, file), path.join(snapPagesDir, file));
-        }
-      }
-    }
-
-    // Copy media
-    const mediaDir = path.join(root, "media");
-    const snapMediaDir = path.join(snapDir, "media");
-    fs.mkdirSync(snapMediaDir, { recursive: true });
-    if (fs.existsSync(mediaDir)) {
-      for (const file of fs.readdirSync(mediaDir)) {
-        const srcPath = path.join(mediaDir, file);
-        if (fs.lstatSync(srcPath).isFile() && !fs.lstatSync(srcPath).isSymbolicLink()) {
-          copyRegularFile(srcPath, path.join(snapMediaDir, file));
-        }
-      }
-    }
+    copyExportSnapshot(root, snapDir);
 
     const title = project.presentation.title ?? "deck";
-    const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_+|_+$/g, "") || "deck"}.pptx`;
+    const filename = `${title.replace(/[^\w\u4e00-\u9fff-]+/g, "_")}.pptx`;
     return {
       ok: true,
       snapDir,

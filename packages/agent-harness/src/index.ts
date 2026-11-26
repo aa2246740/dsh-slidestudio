@@ -17,10 +17,7 @@ import { snapshotVersion } from "@open-slidestudio/project-store";
 import type { AgentRunHooks } from "./agent-brain.js";
 import { resolvePlaybookCategory } from "./compose-ir.js";
 import type { ToolName, ToolStep } from "./harness-types.js";
-import {
-  clearGenerateCheckpoint,
-  writeGenerateCheckpoint,
-} from "./generate-checkpoint.js";
+import { clearGenerateCheckpoint, writeGenerateCheckpoint } from "./generate-checkpoint.js";
 import { reviewSkillPages } from "./layout-qa.js";
 import { createPlaybookBrain } from "./playbook-brain.js";
 import { DEFAULT_DESIGN_SYSTEM } from "./playbook.js";
@@ -57,11 +54,7 @@ export {
   formatPauseMessage,
   GENERATE_CHECKPOINT_FILE,
 } from "./generate-checkpoint.js";
-export type {
-  AgentCheckpoint,
-  AgentPause,
-  AgentPauseKind,
-} from "./generate-checkpoint.js";
+export type { AgentCheckpoint, AgentPause, AgentPauseKind } from "./generate-checkpoint.js";
 export {
   GENERATE_TOOLS,
   runResearch,
@@ -100,12 +93,7 @@ export {
   DEFAULT_TRAVEL_DESIGN,
 } from "./compose-ir.js";
 export type { ComposeDeck, ComposePage, DeckIntent } from "./compose-ir.js";
-export {
-  hasOperatingFacts,
-  missingOperatingFactsReason,
-  extractMarkedGaps,
-  NEED_DATA_REASON,
-} from "./report-facts.js";
+export { hasOperatingFacts, missingOperatingFactsReason, extractMarkedGaps, NEED_DATA_REASON } from "./report-facts.js";
 export {
   parseSkillDeck,
   parseSkillPage,
@@ -143,33 +131,13 @@ export type {
 } from "./llm-port.js";
 export { normalizeToolCalls } from "./llm-port.js";
 export { rebuildNodesFromImage, imageToDataUrl } from "./image-rebuild-llm.js";
-export {
-  createImagePort,
-  imageConfigFromEnv,
-  imageConfigured,
-} from "./image-port.js";
+export { createImagePort, imageConfigFromEnv, imageConfigured } from "./image-port.js";
 export type { ImagePort, ImagePortConfig, GeneratedImage } from "./image-port.js";
-export {
-  createImageSearchPort,
-  imageSearchConfigFromEnv,
-  imageSearchConfigured,
-} from "./image-search-port.js";
-export type {
-  ImageSearchPort,
-  ImageSearchPortConfig,
-  ImageSearchHit,
-} from "./image-search-port.js";
-export {
-  detectCapabilities,
-  formatCapabilityCard,
-} from "./capability-card.js";
+export { createImageSearchPort, imageSearchConfigFromEnv, imageSearchConfigured } from "./image-search-port.js";
+export type { ImageSearchPort, ImageSearchPortConfig, ImageSearchHit } from "./image-search-port.js";
+export { detectCapabilities, formatCapabilityCard } from "./capability-card.js";
 export type { CapabilityCard } from "./capability-card.js";
-export {
-  createPageRasterPort,
-  editorUrlFromEnv,
-  savePageRaster,
-  rasterToDataUrl,
-} from "./page-raster.js";
+export { createPageRasterPort, editorUrlFromEnv, savePageRaster, rasterToDataUrl } from "./page-raster.js";
 export type { PageRasterPort, PageRasterResult } from "./page-raster.js";
 export { findPiSdkRoot, piAvailable } from "./pi-available.js";
 export type { PiAvailability } from "./pi-available.js";
@@ -194,12 +162,7 @@ export {
   PI_LOGIN_PROVIDERS,
 } from "./pi-login.js";
 export type { PiLoginMethod, PiLoginProvider } from "./pi-login.js";
-export {
-  answerPiOAuth,
-  cancelPiOAuth,
-  getPiOAuthSession,
-  startPiOAuth,
-} from "./pi-oauth.js";
+export { answerPiOAuth, cancelPiOAuth, getPiOAuthSession, startPiOAuth } from "./pi-oauth.js";
 export type { PiOAuthEvent, PiOAuthPrompt, PiOAuthSessionView } from "./pi-oauth.js";
 export { persistWrittenPages } from "./agent-tools.js";
 export { saveMediaFile, mediaExists, listMedia } from "./media-store.js";
@@ -219,23 +182,10 @@ export {
   resolveTodoExhibits,
   TODO_EXHIBIT_KINDS,
 } from "./layout-qa.js";
-export type {
-  LayoutReview,
-  LayoutIssue,
-  TodoExhibitContract,
-  TodoExhibitKind,
-} from "./layout-qa.js";
-export {
-  missingLockedPageFacts,
-  reportFactIssues,
-} from "./report-facts.js";
+export type { LayoutReview, LayoutIssue, TodoExhibitContract, TodoExhibitKind } from "./layout-qa.js";
+export { missingLockedPageFacts, reportFactIssues } from "./report-facts.js";
 export type { ReportFactIssue } from "./report-facts.js";
-export {
-  paintKidsCoursewarePage,
-  ensureKidsCoursewarePage,
-  isHostNoteCopy,
-  KIDS_INK,
-} from "./kids-courseware.js";
+export { paintKidsCoursewarePage, ensureKidsCoursewarePage, isHostNoteCopy, KIDS_INK } from "./kids-courseware.js";
 export {
   paintOfficialRecipePage,
   ensureOfficialRecipePage,
@@ -250,12 +200,7 @@ export {
   PAPER_WHITE,
 } from "./playbook-recipes.js";
 export type { RebuildNode } from "./image-rebuild-llm.js";
-export {
-  materializeDeck,
-  chartHasNumericY,
-  stripIndexPrefix,
-  titleFontSize,
-} from "./materialize.js";
+export { materializeDeck, chartHasNumericY, stripIndexPrefix, titleFontSize } from "./materialize.js";
 export { clocksFromTimed, createPiBrain } from "./pi-brain.js";
 export {
   PI_RPC_TOOL_ALLOWLIST,
@@ -281,17 +226,8 @@ export {
   resolveOpenKimiDesignPreview,
   readOpenKimiVisualBytes,
 } from "./openkimi-visual-pack.js";
-export {
-  commitDesignContract,
-  readDesignContract,
-  LAYOUT_FAMILIES,
-  DESIGN_CONTRACT_REL,
-} from "./design-contract.js";
-export type {
-  CommittedDesignContract,
-  DesignContractDraft,
-  LayoutFamily,
-} from "./design-contract.js";
+export { commitDesignContract, readDesignContract, LAYOUT_FAMILIES, DESIGN_CONTRACT_REL } from "./design-contract.js";
+export type { CommittedDesignContract, DesignContractDraft, LayoutFamily } from "./design-contract.js";
 export { renderDeckOverview, DECK_OVERVIEW_RENDERER_VERSION } from "./deck-overview.js";
 export {
   inspectRunLedger,
@@ -308,12 +244,7 @@ export {
 export { buildPiImageContent, buildPiRenderedPageContent } from "./pi-image-content.js";
 export { authenticGenerationStatus } from "./generation-provenance.js";
 export type { AuthenticGenerationStatus } from "./generation-provenance.js";
-export type {
-  PiBrain,
-  PiBrainOptions,
-  PiSessionFactoryOpts,
-  PiSessionLike,
-} from "./pi-brain.js";
+export type { PiBrain, PiBrainOptions, PiSessionFactoryOpts, PiSessionLike } from "./pi-brain.js";
 export {
   classifyPiEvents,
   classifyPiFailure,
@@ -334,12 +265,7 @@ export {
   resolveXaiAuthExtension,
 } from "./pi-rpc.js";
 export type { PiRpcConfig, PiRpcOptions, TimedPiEvent } from "./pi-rpc.js";
-export {
-  HOST_SKILL_NAME,
-  formatSkillPathsMarkdown,
-  resolveHostSkillDir,
-  resolvePiSkillDirs,
-} from "./pi-skill.js";
+export { HOST_SKILL_NAME, formatSkillPathsMarkdown, resolveHostSkillDir, resolvePiSkillDirs } from "./pi-skill.js";
 
 export type { ToolName, ToolStep } from "./harness-types.js";
 
@@ -363,25 +289,12 @@ export type GenerateReason = {
   tools?: { tool: string; label: string; summary: string; detail: string }[];
 };
 
-const REASON_TOOLS = new Set<ToolName>([
-  "think",
-  "plan",
-  "read_file",
-  "research",
-  "write_todo",
-]);
+const REASON_TOOLS = new Set<ToolName>(["think", "plan", "read_file", "research", "write_todo"]);
 
 /** Disk copy of Think / Plan / agent tools so the editor workspace can reopen them. */
-export function persistGenerateReason(
-  root: string,
-  brief: string,
-  steps: ToolStep[],
-): GenerateReason | null {
+export function persistGenerateReason(root: string, brief: string, steps: ToolStep[]): GenerateReason | null {
   const thinkStep = steps.find((s) => s.tool === "think" && s.status === "completed");
-  const planStep = steps.find(
-    (s) =>
-      (s.tool === "plan" || s.tool === "write_todo") && s.status === "completed",
-  );
+  const planStep = steps.find((s) => (s.tool === "plan" || s.tool === "write_todo") && s.status === "completed");
   const tools = steps
     .filter((s) => REASON_TOOLS.has(s.tool) && s.status === "completed")
     .map((s) => ({
@@ -393,12 +306,8 @@ export function persistGenerateReason(
   if (!thinkStep && !planStep && !tools.length) return null;
   const payload: GenerateReason = {
     brief,
-    think: thinkStep
-      ? { summary: thinkStep.summary ?? "", detail: thinkStep.detail ?? "" }
-      : null,
-    plan: planStep
-      ? { summary: planStep.summary ?? "", detail: planStep.detail ?? "" }
-      : null,
+    think: thinkStep ? { summary: thinkStep.summary ?? "", detail: thinkStep.detail ?? "" } : null,
+    plan: planStep ? { summary: planStep.summary ?? "", detail: planStep.detail ?? "" } : null,
     tools: tools.length ? tools : undefined,
   };
   fs.mkdirSync(root, { recursive: true });
@@ -442,9 +351,7 @@ export const mockBrain: Brain = {
       project.presentation.pages = project.pages.map((page) => page.path);
     }
     const cover = project.pages[0]!.page;
-    const titleEl = cover.elements.find((e) => e.elementType === "text") as
-      | TextElement
-      | undefined;
+    const titleEl = cover.elements.find((e) => e.elementType === "text") as TextElement | undefined;
     if (titleEl) {
       titleEl.content.text = title;
     }
@@ -552,12 +459,7 @@ function describeBrain(brain: Brain): {
   return { composeSource: "mock" };
 }
 
-function step(
-  tool: ToolName,
-  label: string,
-  fn: () => void | Promise<void>,
-  done?: string | (() => string),
-): ToolStep {
+function step(tool: ToolName, label: string, fn: () => void | Promise<void>, done?: string | (() => string)): ToolStep {
   const s: ToolStep = { tool, label, status: "running" };
   try {
     const r = fn();
@@ -595,9 +497,7 @@ function validateGeneratedProject(root: string): number {
     { projectRoot: root, mode: "compose" },
   );
   if (!review.ok) {
-    throw new Error(
-      `layout_qa: ${review.issues.map((issue) => `${issue.pageId}:${issue.code}`).join("; ")}`,
-    );
+    throw new Error(`layout_qa: ${review.issues.map((issue) => `${issue.pageId}:${issue.code}`).join("; ")}`);
   }
   return p.pages.length;
 }
@@ -729,12 +629,8 @@ export async function runGenerateAsync(opts: {
       });
       await runReasoned("plan", "Plan", () => {
         if (brain.plan) return brain.plan(opts.brief);
-        return localPlan(
-          opts.brief,
-          DEFAULT_DESIGN_SYSTEM,
-          opts.referenceText,
-          resolvePlaybookCategory(opts.brief),
-        ).reason;
+        return localPlan(opts.brief, DEFAULT_DESIGN_SYSTEM, opts.referenceText, resolvePlaybookCategory(opts.brief))
+          .reason;
       });
 
       const composeStep: ToolStep = {
@@ -814,9 +710,7 @@ export async function runGenerateAsync(opts: {
       };
       emit(expStep);
       try {
-        const { exportProjectToFile } = await import(
-          "@open-slidestudio/exporter-native"
-        );
+        const { exportProjectToFile } = await import("@open-slidestudio/exporter-native");
         pptxPath = path.join(root, "deck.pptx");
         const exp = await exportProjectToFile(root, pptxPath);
         exportBytes = exp.report.bytes;
@@ -849,9 +743,7 @@ export async function runGenerateAsync(opts: {
       steps,
       projectRoot: root,
       composeSource: described.composeSource,
-      fallbackReason:
-        described.fallbackReason ||
-        (e instanceof Error ? e.message : String(e)),
+      fallbackReason: described.fallbackReason || (e instanceof Error ? e.message : String(e)),
     };
   }
 }
@@ -883,12 +775,7 @@ export function runGenerate(opts: {
     });
     const planned = brain.plan
       ? brain.plan(opts.brief)
-      : localPlan(
-          opts.brief,
-          DEFAULT_DESIGN_SYSTEM,
-          opts.referenceText,
-          resolvePlaybookCategory(opts.brief),
-        ).reason;
+      : localPlan(opts.brief, DEFAULT_DESIGN_SYSTEM, opts.referenceText, resolvePlaybookCategory(opts.brief)).reason;
     if (planned && typeof (planned as Promise<ReasonBlock>).then === "function") {
       throw new Error("async brain requires runGenerateAsync");
     }

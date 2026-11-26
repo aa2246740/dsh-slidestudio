@@ -44,7 +44,15 @@ function fixture(): string {
     todos: [{ title: "one" }, { title: "two" }],
     writtenPages: [{ id: "page-1" }, { id: "page-2" }],
   });
-  const hands = ["write_todo", "write_page", "render_page", "write_page", "render_page", "review_pages", "compose_deck"];
+  const hands = [
+    "write_todo",
+    "write_page",
+    "render_page",
+    "write_page",
+    "render_page",
+    "review_pages",
+    "compose_deck",
+  ];
   fs.writeFileSync(
     path.join(root, "_agent", "hands-log.jsonl"),
     `${hands.map((name) => JSON.stringify({ name, ok: true })).join("\n")}\n`,
@@ -57,7 +65,14 @@ function fixture(): string {
     sessionId: "session-test",
     agentStart: "2026-08-20T00:00:00.000Z",
     agentEnd: "2026-08-20T00:01:00.000Z",
-    events: ["agent_start", "tool:write_todo", "tool:write_page", "tool:review_pages", "tool:compose_deck", "agent_end"],
+    events: [
+      "agent_start",
+      "tool:write_todo",
+      "tool:write_page",
+      "tool:review_pages",
+      "tool:compose_deck",
+      "agent_end",
+    ],
     skillStack: {
       ok: true,
       compose: true,
@@ -156,8 +171,20 @@ function fixture(): string {
       referenceUse: { adopt: ["hierarchy"], adapt: ["density"], doNotCopy: ["literal copy"] },
       antiDefaultLocks: ["no card wall"],
       slidePlan: [
-        { pageId: "page-1", title: "one", narrativeJob: "open", layoutFamily: "cover", focalPoint: "title" },
-        { pageId: "page-2", title: "two", narrativeJob: "prove", layoutFamily: "chart-led", focalPoint: "evidence" },
+        {
+          pageId: "page-1",
+          title: "one",
+          narrativeJob: "open",
+          layoutFamily: "cover",
+          focalPoint: "title",
+        },
+        {
+          pageId: "page-2",
+          title: "two",
+          narrativeJob: "prove",
+          layoutFamily: "chart-led",
+          focalPoint: "evidence",
+        },
       ],
       userOverrides: [],
     },

@@ -57,11 +57,7 @@ async function loadModelRuntime(env: NodeJS.ProcessEnv, providerId: string) {
   const href = pathToFileURL(path.join(root, "dist", "index.js")).href;
   const mod = (await import(href)) as {
     ModelRuntime: {
-      create: (opts: {
-        authPath: string;
-        refreshOnCreate?: boolean;
-        allowModelNetwork?: boolean;
-      }) => Promise<{
+      create: (opts: { authPath: string; refreshOnCreate?: boolean; allowModelNetwork?: boolean }) => Promise<{
         registerProvider: (providerId: string, config: unknown) => void;
         refresh: (options: { allowNetwork: boolean }) => Promise<unknown>;
         getProvider: (providerId: string) => unknown;
@@ -87,9 +83,7 @@ async function loadModelRuntime(env: NodeJS.ProcessEnv, providerId: string) {
     if (!extension) {
       throw new Error("xAI OAuth extension is unavailable — install pi-xai-oauth first");
     }
-    const loaderHref = pathToFileURL(
-      path.join(root, "dist", "core", "extensions", "loader.js"),
-    ).href;
+    const loaderHref = pathToFileURL(path.join(root, "dist", "core", "extensions", "loader.js")).href;
     const loader = (await import(loaderHref)) as {
       loadExtensions: (
         paths: string[],
@@ -137,10 +131,7 @@ function viewOf(id: string, env: NodeJS.ProcessEnv): PiOAuthSessionView {
   };
 }
 
-export function getPiOAuthSession(
-  id: string,
-  env: NodeJS.ProcessEnv = process.env,
-): PiOAuthSessionView {
+export function getPiOAuthSession(id: string, env: NodeJS.ProcessEnv = process.env): PiOAuthSessionView {
   return viewOf(id, env);
 }
 
@@ -200,8 +191,7 @@ export async function startPiOAuth(
             url: typeof rec.url === "string" ? rec.url : undefined,
             instructions: typeof rec.instructions === "string" ? rec.instructions : undefined,
             userCode: typeof rec.userCode === "string" ? rec.userCode : undefined,
-            verificationUri:
-              typeof rec.verificationUri === "string" ? rec.verificationUri : undefined,
+            verificationUri: typeof rec.verificationUri === "string" ? rec.verificationUri : undefined,
           });
         },
         prompt(p) {
@@ -215,17 +205,13 @@ export async function startPiOAuth(
               type: (p.type as PiOAuthPrompt["type"]) || "text",
               message: String(p.message || "Continue"),
               placeholder: typeof p.placeholder === "string" ? p.placeholder : undefined,
-              options: Array.isArray(p.options)
-                ? (p.options as PiOAuthPrompt["options"])
-                : undefined,
+              options: Array.isArray(p.options) ? (p.options as PiOAuthPrompt["options"]) : undefined,
             };
             pending.resolvePrompt = resolve;
             pending.rejectPrompt = reject;
-            abort.signal.addEventListener(
-              "abort",
-              () => reject(new Error("cancelled")),
-              { once: true },
-            );
+            abort.signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+              once: true,
+            });
           });
         },
       });

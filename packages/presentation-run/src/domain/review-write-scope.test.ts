@@ -8,7 +8,10 @@ describe("review write scope page-id normalization", () => {
       expiresAt: Date.now() + 60_000,
       items: [
         { pagePath: "pages/01_Cover.page", scope: { kind: "page", pageId: "01_Cover" } },
-        { pagePath: "pages/02_tips.page", scope: { kind: "elements", pageId: "02_tips", elementIds: ["t"] } },
+        {
+          pagePath: "pages/02_tips.page",
+          scope: { kind: "elements", pageId: "02_tips", elementIds: ["t"] },
+        },
       ],
     };
     const cover = reviewWriteTargetForPage(guard, "1_cover");

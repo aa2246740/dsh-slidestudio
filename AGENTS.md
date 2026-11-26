@@ -51,7 +51,7 @@ Choose the smallest relevant check before running broader gates:
 | Native package suite                      | `npm run test:native`                                                                           |
 | Editor/server and DOM tests               | `npm test -w @open-slidestudio/native-web`                                                      |
 | Editor control inventory                  | `npm run oracle:validate`                                                                       |
-| Production boundaries                     | `npm run verify:no-fake-path && npm run verify:no-kimi-runtime`                                 |
+| Production boundaries                     | `npm run verify:no-fake-path && npm run verify:no-kimi-runtime && npm run verify:no-intranet`   |
 
 Package TypeScript tests compile themselves; build native dependencies before
 editor tests. Use scratch projects for mutation tests. Tests use `*.test.ts`,

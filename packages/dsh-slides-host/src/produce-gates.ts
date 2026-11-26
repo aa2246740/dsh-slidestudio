@@ -58,25 +58,26 @@ function loadedPptdV2Dir(): string {
   return path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/pptd-v2")));
 }
 
+function loadedExporterNativeDir(): string {
+  return path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/exporter-native")));
+}
+
+const LOADED_GATE_PACKAGE_DIRS: ReadonlyArray<readonly [string, () => string]> = [
+  ["packages/presentation-run/dist/", loadedPresentationRunDir],
+  ["packages/dsh-slides-host/dist/", loadedHostDir],
+  ["packages/pptd-v2/dist/", loadedPptdV2Dir],
+  ["packages/exporter-native/dist/", loadedExporterNativeDir],
+];
+
+/** Resolve every produce-gate path against the package copy Node actually loaded. */
 function loadedGateFiles(): string[] {
-  const pr = loadedPresentationRunDir();
-  const host = loadedHostDir();
-  return [
-    path.join(pr, "produce-gates.js"),
-    path.join(pr, "domain", "layout-qa.js"),
-    path.join(pr, "domain", "compose-ir.js"),
-    path.join(pr, "domain", "theme-pack.js"),
-    path.join(pr, "domain", "agent-tools.js"),
-    path.join(pr, "domain", "run-ledger.js"),
-    path.join(pr, "domain", "page-raster.js"),
-    path.join(pr, "capabilities.js"),
-    path.join(host, "write-page.js"),
-    path.join(host, "tools.js"),
-    path.join(host, "director-brief.js"),
-    path.join(loadedPptdV2Dir(), "parse.js"),
-    path.join(loadedPptdV2Dir(), "theme.js"),
-    path.resolve(pr, "../../exporter-native/dist/export-pptd.js"),
-  ];
+  return PRODUCE_GATE_REL_FILES.map((rel) => {
+    const normalized = rel.replace(/\\/g, "/");
+    for (const [prefix, directory] of LOADED_GATE_PACKAGE_DIRS) {
+      if (normalized.startsWith(prefix)) return path.join(directory(), normalized.slice(prefix.length));
+    }
+    throw new Error(`produce gate file is outside a loaded package: ${rel}`);
+  });
 }
 
 function workspaceGateFiles(root: string): string[] {

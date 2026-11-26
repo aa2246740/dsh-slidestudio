@@ -10,6 +10,13 @@
 import fs from "node:fs";
 import { classifyBriefKind, type BriefKind } from "./compose-ir.js";
 import { listDesignSystems, resolveSkillRoot } from "./playbook.js";
+import { verifyMaterial } from "./material-pack.js";
+import {
+  DEFAULT_TEMPLATE_ASPECTS,
+  readDesignAspects,
+  sourceDesignAspects,
+  type DesignAspect,
+} from "./design-aspects.js";
 
 export const KIND_THEME_PACK_ERROR = "kind_theme_pack";
 export const MISSING_THEME_PACK_ERROR = "missing_theme_pack";
@@ -35,6 +42,8 @@ const NUMBERED_FAMILY: Record<string, string> = {
   "05_academic": "academic",
 };
 
+export { USER_DESIGN_TINT_SHADE_PERCENTAGES } from "./palette-variants.js";
+
 export type ChosenThemePack = {
   readonly id: string;
   readonly family: string;
@@ -52,6 +61,8 @@ export type KindThemePackInput = {
   readonly brief: string;
   readonly designSystemId?: string;
   readonly adoptedSourceIds?: readonly string[];
+  readonly designAspects?: unknown;
+  readonly projectRoot?: string;
   /** User named a pack (explicit-style). That pack is allowed; extra agent adopts are not. */
   readonly userExplicitPack?: boolean;
 };
@@ -64,12 +75,87 @@ function canonicalizePackId(raw: string): string | undefined {
 }
 
 /**
+ * User design-source id, always `material:<id>`.
+ * `openkimi:material:<id>` and `openkimi-preview:material:<id>` both canonicalize.
+ * A string that merely contains `material:` does not: `..`, `/`, `\`, or a second prefix.
+ */
+export function canonicalDesignSourceId(raw: string): string | undefined {
+  const s = String(raw ?? "").trim();
+  if (!s) return undefined;
+  let body = s.replace(/\\/g, "/");
+  if (body.startsWith("openkimi-preview:")) body = body.slice("openkimi-preview:".length);
+  else if (body.startsWith("openkimi:")) body = body.slice("openkimi:".length);
+  const material = body.match(/^material:([^/\\\0]+)$/);
+  if (material?.[1] && !material[1].includes("..")) return `material:${material[1]}`;
+  return undefined;
+}
+
+/** Chinese refusal for a material id that cannot canonicalize. Names the submitted id. */
+export function malformedDesignSourceMessage(rawIds: readonly string[]): string | undefined {
+  for (const raw of rawIds) {
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed.includes("material:")) continue;
+    if (canonicalDesignSourceId(trimmed)) continue;
+    return `无法采用设计源「${trimmed}」。编号必须是 material:<id>，或 openkimi:material:<id>、openkimi-preview:material:<id>，不能包含 ..、/ 或重复前缀。`;
+  }
+  return undefined;
+}
+
+/** Canonical ids for a planning call. A material id that cannot canonicalize is a Chinese refusal. */
+export function resolvePlanningAdoption(input: { requested: readonly string[]; persisted?: readonly string[] }): {
+  ids: string[];
+  refusal?: string;
+} {
+  const refusal = malformedDesignSourceMessage(input.requested);
+  if (refusal) return { ids: [], refusal };
+  return {
+    ids: [
+      ...new Set([
+        ...canonicalizeAdoptedSourceIds(input.requested),
+        ...canonicalizeAdoptedSourceIds(input.persisted ?? []),
+      ]),
+    ],
+  };
+}
+
+/** Name the submitted alias when a refusal was produced from the canonical id. */
+export function detailWithSubmittedAlias(detail: string, rawIds: readonly string[], sourceId: string): string {
+  const alias = rawIds.map((id) => id.trim()).find((id) => id !== sourceId && canonicalDesignSourceId(id) === sourceId);
+  if (!alias || detail.includes(alias)) return detail;
+  return `${detail}（提交的编号是 ${alias}）`;
+}
+
+/** Canonical `material:<id>` values, with other ids left unchanged. Drops ids that cannot canonicalize. */
+export function canonicalizeAdoptedSourceIds(rawIds: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawIds) {
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed) continue;
+    if (trimmed.includes("material:")) {
+      const canonical = canonicalDesignSourceId(trimmed);
+      if (!canonical || seen.has(canonical)) continue;
+      seen.add(canonical);
+      out.push(canonical);
+      continue;
+    }
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+/**
  * Parse a catalog source id, preview id, or group/slug into a canonical pack id.
  * SKILL.md, categories, and agent-self-directed-plan are not packs.
  */
 export function parseThemePackId(raw: string): string | undefined {
   const s = String(raw ?? "").trim();
   if (!s || s === "agent-self-directed-plan") return undefined;
+  const material = canonicalDesignSourceId(s);
+  if (material) return material;
+  if (s.includes("material:")) return undefined;
   let body = s.replace(/\\/g, "/");
   if (body.startsWith("openkimi-preview:")) body = body.slice("openkimi-preview:".length);
   else if (body.startsWith("openkimi:")) body = body.slice("openkimi:".length);
@@ -92,6 +178,7 @@ export function parseThemePackId(raw: string): string | undefined {
 }
 
 export function themePackFamily(packId: string): string {
+  if (packId.startsWith("material:")) return "user";
   return packId.split("/")[0] ?? "";
 }
 
@@ -247,8 +334,7 @@ export function kindThemePackDisagreement(
 
 export function kindThemePackIssue(input: KindThemePackInput): KindThemePackIssue | undefined {
   const kind = classifyBriefKind(input.brief);
-  const explicitId =
-    input.userExplicitPack === true ? parseThemePackId(input.designSystemId ?? "") : undefined;
+  const explicitId = input.userExplicitPack === true ? parseThemePackId(input.designSystemId ?? "") : undefined;
   const packs = chosenThemePacksFrom({
     designSystemId: input.userExplicitPack === true ? undefined : input.designSystemId,
     adoptedSourceIds: input.adoptedSourceIds,
@@ -259,7 +345,22 @@ export function kindThemePackIssue(input: KindThemePackInput): KindThemePackIssu
   const required = requiredPackFamilies(kind);
   if (!required) return undefined;
   const matching = packs.filter((pack) => required.includes(pack.family));
-  if (matching.length) return undefined;
+  const aspects = input.designAspects ?? (input.projectRoot ? readDesignAspects(input.projectRoot) : undefined);
+  const paletteAdopted = packs.some((pack) => {
+    if (pack.family !== "user") return false;
+    let fallback: readonly DesignAspect[] = [];
+    if (aspects === undefined && input.projectRoot) {
+      try {
+        if (verifyMaterial(input.projectRoot, pack.id.slice("material:".length)).kind === "deck-template") {
+          fallback = DEFAULT_TEMPLATE_ASPECTS;
+        }
+      } catch {
+        // An unverifiable source grants no implicit legacy palette.
+      }
+    }
+    return sourceDesignAspects(aspects, pack.id, fallback).includes("palette");
+  });
+  if (matching.length || paletteAdopted) return undefined;
   const allowed = required.join("/");
   return {
     code: MISSING_THEME_PACK_ERROR,
@@ -268,27 +369,42 @@ export function kindThemePackIssue(input: KindThemePackInput): KindThemePackIssu
   };
 }
 
-/**
- * Official design.md PART B 【Color Palette】 hexes. Unprefixed RRGGBB is not
- * a Color Palette token. Empty when the pack has no PART B palette section.
- */
-export function extractColorPaletteHexes(markdown: string): string[] {
-  const start = markdown.search(/【Color Palette】/);
-  if (start < 0) return [];
-  const rest = markdown.slice(start);
-  const next = rest.search(/\n【(?!Color Palette)/);
-  const section = next >= 0 ? rest.slice(0, next) : rest.slice(0, 4000);
+function extractSectionHexes(markdown: string, headings: readonly string[]): string[] {
   const hexes = new Set<string>();
-  for (const match of section.matchAll(/#([0-9A-Fa-f]{6})\b/g)) {
-    hexes.add(`#${match[1]!.toUpperCase()}`);
+  for (const heading of headings) {
+    const start = markdown.indexOf(`【${heading}】`);
+    if (start < 0) continue;
+    const rest = markdown.slice(start + `【${heading}】`.length);
+    const next = rest.search(/\n【/);
+    const section = next >= 0 ? rest.slice(0, next) : rest.slice(0, 4000);
+    for (const match of section.matchAll(/#([0-9A-Fa-f]{6})\b/g)) {
+      hexes.add(`#${match[1]!.toUpperCase()}`);
+    }
   }
   return [...hexes];
+}
+
+/**
+ * Palette tokens and colors actually observed in a user template. Unprefixed
+ * RRGGBB is not a token; unrelated sections (including typography) are ignored.
+ */
+export function extractColorPaletteHexes(markdown: string): string[] {
+  return extractSectionHexes(markdown, ["Color Palette", "Observed Colors"]);
+}
+
+/** Official design-system permissions remain limited to their declared PART B palette. */
+function extractDeclaredPackPaletteHexes(markdown: string): string[] {
+  return extractSectionHexes(markdown, ["Color Palette"]);
 }
 
 export type PackColorWriteContext = {
   readonly adoptedPackId?: string;
   readonly adoptedPackHexes?: ReadonlySet<string>;
   readonly otherPackHexes?: ReadonlySet<string>;
+  readonly adoptedDesignSourceIds?: readonly string[];
+  readonly materialError?: string;
+  /** The project whose template kits name the paint a template component keeps under the palette. */
+  readonly templateKitRoot?: string;
 };
 
 let cachedCatalogPalettes: ReadonlyMap<string, ReadonlySet<string>> | undefined;
@@ -301,7 +417,7 @@ export function catalogPackPaletteHexes(): ReadonlyMap<string, ReadonlySet<strin
     if (cachedCatalogPalettes && cachedSkillRoot === skillRoot) return cachedCatalogPalettes;
     for (const sys of listDesignSystems(skillRoot)) {
       const markdown = fs.readFileSync(sys.file, "utf8");
-      map.set(sys.id, new Set(extractColorPaletteHexes(markdown)));
+      map.set(sys.id, new Set(extractDeclaredPackPaletteHexes(markdown)));
     }
     cachedSkillRoot = skillRoot;
   } catch {
@@ -312,35 +428,21 @@ export function catalogPackPaletteHexes(): ReadonlyMap<string, ReadonlySet<strin
   return map;
 }
 
-export function packColorWriteContext(packIds: readonly string[]): PackColorWriteContext {
-  const adopted = [...new Set(packIds.map((id) => id.trim()).filter(Boolean))];
-  if (!adopted.length) return {};
-  const catalog = catalogPackPaletteHexes();
-  const adoptedPackHexes = new Set<string>();
-  for (const id of adopted) {
-    const hexes = catalog.get(id);
-    if (!hexes) continue;
-    for (const hex of hexes) adoptedPackHexes.add(hex);
-  }
-  if (!adoptedPackHexes.size) return {};
-  const otherPackHexes = new Set<string>();
-  const adoptedSet = new Set(adopted);
-  for (const [id, hexes] of catalog) {
-    if (adoptedSet.has(id)) continue;
-    for (const hex of hexes) {
-      if (!adoptedPackHexes.has(hex)) otherPackHexes.add(hex);
-    }
-  }
-  return {
-    adoptedPackId: adopted[0],
-    adoptedPackHexes,
-    otherPackHexes,
-  };
-}
+import { packColorWriteContext } from "./theme-pack-color.js";
+export { packColorWriteContext };
 
-export function packColorWriteContextFrom(input: {
-  designSystemId?: string;
-  adoptedSourceIds?: readonly string[];
-}): PackColorWriteContext {
-  return packColorWriteContext(chosenThemePacksFrom(input).map((pack) => pack.id));
+export function packColorWriteContextFrom(
+  input: {
+    designSystemId?: string;
+    adoptedSourceIds?: readonly string[];
+  },
+  projectRoot?: string,
+): PackColorWriteContext {
+  const explicit = input.designSystemId?.trim();
+  return packColorWriteContext(
+    chosenThemePacksFrom(input)
+      .filter((pack) => !explicit || explicit === "freestyle" || pack.family !== "user")
+      .map((pack) => pack.id),
+    projectRoot,
+  );
 }

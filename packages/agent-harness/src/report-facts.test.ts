@@ -29,16 +29,13 @@ describe("report facts gate", () => {
     assert.equal(missingOperatingFactsReason(brief), undefined);
     assert.equal(missingOperatingFactsReason("澄光生活月报封面"), undefined);
     assert.equal(
-      missingOperatingFactsReason(
-        "为《澄光生活》做一页可读的 2026 年 7 月经营月报封面。放一两个 KPI（虚构演示）。",
-      ),
+      missingOperatingFactsReason("为《澄光生活》做一页可读的 2026 年 7 月经营月报封面。放一两个 KPI（虚构演示）。"),
       undefined,
     );
   });
 
   it("accepts a work report naming a team with real numbers", () => {
-    const brief =
-      "交易平台后端组 2026 年 Q3 工作汇报。订单峰值 QPS 从 8,000 提升到 15,000，平均延迟 95 毫秒。";
+    const brief = "交易平台后端组 2026 年 Q3 工作汇报。订单峰值 QPS 从 8,000 提升到 15,000，平均延迟 95 毫秒。";
     assert.equal(hasNamedCompany(brief), true);
     assert.equal(hasOperatingFacts(brief), true);
   });
@@ -51,10 +48,7 @@ describe("report facts gate", () => {
 
   it("accepts Hub attachments that already contain numbers", () => {
     assert.equal(
-      hasOperatingFacts(
-        "根据附件写月报",
-        "## 参考: 2026-07-经营月报-虚构演示.md\nGMV 1,840 万（虚构演示）",
-      ),
+      hasOperatingFacts("根据附件写月报", "## 参考: 2026-07-经营月报-虚构演示.md\nGMV 1,840 万（虚构演示）"),
       true,
     );
   });
@@ -73,8 +67,7 @@ describe("report facts gate", () => {
   });
 
   it("accepts 星河零售 with sourced numbers", () => {
-    const brief =
-      "根据下面数据做一份「星河零售 2026年7月经营月报」。营收 1860万，完成率 93%。";
+    const brief = "根据下面数据做一份「星河零售 2026年7月经营月报」。营收 1860万，完成率 93%。";
     assert.equal(hasNamedCompany(brief), true);
     assert.equal(hasNumericFacts(brief), true);
     assert.equal(missingOperatingFactsReason(brief), undefined);
@@ -89,8 +82,7 @@ describe("report facts gate", () => {
   });
 
   it("extracts named gaps from the B brief", () => {
-    const brief =
-      "以下三个数缺失，待补，禁止估算或补全：华南客单价；复购；线下毛利。";
+    const brief = "以下三个数缺失，待补，禁止估算或补全：华南客单价；复购；线下毛利。";
     assert.deepEqual(extractMarkedGaps(brief), ["华南客单价", "复购", "线下毛利"]);
   });
 
@@ -157,7 +149,9 @@ describe("report facts gate", () => {
           bounds: [40, 300, 860, 80],
           columnWidths: [100, 100, 100, 100, 100, 100, 100, 100],
           rows: [
-            ["营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道", "负责人"].map((text) => ({ text })),
+            ["营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道", "负责人"].map((text) => ({
+              text,
+            })),
             ["万元", "%", "%", "%", "天", "%", "线上/下", "姓名入格"].map((text) => ({ text })),
           ],
         },
@@ -173,7 +167,9 @@ describe("report facts gate", () => {
           bounds: [12, 68, 936, 440],
           columnWidths: [112, 76, 72, 72, 72, 72, 72, 76],
           rows: [
-            ["品名", "营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道"].map((text) => ({ text })),
+            ["品名", "营收", "环比", "同比", "毛利", "库存天", "退货率", "渠道"].map((text) => ({
+              text,
+            })),
             ...Array.from({ length: 12 }, (_, i) =>
               [`sku${i}`, "1", "1", "1", "1", "1", "1", "线上"].map((text) => ({ text })),
             ),
@@ -228,24 +224,48 @@ describe("report facts gate", () => {
       textPage("page-02", "净利率七点九，预算达成 105%"),
       textPage("page-03", "周转 19 天，鲜食报损 3.9%"),
     ]);
-    assert.deepEqual(issues, [
-      { pageId: "page-02", missing: ["7.9%", "105.4%"] },
-    ]);
+    assert.deepEqual(issues, [{ pageId: "page-02", missing: ["7.9%", "105.4%"] }]);
   });
 
   it("does not let a positive value satisfy a locked negative fact", () => {
-    const brief = [
-      "【第1页 封面】营收 1.286 亿。",
-      "【第2页 趋势】闭店 -18 万。",
-      "【第3页 结论】净利率 7.9%。",
-    ].join("\n");
+    const brief = ["【第1页 封面】营收 1.286 亿。", "【第2页 趋势】闭店 -18 万。", "【第3页 结论】净利率 7.9%。"].join(
+      "\n",
+    );
     const pages: SkillPageInput[] = [
-      { id: "page-01", elements: [{ elementId: "a", elementType: "text", bounds: [0, 0, 100, 20], content: { text: "1.286 亿" } }] },
-      { id: "page-02", elements: [{ elementId: "b", elementType: "text", bounds: [0, 0, 100, 20], content: { text: "闭店 18 万" } }] },
-      { id: "page-03", elements: [{ elementId: "c", elementType: "text", bounds: [0, 0, 100, 20], content: { text: "7.9%" } }] },
+      {
+        id: "page-01",
+        elements: [
+          {
+            elementId: "a",
+            elementType: "text",
+            bounds: [0, 0, 100, 20],
+            content: { text: "1.286 亿" },
+          },
+        ],
+      },
+      {
+        id: "page-02",
+        elements: [
+          {
+            elementId: "b",
+            elementType: "text",
+            bounds: [0, 0, 100, 20],
+            content: { text: "闭店 18 万" },
+          },
+        ],
+      },
+      {
+        id: "page-03",
+        elements: [
+          {
+            elementId: "c",
+            elementType: "text",
+            bounds: [0, 0, 100, 20],
+            content: { text: "7.9%" },
+          },
+        ],
+      },
     ];
-    assert.deepEqual(missingLockedPageFacts(brief, pages), [
-      { pageId: "page-02", missing: ["-18 万"] },
-    ]);
+    assert.deepEqual(missingLockedPageFacts(brief, pages), [{ pageId: "page-02", missing: ["-18 万"] }]);
   });
 });

@@ -5,8 +5,7 @@
 import { classifyBriefKind } from "./compose-ir.js";
 import type { SkillPageInput } from "./skill-pages.js";
 
-const GENERIC_ORG =
-  /^(公司|本公司|贵公司|一家公司|该企业|企业|集团客户|管理层)$/;
+const GENERIC_ORG = /^(公司|本公司|贵公司|一家公司|该企业|企业|集团客户|管理层)$/;
 
 const ORG_SUFFIX = /[\u4e00-\u9fffA-Za-z0-9]{2,16}(零售|科技|集团|股份|银行|保险|制造|食品|药业|商贸|控股)/;
 
@@ -41,9 +40,7 @@ export function hasNamedCompany(text: string): boolean {
   }
   if (ORG_SUFFIX.test(text)) return true;
   if (TEAM_NAME.test(text)) return true;
-  for (const m of text.matchAll(
-    /([\u4e00-\u9fff]{2,12})(?:[\s\d年月日]{0,12})经营?(?:月报|年报|周报)/g,
-  )) {
+  for (const m of text.matchAll(/([\u4e00-\u9fff]{2,12})(?:[\s\d年月日]{0,12})经营?(?:月报|年报|周报)/g)) {
     const name = (m[1] ?? "").trim();
     if (!name || GENERIC_ORG.test(name) || name === "公司") continue;
     if (/一份|做一|根据|下面/.test(name)) continue;
@@ -68,10 +65,7 @@ export function hasOperatingFacts(brief: string, referenceText?: string): boolea
   return false;
 }
 
-export function missingOperatingFactsReason(
-  brief: string,
-  referenceText?: string,
-): string | undefined {
+export function missingOperatingFactsReason(brief: string, referenceText?: string): string | undefined {
   if (!reportBriefNeedsFacts(brief)) return undefined;
   if (hasOperatingFacts(brief, referenceText)) return undefined;
   const blob = `${brief}\n${referenceText ?? ""}`;
@@ -86,7 +80,10 @@ export function extractMarkedGaps(brief: string): string[] {
   const after = brief.match(/缺失[^。\n]{0,40}[：:]([^。\n]+)/);
   if (after?.[1]) {
     for (const part of after[1].split(/[；;、,，]/)) {
-      const t = part.replace(/禁止.*$/, "").replace(/[「」『』]/g, "").trim();
+      const t = part
+        .replace(/禁止.*$/, "")
+        .replace(/[「」『』]/g, "")
+        .trim();
       if (t.length >= 2 && t.length <= 16) out.push(t);
     }
   }
@@ -99,13 +96,19 @@ export function extractMarkedGaps(brief: string): string[] {
 
 export function extractRequiredTableColumns(brief: string): string[] {
   const fixed = brief.match(/列固定为[：:]\s*([^\n。]+)/);
-  const counted = brief.match(/\d+\s*列[（(]([^)）]+)[)）]/);
-  const raw = fixed?.[1] ?? counted?.[1] ?? "";
+  const named =
+    brief.match(/(?:表头|列名)(?:固定)?(?:为|是|[：:])\s*[“"「『]([^”"」』]+)[”"」』]/) ??
+    brief.match(/(?:表头|列名)(?:固定)?(?:为|是|[：:])\s*([^\n。；;]+)/);
+  const counted = brief.match(/\d+\s*列\s*[（(]([^)）]+)[)）]/);
+  // A dimension explanation is not a list of column names.
+  const parenthetical = counted?.[1] ?? "";
+  const describesRows = /\d+\s*(?:行|个?单元格)/.test(parenthetical);
+  const raw = fixed?.[1] ?? named?.[1] ?? (describesRows ? "" : parenthetical);
   if (!raw.trim()) return [];
   return [
     ...new Set(
       raw
-        .split(/[/／、,，|]/)
+        .split(/[/／、,，|｜]/)
         .map((s) => s.replace(/列|必须|含/g, "").trim())
         .filter((s) => s.length >= 2 && s.length <= 12),
     ),
@@ -216,9 +219,7 @@ function allNumbers(text: string): LockedNumber[] {
 
 function structuredBriefPages(brief: string): Map<number, string> {
   const pages = new Map<number, string>();
-  for (const match of brief.matchAll(
-    /【第\s*(\d+)\s*页[^】]*】([\s\S]*?)(?=【第\s*\d+\s*页|生成时自检|$)/g,
-  )) {
+  for (const match of brief.matchAll(/【第\s*(\d+)\s*页[^】]*】([\s\S]*?)(?=【第\s*\d+\s*页|生成时自检|$)/g)) {
     const pageNumber = Number(match[1]);
     if (Number.isSafeInteger(pageNumber) && pageNumber >= 1) {
       pages.set(pageNumber, match[2] ?? "");
@@ -239,16 +240,12 @@ export function missingLockedPageFacts(
     if (!source) continue;
     const required = lockedNumbers(source);
     if (!required.length) continue;
-    const present = allNumbers(
-      page.elements.flatMap((element) => elementPlainText(element)).join("\n"),
-    );
+    const present = allNumbers(page.elements.flatMap((element) => elementPlainText(element)).join("\n"));
     const missing = required
       .filter(
         (fact) =>
           !present.some(
-            (candidate) =>
-              candidate.canonical === fact.canonical &&
-              (!fact.negative || candidate.negative),
+            (candidate) => candidate.canonical === fact.canonical && (!fact.negative || candidate.negative),
           ),
       )
       .map((fact) => fact.raw);
@@ -263,11 +260,7 @@ export type ReportFactIssue = {
   message: string;
 };
 
-export function reportFactIssues(
-  brief: string,
-  pages: SkillPageInput[],
-  referenceText?: string,
-): ReportFactIssue[] {
+export function reportFactIssues(brief: string, pages: SkillPageInput[], referenceText?: string): ReportFactIssue[] {
   const issues: ReportFactIssue[] = [];
   const blob = skillPagesPlainText(pages);
   const deckId = pages[0]?.id ?? "deck";
@@ -292,16 +285,14 @@ export function reportFactIssues(
           continue;
         }
         const header = rec.rows[0].map((cell: unknown) => cellText(cell).trim());
-        const bodyRows = rec.rows.slice(1).map((row: unknown) =>
-          Array.isArray(row) ? row.map((cell) => cellText(cell).trim()) : [],
-        );
+        const bodyRows = rec.rows
+          .slice(1)
+          .map((row: unknown) => (Array.isArray(row) ? row.map((cell) => cellText(cell).trim()) : []));
         tables.push({ pageId: page.id, header, bodyRows, n: rec.rows.length });
       }
     }
     const people = extractListedPeople(brief);
-    const dense = tables
-      .filter((t) => t.n >= 10)
-      .sort((a, b) => b.n - a.n)[0];
+    const dense = tables.filter((t) => t.n >= 10).sort((a, b) => b.n - a.n)[0];
     const target = dense ?? tables.sort((a, b) => b.n - a.n)[0];
     const headerOk = Boolean(target && cols.every((col) => target.header.includes(col)));
     if (!headerOk) {
@@ -312,8 +303,7 @@ export function reportFactIssues(
       });
     }
     const ownerIdx = target?.header.indexOf("负责人") ?? -1;
-    const ownerCells =
-      ownerIdx >= 0 ? (target?.bodyRows.map((row) => row[ownerIdx] ?? "") ?? []) : [];
+    const ownerCells = ownerIdx >= 0 ? (target?.bodyRows.map((row) => row[ownerIdx] ?? "") ?? []) : [];
     if (people.length >= 8) {
       const missingPeople = people.filter((name) => !ownerCells.includes(name));
       if (missingPeople.length) {

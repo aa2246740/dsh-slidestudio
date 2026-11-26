@@ -4,6 +4,7 @@ import {
   inspectProduceGates,
   assertProduceGates,
   PRODUCE_GATES_ID,
+  PRODUCE_GATE_REL_FILES,
   type ProduceGateApi,
 } from "./produce-gates.js";
 import { visualReviewIsClaimable } from "./capabilities.js";
@@ -23,6 +24,8 @@ import {
   composedPageLeftoverIssues,
   renderedLayoutBlocksCompose,
 } from "./domain/layout-qa.js";
+import { readMaterialChunk } from "./domain/material-content.js";
+import { verifyMaterial, materialCapabilityEntries } from "./domain/material-pack.js";
 
 const live: ProduceGateApi = {
   pageHasVisibleContent,
@@ -38,11 +41,113 @@ const live: ProduceGateApi = {
   isPlaceholderReviewIssue,
   composedPageLeftoverIssues,
   renderedLayoutBlocksCompose,
+  verifyMaterial,
+  readMaterialChunk,
+  materialCapabilityEntries,
   EMPTY_CLOSER_PRODUCE_NEXT,
   HOST_SEED_PRODUCE_NEXT,
 };
 
 describe("produce gates fingerprint", () => {
+  it("fingerprints the run and domain-hand integration points", () => {
+    assert.ok(PRODUCE_GATE_REL_FILES.includes("packages/presentation-run/dist/run.js"));
+    assert.ok(PRODUCE_GATE_REL_FILES.includes("packages/presentation-run/dist/domain/domain-hands.js"));
+    assert.ok(PRODUCE_GATE_REL_FILES.includes("packages/presentation-run/dist/domain/agent-page-review.js"));
+  });
+
+  it("fingerprints the layout, pack-color and revision modules the produce path loads", () => {
+    const listed = [
+      "packages/presentation-run/dist/domain/layout-gates.js",
+      "packages/presentation-run/dist/domain/layout-ledger.js",
+      "packages/presentation-run/dist/domain/pack-color-context.js",
+      "packages/presentation-run/dist/domain/page-layout-refusal.js",
+      "packages/presentation-run/dist/domain/page-revision-ledger.js",
+      "packages/presentation-run/dist/domain/rendered-layout-assessment.js",
+      "packages/presentation-run/dist/domain/todo-hand.js",
+      "packages/presentation-run/dist/domain/page-chrome.js",
+      "packages/presentation-run/dist/domain/layout-compose-gate.js",
+      "packages/presentation-run/dist/domain/compose-gate-failure.js",
+      "packages/presentation-run/dist/domain/delivery-layouts.js",
+      "packages/pptd-v2/dist/layout-duplicates.js",
+      "packages/pptd-v2/dist/inheritance.js",
+    ];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
+  it("fingerprints the shared page-count authority used by plan and compose", () => {
+    const listed = [
+      "packages/presentation-run/dist/domain/page-count-requirement.js",
+      "packages/presentation-run/dist/domain/conversation-requirements.js",
+      "packages/presentation-run/dist/domain/deck-page-count.js",
+      "packages/presentation-run/dist/domain/plan-coverage.js",
+    ];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
+  it("fingerprints the layout-scope gate that offers and refuses write_layout", () => {
+    const listed = [
+      "packages/presentation-run/dist/domain/layout-edit-scope.js",
+      "packages/dsh-slides-host/dist/produce-request-header.js",
+    ];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
+  it("fingerprints every module that reads, gates and expands a template component", () => {
+    const listed = [
+      "packages/presentation-run/dist/domain/template-kit.js",
+      "packages/presentation-run/dist/domain/template-kit-text.js",
+      "packages/presentation-run/dist/domain/template-component-gates.js",
+      "packages/presentation-run/dist/domain/template-component-expand.js",
+      "packages/presentation-run/dist/domain/template-component-ledger.js",
+      "packages/presentation-run/dist/domain/template-component-paint.js",
+      "packages/pptd-v2/dist/component-element-schema.js",
+    ];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
+  it("fingerprints the editor-turn record that keeps a lapsed editor turn editor-scoped", () => {
+    const listed = [
+      "packages/presentation-run/dist/domain/editor-turn-authority.js",
+      "packages/presentation-run/dist/domain/agent-tools.js",
+    ];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
+  it("fingerprints the sample-wording gate that refuses template sample text in layouts", () => {
+    const listed: string[] = ["packages/presentation-run/dist/domain/layout-sample-text.js"];
+    for (const rel of listed) {
+      assert.ok(
+        PRODUCE_GATE_REL_FILES.some((item) => item === rel),
+        `${rel} must be in the produce fingerprint`,
+      );
+    }
+  });
+
   it("passes on the loaded dist that includes pageHasVisibleContent", () => {
     const report = inspectProduceGates();
     assert.equal(report.id, PRODUCE_GATES_ID);
@@ -268,7 +373,7 @@ describe("produce gates fingerprint", () => {
   });
 
   it("fingerprint regex catches missing-fill collapsed to opaque white", () => {
-    const stale = "function fillToPptx(fill) { if (!fill) return { color: \"FFFFFF\" }; }";
+    const stale = 'function fillToPptx(fill) { if (!fill) return { color: "FFFFFF" }; }';
     assert.match(stale, /if\s*\(\s*!fill\s*\)\s*return\s*\{\s*color:\s*["']FFFFFF["']\s*\}/);
   });
 });

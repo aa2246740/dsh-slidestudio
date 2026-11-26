@@ -63,10 +63,7 @@ describe("pi native login store", () => {
 
   it("lets SLIDESTUDIO_PI_PROVIDER win over the store", () => {
     const { env } = tmpStore({ anthropic: { type: "oauth" } });
-    assert.equal(
-      inferPiProvider({ ...env, SLIDESTUDIO_PI_PROVIDER: "google" }),
-      "google",
-    );
+    assert.equal(inferPiProvider({ ...env, SLIDESTUDIO_PI_PROVIDER: "google" }), "google");
   });
 
   it("does not map the host Gemini key when /login already stored Google", () => {

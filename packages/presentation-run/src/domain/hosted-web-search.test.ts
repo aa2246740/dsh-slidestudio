@@ -10,8 +10,7 @@ import {
 } from "./hosted-web-search.js";
 
 const FACTS_BRIEF = "封面需要今年航天新闻和一张封面底图";
-const FICTION_BRIEF =
-  "闸门复现灯开关\n两页即可：封面 + 结束页。不要做成经营月报。虚构车间灯开关验收。";
+const FICTION_BRIEF = "闸门复现灯开关\n两页即可：封面 + 结束页。不要做成经营月报。虚构车间灯开关验收。";
 
 const QUERY_ONLY = {
   name: "web_search",
@@ -45,7 +44,10 @@ describe("hosted web_search schema grok-4.6 will call", () => {
     const call = grok46WouldCallWebSearch(
       [
         QUERIES_ARRAY,
-        { name: "search_image", parameters: { type: "object", properties: { query: { type: "string" } } } },
+        {
+          name: "search_image",
+          parameters: { type: "object", properties: { query: { type: "string" } } },
+        },
       ],
       FACTS_BRIEF,
     );
@@ -71,14 +73,8 @@ describe("hosted web_search schema grok-4.6 will call", () => {
   });
 
   it("does not require a function-call receipt for dsh-oauth native hosted search", () => {
-    assert.equal(
-      hostedResearchNeedsWebSearchReceipt({ configured: true, via: "pi-xai-hosted" }),
-      false,
-    );
+    assert.equal(hostedResearchNeedsWebSearchReceipt({ configured: true, via: "pi-xai-hosted" }), false);
     assert.equal(hostedResearchNeedsWebSearchReceipt({ configured: true, via: "env" }), false);
-    assert.equal(
-      hostedResearchNeedsWebSearchReceipt({ configured: false, via: "pi-xai-hosted" }),
-      false,
-    );
+    assert.equal(hostedResearchNeedsWebSearchReceipt({ configured: false, via: "pi-xai-hosted" }), false);
   });
 });

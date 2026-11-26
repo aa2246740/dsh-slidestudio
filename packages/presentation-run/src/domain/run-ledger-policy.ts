@@ -1,10 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadProject } from "@open-slidestudio/pptd-v2";
-import { composedPageLeftoverIssues, writePageSchemaError, writePageSchemaIssues } from "./layout-qa.js";
+import {
+  composedPageLeftoverIssues,
+  persistPageKey,
+  writePageSchemaError,
+  writePageSchemaIssues,
+} from "./layout-qa.js";
+import { packColorSourceIds, runtimeDesignSystemId } from "./pack-color-context.js";
 import type { SkillPageInput } from "./skill-pages.js";
-import { listSourceReceipts } from "../receipts.js";
-import { packColorWriteContextFrom } from "./theme-pack.js";
+import { packColorWriteContext } from "./theme-pack.js";
 import type { RunLedgerV1 } from "./run-ledger.js";
 
 export function leftoverComposeBlockers(root: string): string[] {
@@ -23,7 +28,7 @@ export function leftoverComposeBlockers(root: string): string[] {
   }
 }
 
-export function yamlStructureBlockers(root: string, persistPageKey: (name: string) => string): string[] {
+export function yamlStructureBlockers(root: string): string[] {
   const blockers: string[] = [];
   if (!fs.existsSync(path.join(root, "deck.pptd"))) return blockers;
   try {
@@ -31,22 +36,7 @@ export function yamlStructureBlockers(root: string, persistPageKey: (name: strin
     const last = project.pages.at(-1);
     const lastBasename = last ? path.basename(last.path, ".page") : undefined;
     const diskPageCount = project.pages.length;
-    const adoptedSourceIds: string[] = [];
-    let designSystemId: string | undefined;
-    try {
-      const rec = JSON.parse(fs.readFileSync(path.join(root, "_agent", "runtime.json"), "utf8")) as {
-        designSystemId?: unknown;
-      };
-      if (typeof rec.designSystemId === "string" && rec.designSystemId.trim()) {
-        designSystemId = rec.designSystemId.trim();
-      }
-    } catch {
-      designSystemId = undefined;
-    }
-    for (const row of listSourceReceipts(root)) {
-      if (row.state === "adopted" || row.state === "executed") adoptedSourceIds.push(row.sourceId);
-    }
-    const packCtx = packColorWriteContextFrom({ designSystemId, adoptedSourceIds });
+    const packCtx = packColorWriteContext(packColorSourceIds(root, runtimeDesignSystemId(root)), root);
     for (const loaded of project.pages) {
       const page: SkillPageInput = {
         id: persistPageKey(loaded.path),
@@ -61,7 +51,7 @@ export function yamlStructureBlockers(root: string, persistPageKey: (name: strin
         ...packCtx,
       };
       const err = writePageSchemaError(writePageSchemaIssues(page, ctx), page, ctx);
-      if (err) blockers.push(`${page.id}: ${err.error}`);
+      if (err) blockers.push(`${page.id}: ${err.error}: ${err.detail}`);
     }
   } catch (error) {
     blockers.push(`project unreadable: ${error instanceof Error ? error.message : String(error)}`);

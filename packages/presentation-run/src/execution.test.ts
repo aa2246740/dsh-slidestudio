@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createEmptyProject, listComposedPage, saveProject } from "@open-slidestudio/pptd-v2";
-import { inspectProjectExecution as projectExecution } from "./execution-observation.js";
 import { projectExecution as projectExecutionPure } from "./execution.js";
+import { inspectProjectExecution as projectExecution } from "./execution-observation.js";
 import { ensureRunLedger } from "./domain/run-ledger.js";
 import type { CapabilitySnapshot } from "./types.js";
 
@@ -52,8 +52,13 @@ describe("projectExecution candidate regressions", () => {
     const root = tempProjectRoot();
     const ledger = JSON.parse(fs.readFileSync(path.join(root, "_agent", "run-ledger.v1.json"), "utf8"));
     ledger.facts.push({
-      type: "todo.committed", factId: "fact-todo-legacy", at: new Date().toISOString(),
-      contextEpochId: "epoch-1", todoSha256: "todo-sha", itemCount: 2, pageIds: ["1_cover", "2_body"],
+      type: "todo.committed",
+      factId: "fact-todo-legacy",
+      at: new Date().toISOString(),
+      contextEpochId: "epoch-1",
+      todoSha256: "todo-sha",
+      itemCount: 2,
+      pageIds: ["1_cover", "2_body"],
     });
     fs.writeFileSync(path.join(root, "_agent", "run-ledger.v1.json"), JSON.stringify(ledger, null, 2));
     const result = projectExecution({
@@ -78,9 +83,7 @@ describe("projectExecution candidate regressions", () => {
     saveProject(project);
 
     // Save full plan with 1 page
-    const ledger = JSON.parse(
-      fs.readFileSync(path.join(root, "_agent", "run-ledger.v1.json"), "utf8"),
-    );
+    const ledger = JSON.parse(fs.readFileSync(path.join(root, "_agent", "run-ledger.v1.json"), "utf8"));
     ledger.facts.push({
       type: "todo.committed",
       factId: "fact-todo-single",
@@ -98,10 +101,7 @@ describe("projectExecution candidate regressions", () => {
         },
       ],
     });
-    fs.writeFileSync(
-      path.join(root, "_agent", "run-ledger.v1.json"),
-      JSON.stringify(ledger, null, 2),
-    );
+    fs.writeFileSync(path.join(root, "_agent", "run-ledger.v1.json"), JSON.stringify(ledger, null, 2));
 
     const result = projectExecution({
       root,
@@ -118,9 +118,7 @@ describe("projectExecution candidate regressions", () => {
 
   it("projects authoring status when planned pages are missing from disk", () => {
     const root = tempProjectRoot();
-    const ledger = JSON.parse(
-      fs.readFileSync(path.join(root, "_agent", "run-ledger.v1.json"), "utf8"),
-    );
+    const ledger = JSON.parse(fs.readFileSync(path.join(root, "_agent", "run-ledger.v1.json"), "utf8"));
     ledger.facts.push({
       type: "todo.committed",
       factId: "fact-todo-2",
@@ -134,10 +132,7 @@ describe("projectExecution candidate regressions", () => {
         { pageId: "2_body", title: "Body", layoutFamily: "content", exhibits: ["chart:bar"] },
       ],
     });
-    fs.writeFileSync(
-      path.join(root, "_agent", "run-ledger.v1.json"),
-      JSON.stringify(ledger, null, 2),
-    );
+    fs.writeFileSync(path.join(root, "_agent", "run-ledger.v1.json"), JSON.stringify(ledger, null, 2));
 
     const result = projectExecution({
       root,
@@ -208,7 +203,12 @@ describe("projectExecution candidate regressions", () => {
     });
     assert.equal(paused.status.kind, "paused");
     assert.equal(paused.recovery.kind, "continue");
-    const waiting = projectExecution({ root, capability: defaultCapability, agentBusy: false, retryScheduled: true });
+    const waiting = projectExecution({
+      root,
+      capability: defaultCapability,
+      agentBusy: false,
+      retryScheduled: true,
+    });
     assert.equal(waiting.recovery.kind, "wait-or-stop");
 
     const failed = projectExecution({
@@ -249,27 +249,60 @@ describe("projectExecution candidate regressions", () => {
     // Regression: export_deck succeeded and verified, then the model's closing
     // message hit CONTEXT_WINDOW_EXCEEDED. The fault must not mask delivery.
     const result = projectExecutionPure({
-      ledger: JSON.parse(JSON.stringify({
-        schemaVersion: 1, runId: "r", createdAt: "t", updatedAt: "t",
-        sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
-        facts: [{
-          type: "todo.committed", factId: "fact-todo", at: "t", contextEpochId: "e",
-          todoSha256: "todo-sha", itemCount: 1, pageIds: ["1_cover"],
-          pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
-        }],
-      })),
+      ledger: JSON.parse(
+        JSON.stringify({
+          schemaVersion: 1,
+          runId: "r",
+          createdAt: "t",
+          updatedAt: "t",
+          sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
+          facts: [
+            {
+              type: "todo.committed",
+              factId: "fact-todo",
+              at: "t",
+              contextEpochId: "e",
+              todoSha256: "todo-sha",
+              itemCount: 1,
+              pageIds: ["1_cover"],
+              pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
+            },
+          ],
+        }),
+      ),
       identity: { kind: "resolved", pages: new Map([["1_cover", "pages/1_cover.pptd"]]), aliases: new Map() },
       inspection: {
-        initialized: true, referencesComplete: true, missingReferenceChunks: [], todoCount: 1,
-        pages: [{ pageId: "1_cover", revision: 1, pageSha256: "p", raster: true, imageEmitted: false, visualReview: "missing", layout: "pass" }],
-        structuralReview: "pass", composeReady: true, composeBlockers: [], composed: true,
+        initialized: true,
+        referencesComplete: true,
+        missingReferenceChunks: [],
+        todoCount: 1,
+        pages: [
+          {
+            pageId: "1_cover",
+            revision: 1,
+            pageSha256: "p",
+            raster: true,
+            imageEmitted: false,
+            visualReview: "missing",
+            layout: "pass",
+            chromeStale: false,
+          },
+        ],
+        structuralReview: "pass",
+        composeReady: true,
+        composeBlockers: [],
+        composed: true,
       },
       agentBusy: false,
       capability: defaultCapability,
       verifiedDelivery: {
-        artifactPath: "export/deck.pptx", artifactSha256: "a", artifactBytes: 1000,
-        reportPath: "export/export-report.json", reportSha256: "b",
-        slideCount: 1, inputFingerprint: "fp",
+        artifactPath: "export/deck.pptx",
+        artifactSha256: "a",
+        artifactBytes: 1000,
+        reportPath: "export/export-report.json",
+        reportSha256: "b",
+        slideCount: 1,
+        inputFingerprint: "fp",
       },
       terminalFault: { code: "provider-error", message: "context overflow", recoverable: true },
     });
@@ -280,20 +313,49 @@ describe("projectExecution candidate regressions", () => {
 
   it("still projects the fault when delivery is not verified", () => {
     const result = projectExecutionPure({
-      ledger: JSON.parse(JSON.stringify({
-        schemaVersion: 1, runId: "r", createdAt: "t", updatedAt: "t",
-        sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
-        facts: [{
-          type: "todo.committed", factId: "fact-todo", at: "t", contextEpochId: "e",
-          todoSha256: "todo-sha", itemCount: 1, pageIds: ["1_cover"],
-          pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
-        }],
-      })),
+      ledger: JSON.parse(
+        JSON.stringify({
+          schemaVersion: 1,
+          runId: "r",
+          createdAt: "t",
+          updatedAt: "t",
+          sourcePack: { manifestSha256: "m", requirementsId: "r", requirements: [] },
+          facts: [
+            {
+              type: "todo.committed",
+              factId: "fact-todo",
+              at: "t",
+              contextEpochId: "e",
+              todoSha256: "todo-sha",
+              itemCount: 1,
+              pageIds: ["1_cover"],
+              pagePlan: [{ pageId: "1_cover", title: "Cover", layoutFamily: "hero", exhibits: ["none"] }],
+            },
+          ],
+        }),
+      ),
       identity: { kind: "resolved", pages: new Map([["1_cover", "pages/1_cover.pptd"]]), aliases: new Map() },
       inspection: {
-        initialized: true, referencesComplete: true, missingReferenceChunks: [], todoCount: 1,
-        pages: [{ pageId: "1_cover", revision: 1, pageSha256: "p", raster: true, imageEmitted: false, visualReview: "missing", layout: "pass" }],
-        structuralReview: "pass", composeReady: true, composeBlockers: [], composed: true,
+        initialized: true,
+        referencesComplete: true,
+        missingReferenceChunks: [],
+        todoCount: 1,
+        pages: [
+          {
+            pageId: "1_cover",
+            revision: 1,
+            pageSha256: "p",
+            raster: true,
+            imageEmitted: false,
+            visualReview: "missing",
+            layout: "pass",
+            chromeStale: false,
+          },
+        ],
+        structuralReview: "pass",
+        composeReady: true,
+        composeBlockers: [],
+        composed: true,
       },
       agentBusy: false,
       capability: defaultCapability,

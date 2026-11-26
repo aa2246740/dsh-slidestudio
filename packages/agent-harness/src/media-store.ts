@@ -7,7 +7,11 @@ import path from "node:path";
 const SAFE_ID = /[^a-zA-Z0-9_-]+/g;
 
 export function mediaId(raw: string, fallback = "img"): string {
-  const id = raw.trim().replace(SAFE_ID, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  const id = raw
+    .trim()
+    .replace(SAFE_ID, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
   return id || fallback;
 }
 

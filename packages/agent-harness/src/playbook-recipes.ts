@@ -34,12 +34,7 @@ export type RecipeOpts = {
   imageAvailable?: boolean;
 };
 
-function shape(
-  elementId: string,
-  shapeName: string,
-  bounds: Bounds,
-  color: string,
-): ShapeElement {
+function shape(elementId: string, shapeName: string, bounds: Bounds, color: string): ShapeElement {
   return {
     elementId,
     elementType: "shape",
@@ -107,7 +102,10 @@ export function fallbackTitle(brief: string, kind: RecipeKind): string {
         return "回家种一粒，看它会不会醒来";
     }
   }
-  const talk = brief.replace(/^给.+讲一讲/, "").replace(/[。！？].*$/, "").trim();
+  const talk = brief
+    .replace(/^给.+讲一讲/, "")
+    .replace(/[。！？].*$/, "")
+    .trim();
   return talk.slice(0, 16) || "看一看";
 }
 
@@ -125,17 +123,13 @@ export function isFragmentTitle(text: string): boolean {
 }
 
 function classroomTitle(raw: string | undefined, brief: string, kind: RecipeKind): string {
-  if (
-    (kind === "cover" || kind === "route" || kind === "concept") &&
-    /种子|发芽|萌芽/.test(brief)
-  ) {
+  if ((kind === "cover" || kind === "route" || kind === "concept") && /种子|发芽|萌芽/.test(brief)) {
     return fallbackTitle(brief, kind);
   }
   const t = (raw || "").replace(/🌱\s*/g, "").trim();
   if (!t || isHostNoteCopy(t) || isGradeChip(t) || isFragmentTitle(t)) return fallbackTitle(brief, kind);
   const clause = (t.split(/[：:]/)[0] ?? t).trim();
-  const pick =
-    clause !== t && clause.length >= 4 && clause.length <= 16 && !isFragmentTitle(clause) ? clause : t;
+  const pick = clause !== t && clause.length >= 4 && clause.length <= 16 && !isFragmentTitle(clause) ? clause : t;
   if (kind === "cover" && (pick.length > 12 || /[。！？]/.test(pick))) {
     return fallbackTitle(brief, kind);
   }
@@ -143,7 +137,11 @@ function classroomTitle(raw: string | undefined, brief: string, kind: RecipeKind
   return pick.replace(/[？?]$/, "").slice(0, kind === "cover" ? 12 : 16);
 }
 
-function pageCopy(page: SkillPageInput, brief: string, kind: RecipeKind): {
+function pageCopy(
+  page: SkillPageInput,
+  brief: string,
+  kind: RecipeKind,
+): {
   title: string;
   lines: string[];
 } {
@@ -210,10 +208,7 @@ function isChromeCopy(text: string, elementId?: string): boolean {
 }
 
 /** One official name+note set per page type. Never mash leftovers onto a second list. */
-export function officialCopyPairs(
-  brief: string,
-  kind: RecipeKind,
-): Array<{ name: string; note: string }> {
+export function officialCopyPairs(brief: string, kind: RecipeKind): Array<{ name: string; note: string }> {
   if (/种子|发芽|萌芽/.test(brief)) {
     if (kind === "route") {
       return [
@@ -242,11 +237,7 @@ export function officialCopyPairs(
   return lines.map((name) => ({ name, note: "" }));
 }
 
-export function kindCopyMatches(
-  elements: PptdElement[],
-  kind: RecipeKind,
-  brief: string,
-): boolean {
+export function kindCopyMatches(elements: PptdElement[], kind: RecipeKind, brief: string): boolean {
   const blob = elements
     .filter((el) => el.elementType === "text")
     .map((el) => (el as TextElement).content?.text ?? "")
@@ -284,7 +275,13 @@ function gradeChip(brief: string): string {
 
 function shortDocName(brief: string): string {
   if (/种子|发芽/.test(brief)) return "种子发芽";
-  return brief.replace(/^给.+讲一讲/, "").replace(/[。！？].*$/, "").trim().slice(0, 8) || "课堂";
+  return (
+    brief
+      .replace(/^给.+讲一讲/, "")
+      .replace(/[。！？].*$/, "")
+      .trim()
+      .slice(0, 8) || "课堂"
+  );
 }
 
 export function recipeKind(page: SkillPageInput, index: number): RecipeKind {
@@ -320,12 +317,7 @@ function officialPageType(kind: RecipeKind): string {
   }
 }
 
-function chrome(
-  copyTitle: string,
-  chapter: string,
-  footerName: string,
-  pageNo: string,
-): PptdElement[] {
+function chrome(copyTitle: string, chapter: string, footerName: string, pageNo: string): PptdElement[] {
   return [
     shape("rule", "rect", [48, 88, 72, 6], PAPER_WHITE.coral),
     label("title", [48, 28, 720, 52], copyTitle, {
@@ -365,9 +357,7 @@ function seatedOnBand(el: PptdElement | undefined, band: PptdElement | undefined
 
 function coverTitleSeated(elements: PptdElement[]): boolean {
   const band = elements.find((el) => el.elementId === "title-band");
-  const title = elements.find((el) => el.elementId === "title" && el.elementType === "text") as
-    | TextElement
-    | undefined;
+  const title = elements.find((el) => el.elementId === "title" && el.elementType === "text") as TextElement | undefined;
   return seatedOnBand(title, band);
 }
 
@@ -395,11 +385,7 @@ function coverNoImage(copy: ReturnType<typeof pageCopy>, brief: string): PptdEle
   ];
 }
 
-function coverPhoto(
-  copy: ReturnType<typeof pageCopy>,
-  brief: string,
-  src: string,
-): PptdElement[] {
+function coverPhoto(copy: ReturnType<typeof pageCopy>, brief: string, src: string): PptdElement[] {
   return [
     {
       elementId: "photo-band",
@@ -428,10 +414,7 @@ function coverPhoto(
   ];
 }
 
-function listPanels(
-  items: Array<{ name: string; note: string }>,
-  y0: number,
-): PptdElement[] {
+function listPanels(items: Array<{ name: string; note: string }>, y0: number): PptdElement[] {
   const els: PptdElement[] = [];
   const h = items.length >= 4 ? 78 : 96;
   items.forEach((item, i) => {
@@ -545,10 +528,7 @@ function conceptPage(copy: ReturnType<typeof pageCopy>, brief: string, pageNo: s
 
 function methodPage(copy: ReturnType<typeof pageCopy>, brief: string, pageNo: string): PptdElement[] {
   const items = officialCopyPairs(brief, "method").slice(0, 3);
-  return [
-    ...chrome(copy.title, "04", shortDocName(brief), pageNo),
-    ...listPanels(items, 120),
-  ];
+  return [...chrome(copy.title, "04", shortDocName(brief), pageNo), ...listPanels(items, 120)];
 }
 
 function demoPage(copy: ReturnType<typeof pageCopy>, brief: string, pageNo: string): PptdElement[] {
@@ -648,10 +628,7 @@ function pageNoOf(index: number, count?: number): string {
   return String(index + 1).padStart(2, "0") + "/" + String(n).padStart(2, "0");
 }
 
-export function paintOfficialRecipePage(
-  page: SkillPageInput,
-  opts: RecipeOpts,
-): SkillPageInput {
+export function paintOfficialRecipePage(page: SkillPageInput, opts: RecipeOpts): SkillPageInput {
   const kind = recipeKind(page, opts.index);
   const copy = pageCopy(page, opts.brief, kind);
   const pageNo = pageNoOf(opts.index, opts.pageCount);
@@ -733,9 +710,7 @@ export function hasOfficialRecipeKind(elements: PptdElement[], kind: RecipeKind)
       if (/让我们一起/.test(t) || /[。！]/.test(t)) return true;
       if (seatedOnBand(el, band)) return false;
       return (
-        el.bounds[1] + el.bounds[3] < band.bounds[1] &&
-        text.elementId !== "guillemets" &&
-        text.elementId !== "footer"
+        el.bounds[1] + el.bounds[3] < band.bounds[1] && text.elementId !== "guillemets" && text.elementId !== "footer"
       );
     });
     return (
@@ -750,13 +725,7 @@ export function hasOfficialRecipeKind(elements: PptdElement[], kind: RecipeKind)
     );
   }
   if (kind === "route") {
-    return (
-      ids.has("rule") &&
-      ids.has("chapter") &&
-      ids.has("path-spine") &&
-      ids.has("step-0") &&
-      !ids.has("panel-0")
-    );
+    return ids.has("rule") && ids.has("chapter") && ids.has("path-spine") && ids.has("step-0") && !ids.has("panel-0");
   }
   if (kind === "method") {
     return ids.has("rule") && ids.has("chapter") && ids.has("panel-0") && ids.has("well-0");
@@ -784,18 +753,10 @@ export function hasOfficialRecipe(elements: PptdElement[], kind?: RecipeKind): b
   if (ids.has("result-bar") && ids.has("panel-rule")) return true;
 
   const shapes = elements.filter((el) => el.elementType === "shape");
-  const giant = shapes.some(
-    (el) => shapeName(el) === "ellipse" && el.bounds[2] >= 280 && el.bounds[3] >= 280,
-  );
-  const titleBand = shapes.some(
-    (el) => el.elementId === "title-band" && el.bounds[1] >= 240 && el.bounds[2] >= 400,
-  );
+  const giant = shapes.some((el) => shapeName(el) === "ellipse" && el.bounds[2] >= 280 && el.bounds[3] >= 280);
+  const titleBand = shapes.some((el) => el.elementId === "title-band" && el.bounds[1] >= 240 && el.bounds[2] >= 400);
   const coralRule = shapes.some(
-    (el) =>
-      shapeName(el) === "rect" &&
-      hexOf(el) === "#F5987E" &&
-      el.bounds[2] <= 120 &&
-      el.bounds[3] <= 16,
+    (el) => shapeName(el) === "rect" && hexOf(el) === "#F5987E" && el.bounds[2] <= 120 && el.bounds[3] <= 16,
   );
   const palePanels = shapes.filter((el) => {
     const hex = hexOf(el);
@@ -808,15 +769,9 @@ export function hasOfficialRecipe(elements: PptdElement[], kind?: RecipeKind): b
       el.bounds[3] <= 140
     );
   });
-  const wells = shapes.filter(
-    (el) => shapeName(el) === "ellipse" && hexOf(el) === "#FFFFFF" && el.bounds[2] <= 64,
-  );
+  const wells = shapes.filter((el) => shapeName(el) === "ellipse" && hexOf(el) === "#FFFFFF" && el.bounds[2] <= 64);
   const resultBar = shapes.some(
-    (el) =>
-      hexOf(el) === "#44712E" &&
-      el.bounds[2] >= 700 &&
-      el.bounds[3] >= 80 &&
-      el.bounds[3] <= 160,
+    (el) => hexOf(el) === "#44712E" && el.bounds[2] >= 700 && el.bounds[3] >= 80 && el.bounds[3] <= 160,
   );
   const pinkBand = shapes.some(
     (el) => hexOf(el) === "#F9DED8" && el.bounds[0] <= 2 && el.bounds[2] >= 900 && el.bounds[3] <= 140,
@@ -849,15 +804,11 @@ function hasKeptExhibit(elements: PptdElement[]): boolean {
   return elements.some(isTriangleExhibit);
 }
 
-
 function boundsOverlap(a: Bounds, b: Bounds): boolean {
   return a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
 }
 
-function rewriteHostNoteTitles(
-  page: SkillPageInput,
-  opts: RecipeOpts,
-): SkillPageInput {
+function rewriteHostNoteTitles(page: SkillPageInput, opts: RecipeOpts): SkillPageInput {
   const kind = recipeKind(page, opts.index);
   const copy = pageCopy(page, opts.brief, kind);
   let changed = false;
@@ -877,19 +828,14 @@ function rewriteHostNoteTitles(
 }
 
 /** Keep Pi's official chrome. Make the visible title a short whole classroom line. */
-function rewriteClassroomTitles(
-  page: SkillPageInput,
-  opts: RecipeOpts,
-): SkillPageInput {
+function rewriteClassroomTitles(page: SkillPageInput, opts: RecipeOpts): SkillPageInput {
   const kind = recipeKind(page, opts.index);
-  const titleEl = page.elements.find(
-    (el) => el.elementType === "text" && el.elementId === "title",
-  ) as TextElement | undefined;
+  const titleEl = page.elements.find((el) => el.elementType === "text" && el.elementId === "title") as
+    TextElement | undefined;
   const firstText = page.elements.find((el) => el.elementType === "text") as TextElement | undefined;
   const raw = (titleEl ?? firstText)?.content?.text?.trim() ?? "";
   const looksLikeTitle =
-    Boolean(titleEl) ||
-    (Boolean(raw) && (raw.length <= 24 || isFragmentTitle(raw) || /[？?]/.test(raw)));
+    Boolean(titleEl) || (Boolean(raw) && (raw.length <= 24 || isFragmentTitle(raw) || /[？?]/.test(raw)));
   const target = looksLikeTitle ? (titleEl ?? firstText) : undefined;
   const nextTitle = target ? classroomTitle(target.content?.text, opts.brief, kind) : "";
   let changed = false;
@@ -908,8 +854,7 @@ function rewriteClassroomTitles(
   if (kind === "cover") {
     const band = elements.find((el) => el.elementId === "title-band");
     const title = elements.find((el) => el.elementType === "text" && el.elementId === "title") as
-      | TextElement
-      | undefined;
+      TextElement | undefined;
     if (band && title) {
       const seated: Bounds = [
         band.bounds[0] + 28,
@@ -917,11 +862,7 @@ function rewriteClassroomTitles(
         Math.max(200, band.bounds[2] - 48),
         Math.min(64, Math.max(40, band.bounds[3] - 56)),
       ];
-      if (
-        title.bounds[1] + 8 < band.bounds[1] ||
-        title.bounds[2] > band.bounds[2] ||
-        title.bounds[3] > 80
-      ) {
+      if (title.bounds[1] + 8 < band.bounds[1] || title.bounds[2] > band.bounds[2] || title.bounds[3] > 80) {
         elements = elements.map((el) => {
           if (el.elementId !== "title" || el.elementType !== "text") return el;
           const text = el as TextElement;
@@ -1032,30 +973,9 @@ export function ensureOfficialRecipePage(
   return { page: next, applied: true, painted: false };
 }
 
-export function officialRecipesMarkdown(): string {
-  return [
-    "## Official recipes — academic/paper-white-courseware + education-training",
-    "",
-    "Page types (education-training): cover · route · concept · method · demo · transfer.",
-    "Layouts (paper-white PART B, 16:9):",
-    "- cover: giant pale-pink circle left + botanical motif + pale-green title band lower-left. Photo-led only if a real media src already exists.",
-    "- route: coral short rule + chapter + a vertical path (spine + 4 stations). One short name + matching note per station. NOT stacked list pills, NOT leftover titles mashed onto a second note list.",
-    "- method: coral short rule + chapter number + 3 vertical pale list panels with white circular wells. Copy is conditions (water / air / warmth), not seed parts.",
-    "- concept: editorial argument — title 15% / unequal two-column 45:55 / labeled composition. Coral rule + footer.",
-    "- demo: case-evidence — pale-pink top band + two-column body + dark-green result bar.",
-    "- transfer: result bar + next-action panel + footer.",
-    "Tokens: paper #FDFAF5, title #44712E, body #56687A, coral #F5987E, leaf #D7EBCE, blush #F9DED8.",
-    "Chrome on body pages: coral rule ~72×6, chapter number upper-right, « » lower-left, ShortName｜Page lower-right.",
-    "FORBIDDEN: homemade 4-step circles, soil/sun/seed doodles, cream+black text walls, YAML notes as titles.",
-    "Images: read capability.md first. If imageSearch/imageGenerate are NO, use the no-image layouts above. Do not write src. If YES and the recipe is photo-led, decide the photo frame bounds, generate_image with that width and height, then write_page using the same bounds. Do not generate 16:9 and cover-crop into a different slot.",
-  ].join("\n");
-}
+export { officialRecipesMarkdown } from "./playbook-recipes-doc.js";
 
-export function isCoursewareBodyPage(
-  page: SkillPageInput,
-  index: number,
-  last: number,
-): boolean {
+export function isCoursewareBodyPage(page: SkillPageInput, index: number, last: number): boolean {
   const t = (page.pageType || "").toLowerCase();
   if (t === "cover" || t === "close" || t === "toc" || t === "transfer") return false;
   if (index === 0 || index === last) return false;

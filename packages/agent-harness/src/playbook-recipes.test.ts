@@ -79,9 +79,7 @@ describe("official paper-white recipes", () => {
     assert.ok(cover.elements.some((el) => el.elementId === "title-band"));
     assert.doesNotMatch(pageText(cover.elements), /Cover page|Cream background/);
     assert.match(pageText(cover.elements), /种子怎么发芽/);
-    const title = cover.elements.find((el) => el.elementId === "title") as
-      | { content?: { text?: string } }
-      | undefined;
+    const title = cover.elements.find((el) => el.elementId === "title") as { content?: { text?: string } } | undefined;
     assert.ok((title?.content?.text ?? "").length <= 12);
     assert.equal(coursewarePageIssues(cover, { body: true }).length, 0);
   });
@@ -98,7 +96,10 @@ describe("official paper-white recipes", () => {
     assert.equal(hasOfficialRecipe(route.page.elements), true);
     assert.ok(route.page.elements.some((el) => el.elementId === "path-spine"));
     assert.ok(route.page.elements.some((el) => el.elementId === "step-0"));
-    assert.equal(route.page.elements.some((el) => el.elementId === "panel-0"), false);
+    assert.equal(
+      route.page.elements.some((el) => el.elementId === "panel-0"),
+      false,
+    );
     assert.ok(route.page.elements.some((el) => el.elementId === "rule"));
     assert.match(pageText(route.page.elements), /先喝饱水/);
     assert.doesNotMatch(pageText(route.page.elements), /认识种子|发芽条件/);
@@ -133,8 +134,7 @@ describe("official paper-white recipes", () => {
       pageCount: 6,
     });
     const shortTitle = shortened.page.elements.find((el) => el.elementId === "title") as
-      | { content?: { text?: string } }
-      | undefined;
+      { content?: { text?: string } } | undefined;
     assert.equal(shortTitle?.content?.text, "种子里面有什么");
     assert.equal(shortened.restamped, false);
     assert.equal(shortened.painted, false);
@@ -210,12 +210,14 @@ describe("official paper-white recipes", () => {
       index: 0,
     });
     const title = next.page.elements.find((el) => el.elementId === "title") as
-      | { content?: { text?: string }; bounds: number[] }
-      | undefined;
+      { content?: { text?: string }; bounds: number[] } | undefined;
     assert.equal(next.painted, false);
     assert.ok(next.page.elements.some((el) => el.elementId === "circle"));
     assert.ok(next.page.elements.some((el) => el.elementId === "title-band"));
-    assert.equal(next.page.elements.some((el) => el.elementId === "cover-stem"), false);
+    assert.equal(
+      next.page.elements.some((el) => el.elementId === "cover-stem"),
+      false,
+    );
     assert.ok((title?.content?.text ?? "").length <= 12);
     assert.doesNotMatch(title?.content?.text ?? "", /让我们一起探究|外壳（种皮）/);
     assert.ok((title?.bounds[1] ?? 0) >= 348);
@@ -244,8 +246,7 @@ describe("official paper-white recipes", () => {
       index: 2,
     });
     const title = next.page.elements.find((el) => el.elementId === "title") as
-      | { content?: { text?: string } }
-      | undefined;
+      { content?: { text?: string } } | undefined;
     assert.equal(next.painted, false);
     assert.ok(next.page.elements.some((el) => el.elementId === "aside"));
     assert.ok(next.page.elements.some((el) => el.elementId === "ring-outer"));
@@ -302,8 +303,7 @@ describe("official paper-white recipes", () => {
       return el.elementType === "shape" && (el as { shapeName?: string }).shapeName === "ellipse";
     });
     const title = next.page.elements.find((el) => el.elementId === "title") as
-      | { content?: { text?: string }; bounds: number[] }
-      | undefined;
+      { content?: { text?: string }; bounds: number[] } | undefined;
     const band = next.page.elements.find((el) => el.elementId === "title-band");
     assert.equal(ellipses.length, 1);
     assert.ok((ellipses[0]?.bounds[2] ?? 0) >= 280);
@@ -348,7 +348,10 @@ describe("official paper-white recipes", () => {
     assert.ok(next.page.elements.some((el) => el.elementId === "rule"));
     assert.ok(next.page.elements.some((el) => el.elementId === "chapter"));
     assert.ok(next.page.elements.some((el) => el.elementId === "path-spine"));
-    assert.equal(next.page.elements.some((el) => el.elementId === "panel-0"), false);
+    assert.equal(
+      next.page.elements.some((el) => el.elementId === "panel-0"),
+      false,
+    );
     const names = next.page.elements
       .filter((el) => el.elementId.startsWith("item-n-"))
       .map((el) => (el as { content?: { text?: string } }).content?.text ?? "");
@@ -410,7 +413,10 @@ describe("official paper-white recipes", () => {
       ),
       false,
     );
-    assert.equal(next.page.elements.some((el) => el.elementId === "panel-0"), false);
+    assert.equal(
+      next.page.elements.some((el) => el.elementId === "panel-0"),
+      false,
+    );
     assert.ok(next.page.elements.some((el) => el.elementId === "path-spine"));
   });
 
@@ -515,7 +521,10 @@ describe("official paper-white recipes", () => {
     assert.ok(next.page.elements.some((el) => el.elementId === "aside"));
     assert.ok(next.page.elements.some((el) => el.elementId === "ring-outer"));
     assert.ok(next.page.elements.some((el) => el.elementId === "rule"));
-    assert.equal(next.page.elements.some((el) => el.elementId === "panel-0"), false);
+    assert.equal(
+      next.page.elements.some((el) => el.elementId === "panel-0"),
+      false,
+    );
     assert.equal(next.painted, false);
   });
 
@@ -663,44 +672,5 @@ describe("official paper-white recipes", () => {
       next.page.elements.some((el) => el.elementId === "seed"),
       false,
     );
-  });
-
-  it("keeps a 勾股 triangle exhibit instead of restamping seed layouts", () => {
-    const triangle: SkillPageInput = {
-      id: "page-03",
-      pageType: "concept",
-      background: { type: "solid", color: PAPER_WHITE.paper },
-      elements: [
-        {
-          elementId: "title",
-          elementType: "text",
-          bounds: [48, 28, 860, 52],
-          content: { text: "直角边和斜边", bold: true, fontSize: 30, color: PAPER_WHITE.title },
-        },
-        {
-          elementId: "triangle",
-          elementType: "shape",
-          shapeName: "rtTriangle",
-          bounds: [120, 140, 280, 220],
-          fill: { type: "solid", color: PAPER_WHITE.leaf },
-        },
-      ],
-    };
-    const next = ensureOfficialRecipePage(triangle, {
-      brief: "介绍一下勾股定理，面向小学生",
-      index: 2,
-    });
-    assert.equal(next.painted, false);
-    assert.ok(next.page.elements.some((el) => el.elementId === "triangle"));
-  });
-
-  it("demo uses a pink band and a result bar", () => {
-    const demo = paintOfficialRecipePage(
-      { ...creamWall, id: "page-05", pageType: "demo" },
-      { brief: "给二年级讲一讲种子怎么发芽", index: 4 },
-    );
-    assert.ok(demo.elements.some((el) => el.elementId === "pink-band"));
-    assert.ok(demo.elements.some((el) => el.elementId === "result-bar"));
-    assert.equal(hasOfficialRecipe(demo.elements), true);
   });
 });

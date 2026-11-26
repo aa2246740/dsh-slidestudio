@@ -49,7 +49,7 @@ export function resolveRepoRoot(start = process.cwd()): string {
   for (const candidate of candidates) {
     if (fs.existsSync(path.join(candidate, marker))) return path.resolve(candidate);
   }
-  throw new Error(`DSH SlideStudio repo root not found (looked for ${marker})`);
+  throw new Error(`Open SlideStudio repo root not found (looked for ${marker})`);
 }
 
 function sourceManifestPath(repoRoot: string): string {
@@ -186,11 +186,19 @@ export function buildCatalogDto(repoRoot = resolveRepoRoot()): CatalogDto {
     const source = sourcePack.entriesById.get(designSourceId);
     if (!source) throw new Error(`missing exact design source for ${id}`);
     return {
-      id, label: id, category: id.split("/")[0]!, designSourceId, designHash: source.sha256,
-      previews: [{
-        sourceId: visual.sourceId, hash: visual.sha256,
-        url: `/slides/catalog/previews/${encodeURIComponent(visual.sourceId)}`, order: 0,
-      }],
+      id,
+      label: id,
+      category: id.split("/")[0]!,
+      designSourceId,
+      designHash: source.sha256,
+      previews: [
+        {
+          sourceId: visual.sourceId,
+          hash: visual.sha256,
+          url: `/slides/catalog/previews/${encodeURIComponent(visual.sourceId)}`,
+          order: 0,
+        },
+      ],
     };
   });
 
@@ -210,7 +218,13 @@ export function buildCatalogDto(repoRoot = resolveRepoRoot()): CatalogDto {
 export function resolveCatalogPreviewFile(
   sourceId: string,
   repoRoot = resolveRepoRoot(),
-): { filePath: string; bytes: Buffer; mediaType: string; byteLength: number; sha256: string } | null {
+): {
+  filePath: string;
+  bytes: Buffer;
+  mediaType: string;
+  byteLength: number;
+  sha256: string;
+} | null {
   const visualRaw = JSON.parse(fs.readFileSync(visualManifestPath(repoRoot), "utf8")) as {
     files: Array<{
       sourceId: string;
@@ -227,7 +241,8 @@ export function resolveCatalogPreviewFile(
   const root = resolveOpenKimiVisualRoot(repoRoot);
   const filePath = path.resolve(root, entry.relativePath);
   const relative = path.relative(root, filePath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("preview path is outside the visual pack");
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+    throw new Error("preview path is outside the visual pack");
   const stat = fs.lstatSync(filePath);
   const realRelative = path.relative(fs.realpathSync(root), fs.realpathSync(filePath));
   if (!stat.isFile() || stat.isSymbolicLink() || realRelative.startsWith("..") || path.isAbsolute(realRelative)) {

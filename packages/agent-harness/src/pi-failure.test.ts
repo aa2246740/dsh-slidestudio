@@ -1,11 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  classifyPiEvents,
-  classifyPiFailure,
-  piModelCandidates,
-  summarizePiError,
-} from "./pi-failure.js";
+import { classifyPiEvents, classifyPiFailure, piModelCandidates, summarizePiError } from "./pi-failure.js";
 
 const DAILY_429 = `{"error":{"message":"{\\n  \\"error\\": {\\n    \\"code\\": 429,\\n    \\"message\\": \\"You exceeded your current quota... model: gemini-3.5-flash\\\\nPlease retry in 38s.\\",\\n    \\"status\\": \\"RESOURCE_EXHAUSTED\\",\\n    \\"details\\": [{\\"@type\\":\\"type.googleapis.com/google.rpc.QuotaFailure\\",\\"violations\\":[{\\"quotaId\\":\\"GenerateRequestsPerDayPerProjectPerModel-FreeTier\\",\\"quotaValue\\":\\"20\\"}]}]\\n  }\\n}\\n","code":429,"status":"Too Many Requests"}}`;
 
@@ -67,9 +62,7 @@ describe("pi failure classification", () => {
   });
 
   it("does not invent a Google fallback list for other providers", () => {
-    assert.deepEqual(piModelCandidates("claude-sonnet-4", "anthropic"), [
-      "claude-sonnet-4",
-    ]);
+    assert.deepEqual(piModelCandidates("claude-sonnet-4", "anthropic"), ["claude-sonnet-4"]);
     const grok = piModelCandidates("grok-4.5", "xai-auth");
     assert.equal(grok[0], "grok-4.5");
     assert.ok(grok.includes("grok-4.20-0309-reasoning"));
@@ -80,9 +73,7 @@ describe("pi failure classification", () => {
   });
 
   it("treats Codex overload as a retryable switch away from Codex", () => {
-    const hit = classifyPiFailure(
-      "Codex error: Our servers are currently overloaded. Please try again later.",
-    );
+    const hit = classifyPiFailure("Codex error: Our servers are currently overloaded. Please try again later.");
     assert.equal(hit.kind, "rate_limit");
     assert.equal(hit.retryable, true);
     assert.match(hit.message, /Grok|过载/);

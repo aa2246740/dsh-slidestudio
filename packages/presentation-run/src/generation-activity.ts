@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import {
   inspectRunLedger,
   readRunLedger,
@@ -11,6 +9,24 @@ import { projectExecution } from "./execution.js";
 import { resolveProjectPageIdentities } from "./domain/page-identity.js";
 import { inspectProjectCapabilities } from "./capabilities.js";
 import type { ExecutionProjection } from "./types.js";
+import { readProduceTraceEvents } from "./generation-activity-trace.js";
+
+export { generationActivityEventsFromTraceRows, readProduceTraceEvents } from "./generation-activity-trace.js";
+
+/** Metadata facts whose tool call or plan row already tells the story in the timeline. */
+const QUIET_FACT_TYPES: ReadonlySet<RunFact["type"]> = new Set([
+  "page.provenance-declared",
+  "page.material-figures",
+  "page.number-conflicts",
+  "page.computed-figures",
+  "material.query-computed",
+  "material.image-viewed",
+  "material.use-declared",
+  "plan.period-map-declared",
+  "plan.missing-items-declared",
+  "layout.revision-committed",
+  "template.component-used",
+]);
 
 /** A persisted, presentation-safe event for the generation-history UI. */
 export type GenerationActivityEvent = Readonly<{
@@ -23,6 +39,7 @@ export type GenerationActivityEvent = Readonly<{
   revision?: number;
   detail?: string;
   truncated?: boolean;
+  ok?: boolean;
   kind?: "message" | "reasoning" | "tool" | "result" | "turn" | "ledger" | "think";
   name?: string;
   callId?: string;
@@ -61,11 +78,16 @@ function pageFrom(fact: RunFact): Pick<GenerationActivityEvent, "pageId" | "revi
   return {};
 }
 
-function eventFor(fact: RunFact): GenerationActivityEvent {
-  const page = pageFrom(fact);
+function pagePipelineActivity(fact: RunFact, page: ReturnType<typeof pageFrom>): GenerationActivityEvent | undefined {
   switch (fact.type) {
     case "reference.chunk-returned":
-      return { id: fact.factId, type: fact.type, at: fact.at, label: "已读取参考资料", status: "complete" };
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已读取参考资料",
+        status: "complete",
+      };
     case "todo.committed":
       return {
         id: fact.factId,
@@ -76,7 +98,14 @@ function eventFor(fact: RunFact): GenerationActivityEvent {
         detail: `${fact.itemCount} 页`,
       };
     case "page.revision-committed":
-      return { id: fact.factId, type: fact.type, at: fact.at, label: "已写入页面", status: "complete", ...page };
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已写入页面",
+        status: "complete",
+        ...page,
+      };
     case "page.edit-authorized":
       return {
         id: fact.factId,
@@ -98,9 +127,23 @@ function eventFor(fact: RunFact): GenerationActivityEvent {
         ...page,
       };
     case "page.image-result-prepared":
-      return { id: fact.factId, type: fact.type, at: fact.at, label: "已准备页面预览", status: "complete", ...page };
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已准备页面预览",
+        status: "complete",
+        ...page,
+      };
     case "page.image-content-emitted":
-      return { id: fact.factId, type: fact.type, at: fact.at, label: "已展示页面预览", status: "complete", ...page };
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已展示页面预览",
+        status: "complete",
+        ...page,
+      };
     case "page.visual-review-recorded":
       return {
         id: fact.factId,
@@ -121,7 +164,14 @@ function eventFor(fact: RunFact): GenerationActivityEvent {
         detail: fact.issues.length ? fact.issues.join("；") : undefined,
       };
     case "deck.composed":
-      return { id: fact.factId, type: fact.type, at: fact.at, label: "已完成整稿", status: "complete", detail: fact.title };
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已完成整稿",
+        status: "complete",
+        detail: fact.title,
+      };
     case "export.succeeded":
       return {
         id: fact.factId,
@@ -140,7 +190,158 @@ function eventFor(fact: RunFact): GenerationActivityEvent {
         status: "complete",
         detail: fact.queries.join("；"),
       };
+    default:
+      return undefined;
   }
+}
+
+function materialActivity(fact: RunFact): GenerationActivityEvent | undefined {
+  switch (fact.type) {
+    case "material.chunk-returned":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已读取上传资料",
+        status: "complete",
+        detail: fact.part ? `${fact.materialId} ${fact.part}` : fact.materialId,
+      };
+    case "material.page-viewed":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已查看上传资料的页面图片",
+        status: "complete",
+        detail: `${fact.materialId} 第 ${fact.page} 页`,
+      };
+    case "material.overview-viewed":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: fact.overviewKind === "all-images" ? "已查看全部图片总览" : "已查看 PDF 页面总览",
+        status: "complete",
+        detail: `${fact.tiles.length} 格 · ${fact.materialIds.join("、")}`,
+      };
+    case "material.notes-recorded":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录图片说明",
+        status: "complete",
+        detail: fact.page
+          ? `${fact.materialId} 第 ${fact.page} 页`
+          : fact.mediaId
+            ? `${fact.materialId} ${fact.mediaId}`
+            : fact.materialId,
+      };
+    case "material.image-viewed":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已查看上传资料图片",
+        status: "complete",
+        detail: fact.materialId,
+      };
+    case "material.query-computed":
+      // The query_material tool row tells this story (see QUIET_FACT_TYPES).
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已查询资料数据",
+        status: "complete",
+        detail: `${fact.materialId} ${fact.part}`,
+      };
+    default:
+      return undefined;
+  }
+}
+
+function planMetaActivity(fact: RunFact, page: ReturnType<typeof pageFrom>): GenerationActivityEvent | undefined {
+  switch (fact.type) {
+    case "page.computed-figures":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录计算数字的来源",
+        status: "complete",
+        ...page,
+      };
+    case "material.use-declared":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录图片安排",
+        status: "complete",
+        detail: `${fact.entries.length} 张`,
+      };
+    case "page.provenance-declared":
+    case "page.material-figures":
+    case "page.number-conflicts":
+      // Provenance metadata stays in the ledger for the delivery summary; it
+      // adds no timeline rows of its own.
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录数字来源",
+        status: "complete",
+        ...page,
+      };
+    case "plan.period-map-declared":
+      // The write_todo tool row tells this story (see QUIET_FACT_TYPES).
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录期间对应",
+        status: "complete",
+        detail: `${fact.periodMap.from} → ${fact.periodMap.to}`,
+      };
+    case "plan.missing-items-declared":
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已记录没有本期数据的项目",
+        status: "complete",
+        detail: `${fact.items.length} 项`,
+      };
+    case "layout.revision-committed":
+      // The write_layout tool row tells this story; the fact is quiet (see QUIET_FACT_TYPES).
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已定义版式",
+        status: "complete",
+      };
+    case "template.component-used":
+      // The write_page / write_layout tool row already tells this story (see QUIET_FACT_TYPES).
+      return {
+        id: fact.factId,
+        type: fact.type,
+        at: fact.at,
+        label: "已使用模板组件",
+        status: "complete",
+        ...(fact.pageId ? { pageId: fact.pageId, revision: fact.revision } : {}),
+      };
+    default:
+      return undefined;
+  }
+}
+
+function eventFor(fact: RunFact): GenerationActivityEvent {
+  const page = pageFrom(fact);
+  const event = pagePipelineActivity(fact, page) ?? materialActivity(fact) ?? planMetaActivity(fact, page);
+  if (!event) throw new Error(`unhandled activity fact ${fact.type}`);
+  return event;
 }
 
 function stageStatus(
@@ -156,7 +357,7 @@ export function generationActivityFromLedger(
   ledger: RunLedgerV1 | undefined,
   inspection: RunLedgerInspection,
 ): GenerationActivity {
-  const factEvents = ledger?.facts.map(eventFor) ?? [];
+  const factEvents = ledger?.facts.filter((fact) => !QUIET_FACT_TYPES.has(fact.type)).map(eventFor) ?? [];
   if (!ledger) {
     return {
       phase: "awaiting-project",
@@ -175,20 +376,18 @@ export function generationActivityFromLedger(
     inspection.structuralReview === "fail" ||
     inspection.pages.some((page) => page.layout === "fail" || page.visualReview === "revise");
   const latestEditorAuthorization = ledger
-    ? [...ledger.facts]
-        .reverse()
-        .find((fact) => fact.type === "page.edit-authorized")
+    ? [...ledger.facts].reverse().find((fact) => fact.type === "page.edit-authorized")
     : undefined;
   const editorEditCompleted = Boolean(
     latestEditorAuthorization &&
-      inspection.pages.some(
-        (page) =>
-          page.pageId === latestEditorAuthorization.pageId &&
-          page.revision === latestEditorAuthorization.revision + 1 &&
-          page.pageSha256 !== latestEditorAuthorization.pageSha256 &&
-          page.raster &&
-          page.layout === "pass",
-      ),
+    inspection.pages.some(
+      (page) =>
+        page.pageId === latestEditorAuthorization.pageId &&
+        page.revision === latestEditorAuthorization.revision + 1 &&
+        page.pageSha256 !== latestEditorAuthorization.pageSha256 &&
+        page.raster &&
+        page.layout === "pass",
+    ),
   );
   const reviewed = inspection.composeReady || inspection.composed || editorEditCompleted;
   const completed = inspection.composed || editorEditCompleted;
@@ -254,272 +453,6 @@ export function inspectGenerationActivity(root: string): GenerationActivity {
  * same immutable fact snapshot. This avoids exposing a mixed old/new response
  * while the generator atomically appends its next fact.
  */
-const HANDS_LOG_REL = path.join("_agent", "hands-log.jsonl");
-const AGENT_TRACE_REL = path.join("_agent", "agent-trace.jsonl");
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return undefined;
-}
-
-function readJsonl(file: string): unknown[] {
-  if (!fs.existsSync(file)) return [];
-  const rows: unknown[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line) as unknown);
-    } catch {
-      /* skip a broken line */
-    }
-  }
-  return rows;
-}
-
-const TRACE_DETAIL_MAX = 8_192;
-const TRACE_BASE64ISH = /^[A-Za-z0-9+/=_-]+$/;
-
-/**
- * Trace deltas can split a credential at arbitrary byte boundaries. Sanitize
- * the folded value as well as each persisted row so a split Bearer/token value
- * cannot become visible when the UI joins those rows.
- */
-function redactTraceDetail(text: string): string {
-  if (/^data:[^,]*;base64,/i.test(text.trim())) return "[redacted binary data]";
-  if (text.length >= 256 && !/\s/.test(text.trim()) && TRACE_BASE64ISH.test(text.trim())) {
-    return "[redacted binary data]";
-  }
-  return text
-    .replace(/-----BEGIN [^-]*(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*?-----END [^-]+-----/gi, "[redacted credential]")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [redacted]")
-    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[redacted credential]")
-    .replace(/\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization|cookie)\s*[=:]\s*)([^\s,;&]+)/gi, "$1[redacted]")
-    .replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)=)[^&#\s]+/gi, "$1[redacted]")
-    // A previous delta may already have redacted the credential prefix while
-    // the current delta carries the remaining token characters.
-    .replace(/(Bearer \[redacted\])(?:[A-Za-z0-9._~+\/-]+=*)/gi, "$1")
-    .replace(/(\[redacted credential\])(?:[A-Za-z0-9_-]+)/gi, "$1");
-}
-
-function boundTraceDetail(text: string, max = TRACE_DETAIL_MAX): { detail?: string; truncated?: boolean } {
-  const normalized = redactTraceDetail(text).replace(/\r\n?/g, "\n");
-  if (!normalized.trim()) return {};
-  if (normalized.length <= max) return { detail: normalized };
-  return { detail: `${normalized.slice(0, max - 1)}…`, truncated: true };
-}
-
-function pageIdFromHands(row: Record<string, unknown>): string | undefined {
-  const summary = typeof row.summary === "string" ? row.summary : "";
-  if (row.name === "write_page" || row.name === "render_page" || row.name === "review_page") {
-    const token = summary.split("·")[0]?.trim();
-    if (token && !/execution gate/i.test(token)) return token;
-  }
-  try {
-    const args = typeof row.args === "string" ? asRecord(JSON.parse(row.args)) : undefined;
-    const id = args?.id ?? args?.pageId;
-    if (typeof id === "string" && id.trim()) return id.trim();
-  } catch {
-    /* truncated args */
-  }
-  return undefined;
-}
-
-type TraceKind = NonNullable<GenerationActivityEvent["kind"]>;
-type TraceStatus = GenerationActivityEvent["status"];
-type TraceProjection = {
-  event: GenerationActivityEvent;
-  detailMode: "append" | "replace";
-};
-
-function traceKind(value: unknown): TraceKind | undefined {
-  if (value === "message" || value === "reasoning" || value === "tool" ||
-      value === "result" || value === "turn" || value === "think") return value;
-  return undefined;
-}
-
-function traceStatus(row: Record<string, unknown>, kind: TraceKind): TraceStatus {
-  const value = row.status;
-  if (value === "running" || value === "complete" || value === "failed" ||
-      value === "cancelled" || value === "needs-attention") return value;
-  if (kind === "result") return row.ok === false ? "failed" : "complete";
-  if (kind === "tool") return "running";
-  return "complete";
-}
-
-function traceLabel(kind: TraceKind, status: TraceStatus, name?: string): string {
-  if (kind === "message") return status === "running" ? "正在输出" : "回复";
-  if (kind === "reasoning" || kind === "think") return status === "running" ? "正在思考" : "思考";
-  if (kind === "tool") return name ? `调用 ${name}` : "调用工具";
-  if (kind === "result") {
-    if (status === "failed") return name ? `${name} 失败` : "工具失败";
-    if (status === "cancelled") return name ? `${name} 已停止` : "工具已停止";
-    return name ? `${name} 完成` : "工具完成";
-  }
-  if (name === "step") return status === "running" ? "步骤开始" : "步骤结束";
-  if (status === "failed") return "本轮失败";
-  if (status === "cancelled") return "本轮已停止";
-  if (status === "needs-attention") return "本轮需要处理";
-  return status === "running" ? "本轮开始" : "本轮完成";
-}
-
-function eventFromTraceRow(row: Record<string, unknown>, index: number): TraceProjection | undefined {
-  const rawKind = traceKind(row.kind);
-  if (!rawKind) return undefined;
-  // The v1 writer labeled ordinary assistant message text as "think". Keep
-  // those rows visible without continuing the old claim that it was reasoning.
-  const kind: TraceKind = rawKind === "think" ? "message" : rawKind;
-  const at = typeof row.at === "string" ? row.at : new Date(0).toISOString();
-  const name = typeof row.name === "string" ? row.name : undefined;
-  const rawDetail = typeof row.detail === "string"
-    ? row.detail
-    : typeof row.text === "string"
-      ? row.text
-      : "";
-  const bounded = boundTraceDetail(rawDetail);
-  const pageId = typeof row.pageId === "string" ? row.pageId : undefined;
-  const callId = typeof row.callId === "string" ? row.callId : undefined;
-  const status = traceStatus(row, rawKind);
-  const legacyId = `trace-${rawKind}-${index}-${name ?? callId ?? at}`;
-  const id = typeof row.id === "string" && row.id ? row.id : legacyId;
-  const event: GenerationActivityEvent = {
-    id,
-    type: `agent.${kind}`,
-    at,
-    label: traceLabel(kind, status, name),
-    status,
-    ...bounded,
-    ...(row.truncated === true ? { truncated: true } : {}),
-    kind,
-    ...(name ? { name } : {}),
-    ...(callId ? { callId } : {}),
-    ...(pageId ? { pageId } : {}),
-    ...(typeof row.turn === "number" ? { turn: row.turn } : {}),
-    ...(typeof row.step === "number" ? { step: row.step } : {}),
-  };
-  return {
-    event,
-    detailMode: row.detailMode === "append" ? "append" : "replace",
-  };
-}
-
-/** Fold append-only v2 deltas/snapshots, while still accepting v1 trace rows. */
-export function generationActivityEventsFromTraceRows(rows: readonly unknown[]): GenerationActivityEvent[] {
-  const events: GenerationActivityEvent[] = [];
-  const positions = new Map<string, number>();
-
-  const settleRunning = (
-    matches: (event: GenerationActivityEvent) => boolean,
-    status: TraceStatus,
-  ): void => {
-    events.forEach((event, index) => {
-      if (event.status !== "running" || !matches(event)) return;
-      const kind = event.kind;
-      if (!kind || kind === "ledger") return;
-      events[index] = {
-        ...event,
-        status,
-        label: traceLabel(kind, status, event.name),
-      };
-    });
-  };
-
-  rows.forEach((value, index) => {
-    const projected = eventFromTraceRow(asRecord(value) ?? {}, index);
-    if (!projected) return;
-    let priorIndex = positions.get(projected.event.id);
-
-    // Some providers use different content indexes for streamed chunks and
-    // the terminal assistant/message snapshot. Reconcile only when the
-    // turn/step/kind identifies one unambiguous running block.
-    if (priorIndex === undefined && projected.detailMode === "replace" &&
-        (projected.event.kind === "message" || projected.event.kind === "reasoning") &&
-        projected.event.status !== "running") {
-      const candidates: number[] = [];
-      events.forEach((event, eventIndex) => {
-        if (event.status === "running" &&
-            event.kind === projected.event.kind &&
-            event.turn === projected.event.turn &&
-            event.step === projected.event.step) {
-          candidates.push(eventIndex);
-        }
-      });
-      if (candidates.length === 1) priorIndex = candidates[0];
-    }
-
-    if (priorIndex === undefined) {
-      positions.set(projected.event.id, events.length);
-      events.push(projected.event);
-    } else {
-      const prior = events[priorIndex]!;
-      const combined = projected.detailMode === "append"
-        ? boundTraceDetail(`${prior.detail ?? ""}${projected.event.detail ?? ""}`)
-        : { detail: projected.event.detail, truncated: projected.event.truncated };
-      events[priorIndex] = {
-        ...prior,
-        ...projected.event,
-        id: prior.id,
-        at: prior.at,
-        ...(combined.detail === undefined ? { detail: undefined } : { detail: combined.detail }),
-        ...(prior.truncated || combined.truncated || projected.event.truncated
-          ? { truncated: true }
-          : { truncated: undefined }),
-      };
-      // A reconciled snapshot keeps the first stable id canonical while also
-      // accepting any later row that uses the terminal snapshot id.
-      positions.set(projected.event.id, priorIndex);
-    }
-
-    const lifecycle = projected.event;
-    if (lifecycle.kind !== "turn" || lifecycle.status === "running") return;
-    if (lifecycle.name === "step" && lifecycle.turn !== undefined && lifecycle.step !== undefined) {
-      settleRunning(
-        (event) => event.kind !== "turn" && event.turn === lifecycle.turn && event.step === lifecycle.step,
-        lifecycle.status,
-      );
-      return;
-    }
-    if (lifecycle.name === "turn" && lifecycle.turn !== undefined) {
-      settleRunning(
-        (event) => event.kind !== "turn" && event.turn === lifecycle.turn,
-        lifecycle.status,
-      );
-    }
-  });
-  return events;
-}
-
-function eventFromHandsRow(row: Record<string, unknown>, index: number): GenerationActivityEvent | undefined {
-  const name = typeof row.name === "string" ? row.name : "";
-  if (!name) return undefined;
-  if (name === "render_page") return undefined;
-  const at = typeof row.at === "string" ? row.at : new Date(0).toISOString();
-  const ok = row.ok !== false;
-  const summary = typeof row.summary === "string" ? row.summary : "";
-  const detail = typeof row.detail === "string" ? row.detail : summary;
-  return {
-    id: `hands-${index}-${name}-${at}`,
-    type: `tool.${name}`,
-    at,
-    label: ok ? `调用 ${name}` : `${name} 失败`,
-    status: ok ? "complete" : "needs-attention",
-    detail: boundTraceDetail(detail || summary).detail,
-    kind: "tool",
-    name,
-    pageId: pageIdFromHands(row),
-  };
-}
-
-/** Hands-log + session trace, so 生成历程 shows thinking and tool calls, not only ledger labels. */
-export function readProduceTraceEvents(root: string): GenerationActivityEvent[] {
-  const trace = generationActivityEventsFromTraceRows(readJsonl(path.join(root, AGENT_TRACE_REL)));
-  if (trace.length) return trace;
-  return readJsonl(path.join(root, HANDS_LOG_REL))
-    .map((row, index) => eventFromHandsRow(asRecord(row) ?? {}, index))
-    .filter((row): row is GenerationActivityEvent => Boolean(row));
-}
-
 export function inspectGenerationActivitySnapshot(root: string): GenerationActivitySnapshot {
   const ledger = readRunLedger(root);
   const inspection = inspectRunLedger(root, undefined, process.env, ledger);
@@ -527,7 +460,10 @@ export function inspectGenerationActivitySnapshot(root: string): GenerationActiv
   const live = readProduceTraceEvents(root);
   const capability = inspectProjectCapabilities(root);
   const execution = projectExecution({
-    ledger, inspection, identity: resolveProjectPageIdentities(root), capability,
+    ledger,
+    inspection,
+    identity: resolveProjectPageIdentities(root),
+    capability,
   });
   return {
     inspection,

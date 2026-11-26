@@ -12,10 +12,7 @@ export type HostMediaPorts = {
   generate?: ImagePort;
 };
 
-export async function maybePlaceImage(
-  query: string,
-  ports: HostMediaPorts,
-): Promise<string | undefined> {
+export async function maybePlaceImage(query: string, ports: HostMediaPorts): Promise<string | undefined> {
   const root = ports.projectRoot;
   if (!root || (!ports.search && !ports.generate)) return undefined;
   const id = query.replace(/[^\w\u4e00-\u9fff]+/g, "-").slice(0, 24) || "img";

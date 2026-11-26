@@ -24,12 +24,16 @@ import type {
   TextElement,
 } from "@open-slidestudio/pptd-v2";
 import { isCanonicalWritePageArgs, unescapePlainText } from "@open-slidestudio/pptd-v2";
-import type { ComposeDeck, ComposePage, ComposeRole } from "./compose-ir.js";
+import { pageFileName, textOf } from "./skill-deck-view.js";
+export { skillToCompose } from "./skill-deck-view.js";
 import type { Palette } from "./playbook.js";
+import { asRecord, asString, coerceElementList, liftBareCopy, parseJsonMaybe } from "./skill-page-dialect.js";
 
 export type SkillPageInput = {
   id: string;
   pageType?: string;
+  /** The write_layout id this page inherits its copies from; absent means no layout. */
+  layoutId?: string;
   notes?: string;
   background?: Fill;
   animations?: Page["animations"];
@@ -41,31 +45,11 @@ export type SkillDeckInput = {
   pages: SkillPageInput[];
 };
 
-const ELEMENT_TYPES = new Set([
-  "text",
-  "shape",
-  "image",
-  "table",
-  "chart",
-  "line",
-  "icon",
-]);
-
-const ROLES: ComposeRole[] = [
-  "cover",
-  "toc",
-  "content",
-  "evidence",
-  "timeline",
-  "matrix",
-  "close",
-];
+const ELEMENT_TYPES = new Set(["text", "shape", "image", "table", "chart", "line", "icon"]);
 
 function asLayoutRole(value: unknown): LayoutRole | undefined {
   const role = asString(value);
-  return role === "footer" || role === "content" || role === "decoration"
-    ? role
-    : undefined;
+  return role === "footer" || role === "content" || role === "decoration" ? role : undefined;
 }
 
 function asExhibitRole(value: unknown): ExhibitRole | undefined {
@@ -81,33 +65,12 @@ function asExhibitRole(value: unknown): ExhibitRole | undefined {
     : undefined;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function asNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
     return Number(value);
   }
   return undefined;
-}
-
-function parseJsonMaybe(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return value;
-  }
 }
 
 function unwrapItemWrapper(raw: unknown): unknown {
@@ -265,9 +228,7 @@ function parseTextContent(rec: Record<string, unknown>): TextContent | null {
       true,
   };
   const weight =
-    content?.fontWeight ?? content?.weight ??
-    rec.fontWeight ?? rec.weight ??
-    style?.fontWeight ?? style?.weight;
+    content?.fontWeight ?? content?.weight ?? rec.fontWeight ?? rec.weight ?? style?.fontWeight ?? style?.weight;
   const bold =
     (typeof content?.bold === "boolean" ? content.bold : undefined) ??
     (typeof rec.bold === "boolean" ? rec.bold : undefined) ??
@@ -305,32 +266,26 @@ function parseTextContent(rec: Record<string, unknown>): TextContent | null {
     rgbHex(rec.fill);
   if (color) out.color = color;
   const fontFamily =
-    parseFontFamily(content?.fontFamily) ??
-    parseFontFamily(rec.fontFamily) ??
-    parseFontFamily(style?.fontFamily);
+    parseFontFamily(content?.fontFamily) ?? parseFontFamily(rec.fontFamily) ?? parseFontFamily(style?.fontFamily);
   if (fontFamily) out.fontFamily = fontFamily;
   const namedStyle = asString(content?.style) ?? asString(rec.style);
   if (namedStyle) out.style = namedStyle;
   const backgroundColor =
-    asString(content?.backgroundColor) ?? rgbHex(content?.backgroundColor) ??
-    asString(rec.backgroundColor) ?? rgbHex(rec.backgroundColor) ??
-    asString(style?.backgroundColor) ?? rgbHex(style?.backgroundColor);
+    asString(content?.backgroundColor) ??
+    rgbHex(content?.backgroundColor) ??
+    asString(rec.backgroundColor) ??
+    rgbHex(rec.backgroundColor) ??
+    asString(style?.backgroundColor) ??
+    rgbHex(style?.backgroundColor);
   if (backgroundColor) out.backgroundColor = backgroundColor;
-  const lineHeight =
-    asNumber(content?.lineHeight) ?? asNumber(rec.lineHeight) ?? asNumber(style?.lineHeight);
+  const lineHeight = asNumber(content?.lineHeight) ?? asNumber(rec.lineHeight) ?? asNumber(style?.lineHeight);
   if (lineHeight !== undefined) out.lineHeight = lineHeight;
   const letterSpacing =
-    asNumber(content?.letterSpacing) ??
-    asNumber(rec.letterSpacing) ??
-    asNumber(style?.letterSpacing);
+    asNumber(content?.letterSpacing) ?? asNumber(rec.letterSpacing) ?? asNumber(style?.letterSpacing);
   if (letterSpacing !== undefined) out.letterSpacing = letterSpacing;
-  const align =
-    parseTextAlign(content?.align) ??
-    parseTextAlign(rec.align) ??
-    parseTextAlign(style?.align);
+  const align = parseTextAlign(content?.align) ?? parseTextAlign(rec.align) ?? parseTextAlign(style?.align);
   if (align) out.align = align;
-  const list =
-    parseTextList(content?.list) ?? parseTextList(rec.list) ?? parseTextList(style?.list);
+  const list = parseTextList(content?.list) ?? parseTextList(rec.list) ?? parseTextList(style?.list);
   if (list) out.list = list;
   const href = asString(content?.href) ?? asString(rec.href) ?? asString(style?.href);
   if (href) out.href = href;
@@ -388,11 +343,7 @@ function styleBox(style: Record<string, unknown> | null): number[] | null {
 function canvasBounds(rec: Record<string, unknown>): unknown {
   const styled = styleBox(asRecord(rec.style));
   if (styled) return styled;
-  return (
-    rec.bounds ??
-    rec.position ??
-    [rec.x ?? rec.left, rec.y ?? rec.top, rec.w ?? rec.width, rec.h ?? rec.height]
-  );
+  return rec.bounds ?? rec.position ?? [rec.x ?? rec.left, rec.y ?? rec.top, rec.w ?? rec.width, rec.h ?? rec.height];
 }
 
 /**
@@ -545,12 +496,7 @@ function parseSeries(raw: unknown, data: ChartData): ChartSeries[] {
         name: asString(rec.name) ?? data.cols[i + 1] ?? `S${i + 1}`,
         encode: asRecord(rec.encode) as ChartSeries["encode"],
         fill: typeof rec.fill === "string" ? rec.fill : undefined,
-        axis:
-          rec.axis === "secondary"
-            ? "secondary"
-            : rec.axis === "primary"
-              ? "primary"
-              : undefined,
+        axis: rec.axis === "secondary" ? "secondary" : rec.axis === "primary" ? "primary" : undefined,
       };
     });
   }
@@ -739,12 +685,7 @@ function chapterNumber(text: string): string {
 }
 
 /** Official paper-white recipe atoms the agent writes from recipes.md. */
-function expandOfficialRecipeItem(
-  rec: Record<string, unknown>,
-  type: string,
-  kind: string,
-  out: unknown[],
-): boolean {
+function expandOfficialRecipeItem(rec: Record<string, unknown>, type: string, kind: string, out: unknown[]): boolean {
   if (type === "cover-botanical") {
     if (!outHasId(out, "circle")) {
       out.push({
@@ -1234,11 +1175,7 @@ export function expandPlaybookElements(raw: unknown[], pageType = ""): unknown[]
     if (type && expandOfficialRecipeItem(rec, type, kind, out)) return;
     if (type === "header") {
       const bounds = parseBounds(rec.bounds ?? rec.position) ?? [48, 28, 720, 52];
-      const title =
-        asString(rec.content) ??
-        asString(rec.title) ??
-        asString(rec.text) ??
-        asString(rec.heading);
+      const title = asString(rec.content) ?? asString(rec.title) ?? asString(rec.text) ?? asString(rec.heading);
       const sub = asString(rec.subtitle) ?? asString(rec.tag);
       const grade = `${title ?? ""} ${sub ?? ""}`.match(/([一二三四五六七八九十])年级/);
       if (kind === "cover") {
@@ -1385,9 +1322,7 @@ export function expandPlaybookElements(raw: unknown[], pageType = ""): unknown[]
       const x = asNumber(rec.x ?? rec.left);
       const y = asNumber(rec.y ?? rec.top);
       const sized =
-        sizeN !== undefined && sizeN > 0 && x !== undefined && y !== undefined
-          ? [x, y, sizeN, sizeN]
-          : null;
+        sizeN !== undefined && sizeN > 0 && x !== undefined && y !== undefined ? [x, y, sizeN, sizeN] : null;
       out.push({
         ...rec,
         type: "ellipse",
@@ -1398,7 +1333,7 @@ export function expandPlaybookElements(raw: unknown[], pageType = ""): unknown[]
       return;
     }
     if (type === "band") {
-      const bounds = kind === "cover" ? [36, 348, 560, 156] : rec.bounds ?? rec.position ?? [36, 348, 560, 156];
+      const bounds = kind === "cover" ? [36, 348, 560, 156] : (rec.bounds ?? rec.position ?? [36, 348, 560, 156]);
       out.push({
         ...rec,
         type: "box",
@@ -1436,10 +1371,7 @@ export function expandPlaybookElements(raw: unknown[], pageType = ""): unknown[]
         ...rec,
         type: "text",
         elementId: asString(rec.elementId) ?? "title",
-        bounds:
-          kind === "cover"
-            ? [64, 392, 500, 64]
-            : rec.bounds ?? rec.position ?? [48, 180, 860, 64],
+        bounds: kind === "cover" ? [64, 392, 500, 64] : (rec.bounds ?? rec.position ?? [48, 180, 860, 64]),
         fontWeight: rec.fontWeight ?? "bold",
         fontSize: rec.fontSize ?? namedFontSize(rec.size) ?? 36,
       });
@@ -1457,8 +1389,7 @@ export function parseElement(raw: unknown, index: number): PptdElement | null {
   const bounds = parseBounds(rec.bounds) ?? parseBounds(canvasBounds(rec));
   if (elementType === "shape" && !rec.fill && rec.background) rec.fill = rec.background;
   if (!elementType || !ELEMENT_TYPES.has(elementType) || !bounds) return null;
-  const elementId =
-    asString(rec.elementId) ?? asString(rec.id) ?? `el-${String(index + 1).padStart(2, "0")}`;
+  const elementId = asString(rec.elementId) ?? asString(rec.id) ?? `el-${String(index + 1).padStart(2, "0")}`;
   const base = {
     elementId,
     bounds,
@@ -1476,10 +1407,7 @@ export function parseElement(raw: unknown, index: number): PptdElement | null {
   }
 
   if (elementType === "shape") {
-    const shapeName =
-      asString(rec.shapeName) ??
-      asString(asRecord(rec.shape)?.shapeName) ??
-      "rect";
+    const shapeName = asString(rec.shapeName) ?? asString(asRecord(rec.shape)?.shapeName) ?? "rect";
     return {
       ...base,
       elementType: "shape",
@@ -1499,9 +1427,7 @@ export function parseElement(raw: unknown, index: number): PptdElement | null {
       series: parseSeries(chartRec.series ?? rec.series, data),
     };
     if (Array.isArray(rec.colors)) {
-      const colors = rec.colors
-        .map((color) => asString(color))
-        .filter((color): color is string => Boolean(color));
+      const colors = rec.colors.map((color) => asString(color)).filter((color): color is string => Boolean(color));
       if (colors.length) chart.colors = colors;
     }
     if (asString(rec.title)) chart.title = asString(rec.title);
@@ -1549,21 +1475,14 @@ export function parseElement(raw: unknown, index: number): PptdElement | null {
   if (elementType === "line") {
     const points = asString(rec.points);
     if (!points) return null;
-    const viewBox = Array.isArray(rec.viewBox) && rec.viewBox.length >= 2
-      ? ([asNumber(rec.viewBox[0]) ?? bounds[2], asNumber(rec.viewBox[1]) ?? bounds[3]] as [number, number])
-      : ([bounds[2], bounds[3]] as [number, number]);
+    const viewBox =
+      Array.isArray(rec.viewBox) && rec.viewBox.length >= 2
+        ? ([asNumber(rec.viewBox[0]) ?? bounds[2], asNumber(rec.viewBox[1]) ?? bounds[3]] as [number, number])
+        : ([bounds[2], bounds[3]] as [number, number]);
     return { ...base, elementType: "line", viewBox, points };
   }
 
   return null;
-}
-
-function coerceElementList(rec: Record<string, unknown>): unknown[] {
-  let raw: unknown = rec.elements ?? rec.items ?? rec.shapes;
-  raw = parseJsonMaybe(raw);
-  if (Array.isArray(raw)) return raw;
-  if (raw && typeof raw === "object") return [raw];
-  return [];
 }
 
 function looseTextPage(rec: Record<string, unknown>, index: number): SkillPageInput | null {
@@ -1601,30 +1520,13 @@ function looseTextPage(rec: Record<string, unknown>, index: number): SkillPageIn
   return {
     id: asString(rec.id) ?? `page-${String(index + 1).padStart(2, "0")}`,
     pageType: asString(rec.pageType) ?? asString(rec.role),
+    ...layoutIdPart(rec),
     notes: asString(rec.notes),
     elements,
   };
 }
 
-function liftBareCopy(item: unknown): unknown {
-  const rec = asRecord(item);
-  if (!rec) return item;
-  const type = asString(rec.type) ?? asString(rec.elementType);
-  if (type) return item;
-  if (asString(rec.title) && !asString(rec.text)) {
-    return { ...rec, type: "text", text: rec.title, fontWeight: rec.fontWeight ?? "bold" };
-  }
-  if (asString(rec.body) && !asString(rec.text)) {
-    return { ...rec, type: "text", text: rec.body };
-  }
-  return item;
-}
-
-function parsePage(
-  raw: unknown,
-  index: number,
-  opts: { loose?: boolean } = {},
-): SkillPageInput | null {
+function parsePage(raw: unknown, index: number, opts: { loose?: boolean } = {}): SkillPageInput | null {
   const rec = asRecord(parseJsonMaybe(raw));
   if (!rec) return null;
   // Native pages already satisfy the generation contract. Do not send them
@@ -1636,6 +1538,7 @@ function parsePage(
     ...(rec.notes !== undefined ? { notes: rec.notes } : {}),
     ...(rec.background !== undefined ? { background: rec.background } : {}),
     ...(rec.animations !== undefined ? { animations: rec.animations } : {}),
+    ...(rec.layoutId !== undefined ? { layoutId: rec.layoutId } : {}),
     elements: rec.elements,
   };
   if (isCanonicalWritePageArgs(native)) {
@@ -1648,11 +1551,7 @@ function parsePage(
     const el = asRecord(item);
     const type = asString(el?.type) ?? asString(el?.elementType);
     if (!isSlideChrome(type)) return true;
-    slideFill =
-      slideFill ??
-      parseFill(el?.background) ??
-      parseFill(asRecord(el?.background)) ??
-      parseFill(el?.fill);
+    slideFill = slideFill ?? parseFill(el?.background) ?? parseFill(asRecord(el?.background)) ?? parseFill(el?.fill);
     return false;
   });
   const parsed = withoutSlide
@@ -1664,10 +1563,17 @@ function parsePage(
   return {
     id: asString(rec.id) ?? `page-${String(index + 1).padStart(2, "0")}`,
     pageType: pageType || asString(rec.pageType) || asString(rec.role),
+    ...layoutIdPart(rec),
     notes: asString(rec.notes),
     background,
     elements,
   };
+}
+
+/** The write_layout id a page names. A blank or absent value means the page has no layout. */
+function layoutIdPart(rec: Record<string, unknown>): { layoutId?: string } {
+  const layoutId = asString(rec.layoutId);
+  return layoutId ? { layoutId } : {};
 }
 
 function slidePrefix(id: string): number | null {
@@ -1785,89 +1691,7 @@ export function parseSkillDeck(raw: unknown): SkillDeckInput | null {
   };
 }
 
-export function assertSkillDeck(
-  deck: SkillDeckInput,
-  opts: { minPages?: number } = {},
-): void {
-  const minPages = opts.minPages ?? 4;
-  if (deck.pages.length < minPages) {
-    throw new Error(
-      `skill PPTD needs at least ${minPages} pages with elements, got ${deck.pages.length}`,
-    );
-  }
-  for (const [i, page] of deck.pages.entries()) {
-    if (page.elements.length === 0) {
-      throw new Error(`skill page ${i + 1} has no PPTD elements`);
-    }
-  }
-}
-
-function textOf(el: PptdElement): string | undefined {
-  if (el.elementType !== "text") return undefined;
-  const content = (el as TextElement).content;
-  return content?.text?.trim() || undefined;
-}
-
-function pageTitle(page: SkillPageInput): string {
-  for (const el of page.elements) {
-    const text = textOf(el);
-    if (text) return text.slice(0, 80);
-  }
-  return page.id;
-}
-
-function pageRole(page: SkillPageInput, index: number, last: number): ComposeRole {
-  const raw = (page.pageType || "").toLowerCase();
-  if (ROLES.includes(raw as ComposeRole)) return raw as ComposeRole;
-  if (index === 0) return "cover";
-  if (index === last) return "close";
-  if (page.elements.some((el) => el.elementType === "chart" || el.elementType === "table")) {
-    return "evidence";
-  }
-  return "content";
-}
-
-/** Plan/timeline view of a skill deck. Disk SSOT is still the PPTD pages. */
-export function skillToCompose(deck: SkillDeckInput): ComposeDeck {
-  const last = Math.max(0, deck.pages.length - 1);
-  const pages: ComposePage[] = deck.pages.map((page, index) => {
-    const texts = page.elements
-      .map((el) => textOf(el))
-      .filter((t): t is string => Boolean(t));
-    const role = pageRole(page, index, last);
-    const title = texts[0] ?? page.id;
-    const rest = texts.slice(1);
-    const chartEl = page.elements.find((el) => el.elementType === "chart") as
-      | ChartElement
-      | undefined;
-    return {
-      role,
-      title,
-      bullets: role === "toc" ? undefined : rest.length ? rest : undefined,
-      items: role === "toc" ? rest : undefined,
-      chart: chartEl
-        ? {
-            title: typeof chartEl.title === "string" ? chartEl.title : title,
-            cols: chartEl.data.cols,
-            rows: chartEl.data.rows,
-          }
-        : undefined,
-    };
-  });
-  return { title: deck.title.slice(0, 80), pages };
-}
-
-function pageFileName(index: number, pageType?: string): string {
-  const role =
-    (pageType || "page").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24) || "page";
-  return `pages/${String(index + 1).padStart(2, "0")}_${role}.page`;
-}
-
-export function applySkillDeck(
-  project: PptdProject,
-  deck: SkillDeckInput,
-  pal?: Palette,
-): void {
+export function applySkillDeck(project: PptdProject, deck: SkillDeckInput, pal?: Palette): void {
   if (deck.pages.length === 0) {
     throw new Error("skill deck has no pages with PPTD elements");
   }
@@ -1902,8 +1726,5 @@ export function applySkillDeck(
 
   const agentDir = path.join(project.rootDir, "_agent");
   fs.mkdirSync(agentDir, { recursive: true });
-  writeFileAtomic(
-    path.join(agentDir, "skill-deck.json"),
-    `${JSON.stringify(deck, null, 2)}\n`,
-  );
+  writeFileAtomic(path.join(agentDir, "skill-deck.json"), `${JSON.stringify(deck, null, 2)}\n`);
 }

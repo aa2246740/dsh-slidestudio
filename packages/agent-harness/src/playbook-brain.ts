@@ -3,26 +3,11 @@
  * Offline default is deterministic (no network). Optional LlmPort when configured.
  */
 import type { PptdProject } from "@open-slidestudio/pptd-v2";
-import {
-  composeBodyRules,
-  deterministicDeck,
-  finalizeComposeDeck,
-  type ComposeDeck,
-} from "./compose-ir.js";
+import { composeBodyRules, deterministicDeck, finalizeComposeDeck, type ComposeDeck } from "./compose-ir.js";
 import type { LlmPort } from "./llm-port.js";
 import { materializeDeck } from "./materialize.js";
-import {
-  applySkillDeck,
-  parseSkillDeck,
-  skillToCompose,
-  type SkillDeckInput,
-} from "./skill-pages.js";
-import {
-  DEFAULT_CATEGORY,
-  DEFAULT_DESIGN_SYSTEM,
-  loadPlaybook,
-  type PlaybookBundle,
-} from "./playbook.js";
+import { applySkillDeck, parseSkillDeck, skillToCompose, type SkillDeckInput } from "./skill-pages.js";
+import { DEFAULT_CATEGORY, DEFAULT_DESIGN_SYSTEM, loadPlaybook, type PlaybookBundle } from "./playbook.js";
 import { planFromDeck, thinkAboutBrief, type ReasonBlock } from "./reason.js";
 
 export type PlaybookBrainOptions = {
@@ -45,7 +30,7 @@ export type PlaybookBrain = {
 
 function buildSystemPrompt(bundle: PlaybookBundle): string {
   return [
-    "You compose an DSH SlideStudio deck as JSON only.",
+    "You compose an Open SlideStudio deck as JSON only.",
     "Prefer pages[].elements PPTD (text/shape/chart/table + bounds). role+bullets is fallback only.",
     "Disk format is YAML PPTD v2. Do not mention Kimi trademarks.",
     "Cover copy comes from the user brief (title / subtitle), never from the product name or design-system id.",
@@ -107,9 +92,7 @@ function buildUserPrompt(brief: string, referenceText?: string): string {
   return parts.join("\n\n");
 }
 
-export function createPlaybookBrain(
-  opts: PlaybookBrainOptions = {},
-): PlaybookBrain {
+export function createPlaybookBrain(opts: PlaybookBrainOptions = {}): PlaybookBrain {
   const playbook = loadPlaybook({
     skillRoot: opts.skillRoot,
     designSystemId: opts.designSystemId ?? DEFAULT_DESIGN_SYSTEM,
@@ -145,12 +128,7 @@ export function createPlaybookBrain(
   };
 
   const fallbackDeck = (brief: string): ComposeDeck =>
-    deterministicDeck(
-      brief,
-      playbook.designSystemId,
-      opts.referenceText,
-      playbook.categoryId,
-    );
+    deterministicDeck(brief, playbook.designSystemId, opts.referenceText, playbook.categoryId);
 
   const planOffline = (brief: string): ReasonBlock => {
     plannedSkill = undefined;
@@ -172,10 +150,7 @@ export function createPlaybookBrain(
       const llm = opts.llm;
       return (async () => {
         try {
-          const raw = await llm.completeJson(
-            buildSystemPrompt(playbook),
-            buildUserPrompt(brief, opts.referenceText),
-          );
+          const raw = await llm.completeJson(buildSystemPrompt(playbook), buildUserPrompt(brief, opts.referenceText));
           plannedDeck = acceptRaw(raw, brief);
           usedLlm = true;
           return planFromDeck(plannedDeck);
@@ -196,10 +171,7 @@ export function createPlaybookBrain(
       const llm = opts.llm;
       return (async () => {
         try {
-          const raw = await llm.completeJson(
-            buildSystemPrompt(playbook),
-            buildUserPrompt(brief, opts.referenceText),
-          );
+          const raw = await llm.completeJson(buildSystemPrompt(playbook), buildUserPrompt(brief, opts.referenceText));
           plannedDeck = applyRaw(raw, brief, project);
           usedLlm = true;
         } catch {

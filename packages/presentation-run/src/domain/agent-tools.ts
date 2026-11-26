@@ -1,3 +1,10 @@
+import {
+  executePageStructureTool,
+  structuralEditGuard,
+  rewriteEditGuard,
+} from "./page-structure-tools.js";
+import { planWriteFeedback, reviewPlanCoverage } from "./plan-coverage.js";
+export { rewriteLockActive } from "./page-structure-tools.js";
 /**
  * Allowlisted generate tools. The model may only call these —
  * no shell, no iframe, no public web fetch.
@@ -7,33 +14,41 @@ import path from "node:path";
 import {
   createEmptyProject,
   loadProject,
+  ownPageBody,
   saveProject,
   withProjectWriteLock,
+  type Page,
   type Theme,
 } from "@open-slidestudio/pptd-v2";
 import {
   composeBodyRules,
   extractReferenceLines,
   finalizeComposeDeck,
-  inferDeckIntent,
   isNamedClassroomFact,
   type ComposeDeck,
 } from "./compose-ir.js";
 import { parseCanonicalPagePlan } from "./page-plan.js";
+import { diskSkillPages, reviewCurrent } from "./agent-page-review.js";
 import { aspectFromSlot, type ImagePort } from "./image-port.js";
 import type { ImageSearchPort } from "./image-search-port.js";
 import type { GrokWebSearchResult } from "./grok-hosted.js";
-import {
-  EMPTY_HOSTED_WEB_SEARCH,
-  webSearchQueriesFromArgs,
-} from "./hosted-web-search.js";
+import { EMPTY_HOSTED_WEB_SEARCH, webSearchQueriesFromArgs } from "./hosted-web-search.js";
 import { stableSha256 } from "./run-ledger.js";
-import { readActiveReviewGuard, reviewWriteTargetForPage, reviewWriteScopeViolation } from "./review-write-scope.js";
+import { pageRevisionSha256 } from "./hashing.js";
+import {
+  isPageLayoutRefusalCode,
+  pageLayoutRefusal,
+  type PageLayoutRefusalCode,
+} from "./page-layout-refusal.js";
+import {
+  readActiveReviewGuard,
+  reviewWriteTargetForPage,
+  reviewWriteScopeViolation,
+} from "./review-write-scope.js";
 import { backgroundColorWriteAuthority } from "./background-color-authority.js";
+import { EDITOR_AUTHORITY_LOST_DETAIL, editorTurnAuthorityLost } from "./editor-turn-authority.js";
 import {
   isTodoExhibitKind,
-  resolveTodoExhibits,
-  reviewSkillPages,
   isCloserPage,
   pageHasReadableCopy,
   pageHasVisibleContent,
@@ -44,7 +59,6 @@ import {
   writePageSchemaError,
   composedPageLeftoverIssues,
   EMPTY_CLOSER_PRODUCE_NEXT,
-  TODO_EXHIBIT_KINDS,
   type LayoutReview,
   type TodoExhibitKind,
 } from "./layout-qa.js";
@@ -58,7 +72,6 @@ import {
 } from "./page-raster.js";
 import type { PlaybookBundle } from "./playbook.js";
 import {
-  assertSkillDeck,
   parseSkillDeck,
   parseSkillPage,
   countRawChartElements,
@@ -67,315 +80,15 @@ import {
   type SkillDeckInput,
   type SkillPageInput,
 } from "./skill-pages.js";
-import { missingOperatingFactsReason, reportFactIssues } from "./report-facts.js";
+import { assertSkillDeck } from "./deck-page-count.js";
+import type { PageCountRequirement } from "./page-count-requirement.js";
+import { missingOperatingFactsReason } from "./report-facts.js";
 import { inspectProjectCapabilities } from "../capabilities.js";
-import { listSourceReceipts } from "../receipts.js";
-import {
-  kindThemePackIssue,
-  packColorWriteContextFrom,
-  PACK_COLOR_ERROR,
-  sourceIdList,
-} from "./theme-pack.js";
-
-type LlmToolSpec = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-};
-
-export const GENERATE_TOOLS: LlmToolSpec[] = [
-  {
-    type: "function",
-    function: {
-      name: "think",
-      description:
-        "Record the audience, constraints, and what you will not invent. Call this first.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          summary: { type: "string" },
-          detail: { type: "string" },
-        },
-        required: ["summary", "detail"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_playbook",
-      description:
-        "Read one playbook section. Do not guess the category rules — read them.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          section: {
-            type: "string",
-            enum: ["catalog", "skill", "images", "category", "guide", "design", "pptd"],
-          },
-        },
-        required: ["section"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description:
-        "Read uploaded reference attachments. Quote only; never invent beyond this text.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          query: { type: "string", description: "Optional substring filter" },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "research",
-      description:
-        "Look up facts in attachments or record an honest gap. No public web. Never invent citations.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          query: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_todo",
-      description:
-        "Write or replace the complete page outline. Do not default to 6 pages. A classroom lesson is usually 6 (cover→path→concept→remember→exhibit→takeaway). A 月报/复盘 follows the attachment: one job per exhibit, no padding. If the brief specifies a page count or page-by-page script, keep every specified page. Each item needs a note and the exact editable exhibits the later page must implement. Mark photo-led pages with the photo exhibit; their media must exist before write_page. Use none only when the page truly requests no exhibit; prose never substitutes for a requested chart, table, or diagram. Revise the todo whenever the page structure changes — split sections are allowed, but the new pageIds must appear here BEFORE their first write_page.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                title: { type: "string" },
-                note: { type: "string" },
-                exhibits: {
-                  type: "array",
-                  minItems: 1,
-                  items: { type: "string", enum: [...TODO_EXHIBIT_KINDS] },
-                },
-              },
-              required: ["title", "note", "exhibits"],
-            },
-          },
-        },
-        required: ["items"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description:
-        "Search the web for current information. Provide 1–4 queries in the required queries array. Use a one-item array for a single search. Only when inspect_capabilities.research.configured and via=pi-xai-hosted. Returns facts and citations. Do not pretend you searched if this tool was not called.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          queries: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-            maxItems: 4,
-            description:
-              "Required search queries; 1–4 non-empty strings. Use a one-item array for a single search.",
-          },
-        },
-        required: ["queries"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_image",
-      description:
-        "Optional. Query the configured image search port and write media/{id}.png. Only call this if the capability card says imageSearch=YES. No public-web scrape by the host. If the port is off or empty, you get kind=none — do not write src.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "string", description: "File stem, e.g. cover or day1-sensoji" },
-          query: { type: "string" },
-        },
-        required: ["id", "query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "generate_image",
-      description:
-        "Create a file in project media/ only when the capability card says imageGenerate=YES. Pass the planned photo frame width and height in page pixels so the file matches that slot. Do not default to 16:9 and later cover-crop into a portrait frame. Fails closed if the image API cannot run — it does not write a placeholder PNG.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "string", description: "File stem, e.g. cover or day1-sensoji" },
-          prompt: { type: "string" },
-          width: { type: "number", description: "Planned image frame width in page pixels" },
-          height: { type: "number", description: "Planned image frame height in page pixels" },
-          aspect: { type: "string", description: "Only if width/height are unknown: 16:9, 4:3, 1:1, or 3:4" },
-        },
-        required: ["id", "prompt"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_page",
-      description:
-        "Write ONE COMPLETE page as PPTD in a single call. This replaces the whole page; it never appends elements. Every revision must resend the full elements[] array, with bounds/style/fill/line/alignment inside each owning element. layoutStatus=pass is overflow-only, not a rewrite seal. The same pageId may be rewritten until review_pages records a current structural pass for that revision. After structural pass, rewrite only if the current revision has explicit editor edit authorization, review_pages names the page failing, or review_page says revise. An authorized editor edit uses read_page and expectedPageSha256; do not manufacture a visual review to enable it. Official recipe vocab: header|list|box|circle|band|text, or cover-botanical|title-band|coral-rule|chapter|page-title|route-path|method-panels|two-column-45-55|demo-band|two-column-body|result-bar|next-action|footer-chrome. pageType cover|route|concept|method|demo|transfer. Invalid parse returns error. The host will not rewrite your elements.",
-      parameters: {
-        type: "object",
-        additionalProperties: true,
-        properties: {
-          id: { type: "string" },
-          pageType: { type: "string" },
-          notes: { type: "string" },
-          background: { type: "object" },
-          elements: { type: "array", minItems: 1 },
-          expectedPageSha256: {
-            type: "string",
-            description:
-              "When revising an existing page, pass the pageSha256 from the immediately preceding read_page. The write is rejected if that page changed before persistence.",
-          },
-        },
-        required: ["id", "elements"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "render_page",
-      description:
-        "Screenshot native #slide for ONE written page. Classroom decks must call this for every page the user will see (pageIndex 0..n-1). page-1.png alone is rejected. If Playwright/editor is down, kind=unavailable.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          pageId: { type: "string" },
-          pageIndex: { type: "number" },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "review_pages",
-      description:
-        "Native structural QA (not Kimi export_images.py). One written page is enough. Fails empty pages and unlabeled invented numbers. Does not require media. If you chose an image src, that file must exist. Call render_page first if you want to see the real #slide. If raster/vision is off, say you did not see the slide.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "compose_deck",
-      description:
-        "Finalize the deck. Prefer pages already written with write_page, or send pages[] with elements. Images are optional. If you included src, the file must exist. Empty pages and unlabeled invented numbers are rejected. role+bullets without elements is an IR fallback.",
-      parameters: {
-        type: "object",
-        additionalProperties: true,
-        properties: {
-          title: { type: "string" },
-          pages: {
-            type: "array",
-            minItems: 5,
-            items: {
-              type: "object",
-              additionalProperties: true,
-              properties: {
-                id: { type: "string" },
-                pageType: { type: "string" },
-                role: {
-                  type: "string",
-                  enum: ["cover", "toc", "content", "evidence", "timeline", "matrix", "close"],
-                },
-                title: { type: "string" },
-                notes: { type: "string" },
-                elements: {
-                  type: "array",
-                  minItems: 1,
-                  items: {
-                    type: "object",
-                    additionalProperties: true,
-                    properties: {
-                      elementId: { type: "string" },
-                      elementType: {
-                        type: "string",
-                        enum: ["text", "shape", "image", "table", "chart", "line", "icon"],
-                      },
-                      bounds: {
-                        type: "array",
-                        items: { type: "number" },
-                        minItems: 4,
-                        maxItems: 4,
-                      },
-                      content: { type: "object" },
-                      shapeName: { type: "string" },
-                      fill: {},
-                      src: { type: "string" },
-                      data: { type: "object" },
-                      series: { type: "array" },
-                      columnWidths: { type: "array" },
-                      rows: { type: "array" },
-                    },
-                    required: ["elementType", "bounds"],
-                  },
-                },
-                subtitle: { type: "string" },
-                kicker: { type: "string" },
-                chapter: { type: "string" },
-                bullets: { type: "array", items: { type: "string" } },
-                items: { type: "array", items: { type: "string" } },
-                soWhat: { type: "string" },
-                note: { type: "string" },
-                chart: { type: "object" },
-              },
-              required: ["title"],
-            },
-          },
-        },
-        required: ["title"],
-      },
-    },
-  },
-];
+import { packColorSourceIds } from "./pack-color-context.js";
+import { effectiveCatalogPackId } from "./design-authority.js";
+import { adoptedSourceIdsForState, refuseIfKindThemePack } from "./adopted-source-guard.js";
+import { packColorWriteContext, PACK_COLOR_ERROR } from "./theme-pack.js";
+import { holdsOnlyTemplateComponents } from "./template-component-paint.js";
 
 export type AgentTodo = {
   pageId?: string;
@@ -424,6 +137,9 @@ export type ToolExecution = {
 export type AgentToolState = {
   brief: string;
   requestedPageCount?: number;
+  pageCountRequirement?: PageCountRequirement;
+  /** The context epoch that decides which native question answers are current. */
+  contextEpochId?: string;
   playbook: PlaybookBundle;
   referenceText?: string;
   todos: AgentTodo[];
@@ -448,30 +164,12 @@ function writtenPages(state: AgentToolState): SkillPageInput[] {
   return state.writtenPages;
 }
 
-/**
- * Disk SSOT → review input. review_pages/compose_deck must grade what is
- * actually persisted, not the in-memory buffer — an editor edit or a partial
- * write can diverge them. Throws when the project cannot be loaded; callers
- * decide whether a missing/corrupt disk state may fall back to the buffer.
- */
-function diskSkillPages(state: AgentToolState): SkillPageInput[] {
-  if (!state.projectRoot) return [];
-  return loadProject(state.projectRoot).pages.map((entry) => ({
-    id: persistPageKey(entry.path),
-    pageType: entry.page.pageType,
-    notes: entry.page.notes,
-    background: entry.page.background,
-    animations: entry.page.animations,
-    elements: entry.page.elements,
-  }));
-}
-
 /** Authoritative page set for review/compose: disk first, buffer only as legacy fallback. */
 function reviewablePages(state: AgentToolState): { pages: SkillPageInput[]; loadError?: string } {
   if (state.projectRoot) {
     try {
       const disk = diskSkillPages(state);
-      if (disk.length) return { pages: disk };
+      if (disk.length || state.strictLedger) return { pages: disk };
     } catch (e) {
       return {
         pages: state.strictLedger ? [] : writtenPages(state),
@@ -480,7 +178,7 @@ function reviewablePages(state: AgentToolState): { pages: SkillPageInput[]; load
     }
   }
   const buffered = writtenPages(state);
-  return { pages: buffered.length ? buffered : state.skillDeck?.pages ?? [] };
+  return { pages: buffered.length ? buffered : (state.skillDeck?.pages ?? []) };
 }
 
 function syncSkillDeckPage(state: AgentToolState, page: SkillPageInput): void {
@@ -495,8 +193,7 @@ function wouldWipeWrittenCopy(
   incoming: SkillPageInput,
 ): boolean {
   return (
-    pageHasReadableCopy({ elements: existing.page.elements }) &&
-    !pageHasReadableCopy(incoming)
+    pageHasReadableCopy({ elements: existing.page.elements }) && !pageHasReadableCopy(incoming)
   );
 }
 
@@ -507,11 +204,7 @@ function matchExistingPageIndex(
   return project.pages.findIndex((loaded) => pageIdMatchesFile(page.id, loaded.path));
 }
 
-function persistNewPagePath(
-  page: SkillPageInput,
-  index: number,
-  used: Set<string>,
-): string {
+function persistNewPagePath(page: SkillPageInput, index: number, used: Set<string>): string {
   const byId = persistPagePathFromId(page.id);
   if (byId) return byId;
   let next = index;
@@ -529,6 +222,7 @@ function asPersistedPage(page: SkillPageInput): {
   background: SkillPageInput["background"];
   animations: SkillPageInput["animations"];
   elements: SkillPageInput["elements"];
+  layoutId?: string;
 } {
   return {
     pageType: page.pageType,
@@ -536,6 +230,8 @@ function asPersistedPage(page: SkillPageInput): {
     background: page.background,
     animations: page.animations,
     elements: page.elements,
+    // The layout is stored; saveProject materialises its copies onto the page file.
+    ...(page.layoutId !== undefined ? { layoutId: page.layoutId } : {}),
   };
 }
 
@@ -557,10 +253,22 @@ function patchPagesInPlace(
 }
 
 function persistPageFileName(index: number, pageType?: string): string {
-  const role =
-    (pageType || "page").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24) || "page";
+  const role = (pageType || "page").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24) || "page";
   return `pages/${String(index + 1).padStart(2, "0")}_${role}.page`;
 }
+
+type PersistRefusal = {
+  ok: false;
+  error:
+    | "page_revision_required"
+    | "page_revision_conflict"
+    | "review_scope_violation"
+    | PageLayoutRefusalCode;
+  detail?: string;
+  pageId: string;
+  expectedPageSha256?: string;
+  actualPageSha256?: string;
+};
 
 /**
  * Persist by page id onto the matching file. Never remap by index, first
@@ -569,6 +277,257 @@ function persistPageFileName(index: number, pageType?: string): string {
  * Empty pages are not appended. A newly created project has zero composed
  * pages; the first write_page lists the agent id. Host does not paint leftover YAML.
  */
+function editorTurnWriteRefusal(
+  state: AgentToolState,
+  pages: readonly SkillPageInput[],
+): PersistRefusal | undefined {
+  if (!editorTurnAuthorityLost(state.projectRoot!)) return undefined;
+  return {
+    ok: false,
+    error: "review_scope_violation",
+    pageId: persistPageKey(pages[0]?.id ?? "unknown"),
+    detail: EDITOR_AUTHORITY_LOST_DETAIL,
+  };
+}
+
+function loadOrCreateWriteProject(
+  state: AgentToolState,
+  pages: readonly SkillPageInput[],
+): { project: ReturnType<typeof loadProject>; title: string } | undefined {
+  const root = state.projectRoot!;
+  const title = state.skillDeck?.title || state.brief.slice(0, 40) || "生成中";
+  const hasPptd = fs.existsSync(root) && fs.readdirSync(root).some((name) => name.endsWith(".pptd"));
+  if (!hasPptd && !pages.length) return undefined;
+  return {
+    project: hasPptd ? loadProject(root) : createEmptyProject(root, { title }),
+    title,
+  };
+}
+
+function pageRevisionWriteRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  projectRoot: string,
+  opts: { expectedPageSha256?: string },
+): PersistRefusal | undefined {
+  const expectedPageSha256 = String(opts.expectedPageSha256 ?? "").trim();
+  const guard = readActiveReviewGuard(projectRoot);
+  const structural = structuralEditGuard(guard);
+  const rewrite = rewriteEditGuard(guard);
+  const targetPageId = pages.length === 1 ? persistPageKey(pages[0]!.id) : "";
+  const current = targetPageId
+    ? project.pages.find((loaded) => pageIdMatchesFile(targetPageId, loaded.path))
+    : undefined;
+  const actualPageSha256 = current
+    ? pageRevisionSha256(current.page, persistPageKey(current.path))
+    : undefined;
+  const singleMissingPage = pages.length === 1 && !current;
+  const structuralNewPage = structural !== undefined && singleMissingPage;
+  const rewriteNewPage = rewrite !== undefined && singleMissingPage;
+  if (
+    guard &&
+    (!expectedPageSha256 || pages.length !== 1 || !current) &&
+    !structuralNewPage &&
+    !rewriteNewPage
+  ) {
+    return {
+      ok: false,
+      error: "page_revision_required",
+      pageId: persistPageKey(pages[0]?.id ?? "unknown"),
+      actualPageSha256,
+    };
+  }
+  if (expectedPageSha256 && (!targetPageId || actualPageSha256 !== expectedPageSha256)) {
+    return {
+      ok: false,
+      error: "page_revision_conflict",
+      pageId: targetPageId || persistPageKey(pages[0]?.id ?? "unknown"),
+      expectedPageSha256,
+      actualPageSha256,
+    };
+  }
+  return undefined;
+}
+
+function structuralScopeRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  structural: NonNullable<ReturnType<typeof structuralEditGuard>>,
+): PersistRefusal | undefined {
+  for (const proposed of pages) {
+    const pageId = persistPageKey(proposed.id);
+    const existing = project.pages.find((loaded) => pageIdMatchesFile(proposed.id, loaded.path));
+    if (existing && !structural.editablePageIds.has(pageId)) {
+      return {
+        ok: false,
+        error: "review_scope_violation",
+        pageId,
+        detail: `Page ${pageId} is an existing page outside the structural edit's editable set`,
+      };
+    }
+  }
+  return undefined;
+}
+
+function rewriteScopeRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  rewrite: NonNullable<ReturnType<typeof rewriteEditGuard>>,
+): PersistRefusal | undefined {
+  for (const proposed of pages) {
+    const pageId = persistPageKey(proposed.id);
+    const existing = project.pages.find((loaded) => pageIdMatchesFile(proposed.id, loaded.path));
+    if (existing && !rewrite.baselinePageIds.has(pageId)) {
+      return {
+        ok: false,
+        error: "review_scope_violation",
+        pageId,
+        detail: `Page ${pageId} is not part of the rewrite baseline`,
+      };
+    }
+  }
+  return undefined;
+}
+
+function guardedScopeRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  guard: NonNullable<ReturnType<typeof readActiveReviewGuard>>,
+): PersistRefusal | undefined {
+  for (const proposed of pages) {
+    const pageId = persistPageKey(proposed.id);
+    const target = reviewWriteTargetForPage(guard, pageId);
+    if (!target) {
+      return {
+        ok: false,
+        error: "review_scope_violation",
+        pageId,
+        detail: `Page ${pageId} is outside the authorized existing pages`,
+      };
+    }
+    const elementGuard = target.scope.kind === "elements";
+    if (elementGuard && !target.pageBody) {
+      return {
+        ok: false,
+        error: "review_scope_violation",
+        pageId,
+        detail: "The original element review baseline is missing; create a new review",
+      };
+    }
+    const existing = project.pages.find((loaded) => pageIdMatchesFile(proposed.id, loaded.path));
+    const violation = reviewWriteScopeViolation(
+      target.scope,
+      pageId,
+      elementGuard ? ownPageBody(target.pageBody as unknown as Page) : existing && ownPageBody(existing.page),
+      asPersistedPage(proposed),
+    );
+    if (violation) return { ok: false, error: "review_scope_violation", pageId, detail: violation };
+  }
+  return undefined;
+}
+
+function reviewScopeWriteRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  projectRoot: string,
+): PersistRefusal | undefined {
+  const guard = readActiveReviewGuard(projectRoot);
+  const structural = structuralEditGuard(guard);
+  if (structural) return structuralScopeRefusal(project, pages, structural);
+  const rewrite = rewriteEditGuard(guard);
+  if (rewrite) return rewriteScopeRefusal(project, pages, rewrite);
+  if (guard && (guard.scope || guard.items !== undefined)) {
+    return guardedScopeRefusal(project, pages, guard);
+  }
+  return undefined;
+}
+
+function layoutWriteRefusal(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+): PersistRefusal | undefined {
+  for (const proposed of pages) {
+    const refusal = pageLayoutRefusal(project.presentation, asPersistedPage(proposed));
+    if (!refusal) continue;
+    return {
+      ok: false,
+      error: refusal.error,
+      pageId: persistPageKey(proposed.id),
+      detail: refusal.detail,
+    };
+  }
+  return undefined;
+}
+
+function commitWrittenPages(
+  project: ReturnType<typeof loadProject>,
+  pages: readonly SkillPageInput[],
+  state: AgentToolState,
+  title: string,
+): void {
+  const root = state.projectRoot!;
+  const guard = readActiveReviewGuard(root);
+  const structural = structuralEditGuard(guard);
+  if (!guard && !project.presentation.title?.trim()) project.presentation.title = title;
+  if (project.pages.length > 0) patchPagesInPlace(project, pages);
+  const used = new Set(project.pages.map((loaded) => loaded.path));
+  const added: typeof project.pages = [];
+  for (const [index, page] of pages.entries()) {
+    if (matchExistingPageIndex(project, page) >= 0) continue;
+    if ([...used].some((listed) => pageIdMatchesFile(page.id, listed))) continue;
+    if (
+      !pageHasVisibleContent(page) &&
+      !pageHasReadableCopy(page) &&
+      !holdsOnlyTemplateComponents(page, root)
+    ) {
+      continue;
+    }
+    const nextPath = persistNewPagePath(page, project.pages.length + index, used);
+    if (!nextPath || used.has(nextPath)) continue;
+    used.add(nextPath);
+    const entry = { path: nextPath, page: asPersistedPage(page) };
+    if (structural) added.push(entry);
+    else project.pages.push(entry);
+  }
+  if (structural && added.length) {
+    const baselineIds = new Set(
+      (Array.isArray(guard?.projectPages) ? guard.projectPages : [])
+        .map((entry) => persistPageKey(String((entry as Record<string, unknown>)?.pageId ?? "")))
+        .filter((id) => id.length > 0),
+    );
+    const alreadyAdded = baselineIds.size
+      ? project.pages.filter((loaded) => !baselineIds.has(persistPageKey(loaded.path))).length
+      : 0;
+    const pos = Math.max(
+      0,
+      Math.min((structural.insertIndex ?? project.pages.length) + alreadyAdded, project.pages.length),
+    );
+    project.pages.splice(pos, 0, ...added);
+  }
+  project.presentation.pages = project.pages.map((page) => page.path);
+  saveProject(project);
+}
+
+function persistPagesUnderLock(
+  state: AgentToolState,
+  pages: readonly SkillPageInput[],
+  opts: { expectedPageSha256?: string },
+): PersistRefusal | undefined {
+  const lost = editorTurnWriteRefusal(state, pages);
+  if (lost) return lost;
+  const opened = loadOrCreateWriteProject(state, pages);
+  if (!opened) return undefined;
+  const root = state.projectRoot!;
+  const revision = pageRevisionWriteRefusal(opened.project, pages, root, opts);
+  if (revision) return revision;
+  const scope = reviewScopeWriteRefusal(opened.project, pages, root);
+  if (scope) return scope;
+  const layout = layoutWriteRefusal(opened.project, pages);
+  if (layout) return layout;
+  commitWrittenPages(opened.project, pages, state, opened.title);
+  return undefined;
+}
+
 /**
  * Persist only the pages mutated by the current tool call when a scope is
  * supplied. Replaying hands-state's historical writtenPages would otherwise
@@ -578,245 +537,47 @@ export function persistWrittenPages(
   state: AgentToolState,
   pageScope?: readonly SkillPageInput[],
   opts: { expectedPageSha256?: string } = {},
-):
-  | { ok: true }
-  | {
-      ok: false;
-      error: "page_revision_required" | "page_revision_conflict" | "review_scope_violation";
-      detail?: string;
-      pageId: string;
-      expectedPageSha256?: string;
-      actualPageSha256?: string;
-    } {
+): { ok: true } | PersistRefusal {
   if (!state.projectRoot) return { ok: true };
   const pages = pageScope ?? writtenPages(state);
-  let conflict:
-    | {
-        ok: false;
-        error: "page_revision_required" | "page_revision_conflict" | "review_scope_violation";
-        detail?: string;
-        pageId: string;
-        expectedPageSha256?: string;
-        actualPageSha256?: string;
-      }
-    | undefined;
+  let conflict: PersistRefusal | undefined;
   withProjectWriteLock(state.projectRoot, () => {
-    const title = state.skillDeck?.title || state.brief.slice(0, 40) || "生成中";
-    const hasPptd = fs.existsSync(state.projectRoot!) && fs.readdirSync(state.projectRoot!).some((name) => name.endsWith(".pptd"));
-    // A successful compose can have no newly appended page while still owning
-    // deck metadata (especially its finalized title). Do not manufacture an
-    // empty project for an ordinary no-op scope, though.
-    if (!hasPptd && !pages.length) return;
-    const project = hasPptd
-      ? loadProject(state.projectRoot!)
-      : createEmptyProject(state.projectRoot!, { title });
-    const expectedPageSha256 = String(opts.expectedPageSha256 ?? "").trim();
-    const guard = readActiveReviewGuard(state.projectRoot!);
-    const structural = structuralEditGuard(guard);
-    const rewrite = rewriteEditGuard(guard);
-    const targetPageId = pages.length === 1 ? persistPageKey(pages[0]!.id) : "";
-    const current = targetPageId
-      ? project.pages.find((loaded) => pageIdMatchesFile(targetPageId, loaded.path))
-      : undefined;
-    const actualPageSha256 = current
-      ? stableSha256({ ...current.page, id: persistPageKey(current.path) })
-      : undefined;
-    // A structural or rewrite lock authorizes creating exactly one new page per
-    // write; there is no baseline revision to compare against.
-    const structuralNewPage = structural !== undefined && pages.length === 1 && !current;
-    const rewriteNewPage = rewrite !== undefined && pages.length === 1 && !current;
-    if (guard && (!expectedPageSha256 || pages.length !== 1 || !current) && !structuralNewPage && !rewriteNewPage) {
-      conflict = {
-        ok: false,
-        error: "page_revision_required",
-        pageId: persistPageKey(pages[0]?.id ?? "unknown"),
-        actualPageSha256,
-      };
-      return;
-    }
-    if (expectedPageSha256) {
-      if (!targetPageId || actualPageSha256 !== expectedPageSha256) {
-        conflict = {
-          ok: false,
-          error: "page_revision_conflict",
-          pageId: targetPageId || persistPageKey(pages[0]?.id ?? "unknown"),
-          expectedPageSha256,
-          actualPageSha256,
-        };
-        return;
-      }
-    }
-    if (structural) {
-      for (const proposed of pages) {
-        const pageId = persistPageKey(proposed.id);
-        const existing = project.pages.find(loaded => pageIdMatchesFile(proposed.id, loaded.path));
-        // Baseline pages are writable only when the lock whitelists them in
-        // editablePageIds — and the CAS check above has already run for them.
-        if (existing && !structural.editablePageIds.has(pageId)) {
-          conflict = {
-            ok: false,
-            error: "review_scope_violation",
-            pageId,
-            detail: `Page ${pageId} is an existing page outside the structural edit's editable set`,
-          };
-          return;
-        }
-      }
-    } else if (rewrite) {
-      for (const proposed of pages) {
-        const pageId = persistPageKey(proposed.id);
-        const existing = project.pages.find(loaded => pageIdMatchesFile(proposed.id, loaded.path));
-        // A rewrite lock authorizes every baseline page (CAS already ran for
-        // them above) plus brand-new ids, which append at the end.
-        if (existing && !rewrite.baselinePageIds.has(pageId)) {
-          conflict = {
-            ok: false,
-            error: "review_scope_violation",
-            pageId,
-            detail: `Page ${pageId} is not part of the rewrite baseline`,
-          };
-          return;
-        }
-      }
-    } else if (guard && (guard.scope || guard.items !== undefined)) {
-      for (const proposed of pages) {
-        const pageId = persistPageKey(proposed.id);
-        const target = reviewWriteTargetForPage(guard, pageId);
-        if (!target) {
-          conflict = { ok: false, error: "review_scope_violation", pageId, detail: `Page ${pageId} is outside the authorized existing pages` };
-          return;
-        }
-        const elementGuard = target.scope.kind === "elements";
-        if (elementGuard && !target.pageBody) {
-          conflict = { ok: false, error: "review_scope_violation", pageId, detail: "The original element review baseline is missing; create a new review" };
-          return;
-        }
-        const existing = project.pages.find(loaded => pageIdMatchesFile(proposed.id, loaded.path));
-        const violation = reviewWriteScopeViolation(
-          target.scope, pageId,
-          elementGuard ? target.pageBody : existing?.page,
-          asPersistedPage(proposed),
-        );
-        if (violation) {
-          conflict = { ok: false, error: "review_scope_violation", pageId, detail: violation };
-          return;
-        }
-      }
-    }
-    // Editing a page must not rename the deck from an old generation brief.
-    if (!guard) project.presentation.title = title;
-    if (project.pages.length > 0) {
-      patchPagesInPlace(project, pages);
-    }
-    const used = new Set(project.pages.map((loaded) => loaded.path));
-    const added: typeof project.pages = [];
-    for (const [index, page] of pages.entries()) {
-      if (matchExistingPageIndex(project, page) >= 0) continue;
-      if ([...used].some((listed) => pageIdMatchesFile(page.id, listed))) continue;
-      if (!pageHasVisibleContent(page) && !pageHasReadableCopy(page)) continue;
-      const nextPath = persistNewPagePath(page, project.pages.length + index, used);
-      if (!nextPath || used.has(nextPath)) continue;
-      used.add(nextPath);
-      const entry = { path: nextPath, page: asPersistedPage(page) };
-      if (structural) added.push(entry);
-      else project.pages.push(entry);
-    }
-    if (structural && added.length) {
-      // Insert before the baseline page at insertIndex; pages added by earlier
-      // writes of this same turn already sit there, so each new page lands
-      // right after them and write order is preserved.
-      const baselineIds = new Set(
-        (Array.isArray(guard?.projectPages) ? guard.projectPages : [])
-          .map((entry) => persistPageKey(String((entry as Record<string, unknown>)?.pageId ?? "")))
-          .filter((id) => id.length > 0),
-      );
-      const alreadyAdded = baselineIds.size
-        ? project.pages.filter((loaded) => !baselineIds.has(persistPageKey(loaded.path))).length
-        : 0;
-      const pos = Math.max(
-        0,
-        Math.min((structural.insertIndex ?? project.pages.length) + alreadyAdded, project.pages.length),
-      );
-      project.pages.splice(pos, 0, ...added);
-    }
-    project.presentation.pages = project.pages.map((page) => page.path);
-    saveProject(project);
+    conflict = persistPagesUnderLock(state, pages, opts);
   });
   return conflict ?? { ok: true };
 }
 
 /**
- * The persisted workspace-edit guard for page-list changes: kind "deck" plus
- * structureOnly. It authorizes new pages at insertIndex, whitelisted edits via
- * editablePageIds and removals via deletablePageIds; every other existing page
- * must remain byte-identical.
+ * Order the composed manifest by the plan the agent committed in write_todo.
+ * Pages are appended in write order during generation, but the plan — not the
+ * write sequence — is the intended reading order. Pages a todo does not name
+ * keep their relative order after the planned ones.
  */
-function structuralEditGuard(
-  guard: ReturnType<typeof readActiveReviewGuard>,
-): { insertIndex?: number; editablePageIds: ReadonlySet<string>; deletablePageIds: ReadonlySet<string>; reorderPageIds: string[] } | undefined {
-  const scope = guard?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
-  const rec = scope as Record<string, unknown>;
-  if (rec.kind !== "deck" || rec.structureOnly !== true) return undefined;
-  const insertIndex = Number(rec.insertIndex);
-  const idSet = (value: unknown) => new Set(
-    (Array.isArray(value) ? value : [])
-      .map((id) => persistPageKey(String(id ?? "")))
-      .filter((id) => id.length > 0),
-  );
-  return {
-    insertIndex: Number.isSafeInteger(insertIndex) && insertIndex >= 0 ? insertIndex : undefined,
-    editablePageIds: idSet(rec.editablePageIds),
-    deletablePageIds: idSet(rec.deletablePageIds),
-    // Order is the payload for a reorder — keep the sequence, not a set.
-    reorderPageIds: (Array.isArray(rec.reorderPageIds) ? rec.reorderPageIds : [])
-      .map((id) => persistPageKey(String(id ?? "")))
-      .filter((id) => id.length > 0),
-  };
-}
-
-/**
- * A full-rewrite lock (kind "deck" + rewrite, never structureOnly) authorizes
- * replacing the whole deck: every baseline page may be rewritten or deleted,
- * new pages may be appended, and the final manifest order is whatever the
- * committed plan demands — the verify step pins that order exactly.
- */
-function rewriteEditGuard(
-  guard: ReturnType<typeof readActiveReviewGuard>,
-): { baselinePageIds: ReadonlySet<string> } | undefined {
-  const scope = guard?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
-  const rec = scope as Record<string, unknown>;
-  if (rec.kind !== "deck" || rec.rewrite !== true || rec.structureOnly === true) return undefined;
-  const baselinePageIds = new Set(
-    (Array.isArray(guard?.projectPages) ? guard.projectPages : [])
-      .map((entry) => persistPageKey(String((entry as Record<string, unknown>)?.pageId ?? "")))
-      .filter((id) => id.length > 0),
-  );
-  return { baselinePageIds };
-}
-
-/** Whether the active editor lock is a full-deck rewrite. */
-export function rewriteLockActive(projectRoot: string): boolean {
-  return rewriteEditGuard(readActiveReviewGuard(projectRoot)) !== undefined;
-}
-
-/**
- * Deck-level metadata authorization ("editableMeta"): the scope may whitelist
- * "title" and/or "theme". A rewrite lock authorizes both implicitly.
- */
-function editableMetaGuard(
-  guard: ReturnType<typeof readActiveReviewGuard>,
-): ReadonlySet<string> {
-  const scope = guard?.scope;
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return new Set();
-  const rec = scope as Record<string, unknown>;
-  const meta = new Set(
-    (Array.isArray(rec.editableMeta) ? rec.editableMeta : [])
-      .map((field) => String(field ?? "").trim())
-      .filter((field) => field === "title" || field === "theme"),
-  );
-  return meta;
+export function orderComposedPagesByPlan(root: string, todos: readonly AgentTodo[]): void {
+  const wanted = todos
+    .map((todo) => persistPageKey(todo.pageId ?? todo.title))
+    .filter((key) => key.length > 0);
+  if (!wanted.length) return;
+  withProjectWriteLock(root, () => {
+    // A turn whose editor lease lapsed keeps the page order it was given.
+    if (editorTurnAuthorityLost(root)) return;
+    const project = loadProject(root);
+    const remaining = [...project.pages];
+    const ordered: typeof project.pages = [];
+    for (const key of wanted) {
+      const index = remaining.findIndex((loaded) => pageIdMatchesFile(key, loaded.path));
+      if (index < 0) continue;
+      ordered.push(...remaining.splice(index, 1));
+    }
+    ordered.push(...remaining);
+    const sameOrder =
+      ordered.length === project.pages.length &&
+      ordered.every((loaded, index) => loaded.path === project.pages[index]?.path);
+    if (sameOrder) return;
+    project.pages = ordered;
+    project.presentation.pages = ordered.map((loaded) => loaded.path);
+    saveProject(project);
+  });
 }
 
 function lastDiskBasename(state: AgentToolState): string | undefined {
@@ -831,7 +592,10 @@ function lastDiskBasename(state: AgentToolState): string | undefined {
   }
 }
 
-function siblingImageSrcsForWrite(state: AgentToolState, pageId: string): { pageId: string; src: string }[] {
+function siblingImageSrcsForWrite(
+  state: AgentToolState,
+  pageId: string,
+): { pageId: string; src: string }[] {
   const rows: { pageId: string; src: string }[] = [];
   const seen = new Set<string>();
   const add = (id: string, src: string) => {
@@ -852,8 +616,7 @@ function siblingImageSrcsForWrite(state: AgentToolState, pageId: string): { page
   for (const loaded of diskPages) {
     const rec = loaded.page as Record<string, unknown>;
     const id =
-      path.basename(loaded.path, ".page") ||
-      (typeof rec.id === "string" ? rec.id.trim() : "");
+      path.basename(loaded.path, ".page") || (typeof rec.id === "string" ? rec.id.trim() : "");
     if (!id) continue;
     for (const el of loaded.page.elements) {
       if (el.elementType === "image" && typeof el.src === "string") add(id, el.src);
@@ -876,49 +639,6 @@ function leftoverComposeIssue(state: AgentToolState) {
   } catch {
     return undefined;
   }
-}
-
-function researchHadGap(state: AgentToolState): boolean {
-  return state.researchNotes.some((n) => Boolean(n.gap) || n.source === "none");
-}
-
-function isClassroomBrief(brief: string): boolean {
-  return inferDeckIntent(brief) === "teach";
-}
-
-function mergedTodoExhibits(
-  todo: AgentTodo,
-  index: number,
-  brief: string,
-): TodoExhibitKind[] {
-  return resolveTodoExhibits(todo, index, brief);
-}
-
-function reviewCurrent(
-  state: AgentToolState,
-  pages: SkillPageInput[],
-  mode: "compose" | "strict" = "strict",
-): LayoutReview {
-  const classroom = isClassroomBrief(state.brief);
-  const review = reviewSkillPages(pages, {
-    projectRoot: state.projectRoot,
-    researchHadGap: researchHadGap(state),
-    todos: state.todos.map((todo, index) => ({
-      ...todo,
-      exhibits: mergedTodoExhibits(todo, index, state.brief),
-    })),
-    mode: classroom && mode === "compose" ? "compose" : classroom ? "strict" : mode,
-    courseware:
-      state.playbook.designSystemId === "academic/paper-white-courseware" &&
-      isClassroomBrief(state.brief),
-  });
-  const extras = reportFactIssues(state.brief, pages, state.referenceText);
-  if (extras.length) {
-    review.issues.push(...extras);
-    review.ok = false;
-  }
-  state.lastReview = review;
-  return review;
 }
 
 function refuseIfNoReportFacts(
@@ -945,54 +665,16 @@ function refuseIfMissingHostedWebSearch(
   return undefined;
 }
 
-function adoptedSourceIdsForState(
-  state: AgentToolState,
-  args: Record<string, unknown> = {},
-): string[] {
-  const adopted = sourceIdList(args.adoptedSourceIds, args.adopt);
-  if (state.projectRoot) {
-    for (const row of listSourceReceipts(state.projectRoot)) {
-      if (row.state === "adopted" || row.state === "executed") adopted.push(row.sourceId);
-    }
-  }
-  return adopted;
-}
-
-function packColorSchemaContext(
-  state: AgentToolState,
-  args: Record<string, unknown> = {},
-) {
-  return packColorWriteContextFrom({
-    designSystemId: state.playbook.designSystemId || undefined,
-    adoptedSourceIds: adoptedSourceIdsForState(state, args),
-  });
-}
-
-function refuseIfKindThemePack(
-  name: string,
-  state: AgentToolState,
-  args: Record<string, unknown> = {},
-): ReturnType<typeof executeGenerateTool> | undefined {
-  const adopted = adoptedSourceIdsForState(state, args);
-  const issue = kindThemePackIssue({
-    brief: state.brief,
-    designSystemId: state.playbook.designSystemId,
-    adoptedSourceIds: adopted,
-    userExplicitPack: state.userExplicitPack === true,
-  });
-  if (!issue) return undefined;
-  return {
-    name,
-    ok: false,
-    summary: "kind/theme pack",
-    detail: issue.detail,
-    payload: {
-      error: issue.code,
-      packId: issue.packId,
-      kind: issue.kind,
-      painted: false,
-    },
-  };
+/**
+ * The pack-colour context of the agent write and compose checks (one of the four pack_color callers).
+ * The playbook keeps the Hub pack as history; a saved style decision may have replaced it since.
+ */
+export function packColorSchemaContext(state: AgentToolState, _args: Record<string, unknown> = {}) {
+  const designSystemId = state.projectRoot
+    ? effectiveCatalogPackId(state.projectRoot, state.playbook.designSystemId || undefined)
+    : state.playbook.designSystemId;
+  const ids = packColorSourceIds(state.projectRoot, designSystemId);
+  return packColorWriteContext(ids, state.projectRoot);
 }
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -1059,7 +741,10 @@ function playbookSection(bundle: PlaybookBundle, section: string): string {
 function filterLines(lines: string[], query?: string): string[] {
   const q = query?.trim();
   if (!q) return lines;
-  const tokens = q.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+  const tokens = q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 1);
   return lines.filter((line) => {
     const low = line.toLowerCase();
     return low.includes(q.toLowerCase()) || tokens.some((t) => low.includes(t));
@@ -1182,12 +867,31 @@ export function executeGenerateTool(
     if (blocked) return blocked;
     let items: AgentTodo[];
     try {
-      items = parseCanonicalPagePlan(args.items).map((page) => ({ ...page, exhibits: [...page.exhibits] }));
+      items = parseCanonicalPagePlan(args.items).map((page) => ({
+        ...page,
+        exhibits: [...page.exhibits],
+      }));
     } catch (error) {
       return {
-        name, ok: false, summary: "incomplete plan",
+        name,
+        ok: false,
+        summary: "incomplete plan",
         detail: error instanceof Error ? error.message : String(error),
         payload: { error: "incomplete_plan" },
+      };
+    }
+    const feedback = planWriteFeedback(state.projectRoot, items, state.brief, state.contextEpochId);
+    if (feedback.countMismatch) {
+      return {
+        name,
+        ok: false,
+        summary: "page count mismatch",
+        detail: feedback.countMismatch,
+        payload: {
+          error: "page_count_mismatch",
+          plannedCount: items.length,
+          next: "write_todo",
+        },
       };
     }
     state.todos = items;
@@ -1201,188 +905,13 @@ export function executeGenerateTool(
       name,
       ok: true,
       summary: `${items.length} 页`,
-      detail,
-      payload: { items },
+      detail: [detail, ...feedback.hints].join("\n"),
+      payload: { items, ...feedback },
     };
   }
 
-  if (name === "delete_pages") {
-    const guard = state.projectRoot ? readActiveReviewGuard(state.projectRoot) : undefined;
-    const structural = structuralEditGuard(guard);
-    const rewrite = rewriteEditGuard(guard);
-    // Under a full-rewrite lock every baseline page is droppable.
-    const deletable = structural?.deletablePageIds ?? rewrite?.baselinePageIds ?? new Set<string>();
-    const requested = [...new Set(
-      (Array.isArray(args.pageIds) ? args.pageIds : [])
-        .map((id) => persistPageKey(String(id ?? "")))
-        .filter((id) => id.length > 0),
-    )];
-    const unauthorized = requested.filter((id) => !deletable.has(id));
-    if ((!structural && !rewrite) || !deletable.size || !requested.length || unauthorized.length) {
-      return {
-        name,
-        ok: false,
-        summary: "delete outside structural scope",
-        detail: !structural && !rewrite
-          ? "delete_pages needs an active editor structural authorization with deletablePageIds; this turn has none"
-          : `delete_pages only removes the pages this turn authorized (${[...deletable].join(", ")}); refusing ${unauthorized.join(", ") || "an empty pageIds"}`,
-        payload: { error: "review_scope_violation", painted: false },
-      };
-    }
-    const deleted: string[] = [];
-    let missing: string[] = [];
-    withProjectWriteLock(state.projectRoot!, () => {
-      const project = loadProject(state.projectRoot!);
-      const wanted = new Set(requested);
-      const kept = [];
-      for (const loaded of project.pages) {
-        if (wanted.has(persistPageKey(loaded.path))) {
-          deleted.push(persistPageKey(loaded.path));
-          fs.rmSync(path.join(state.projectRoot!, loaded.path), { force: true });
-        } else kept.push(loaded);
-      }
-      missing = requested.filter((id) => !deleted.includes(id));
-      project.pages = kept;
-      project.presentation.pages = kept.map((page) => page.path);
-      saveProject(project);
-    });
-    if (missing.length) {
-      return {
-        name,
-        ok: false,
-        summary: "page not found",
-        detail: `pageIds not on disk: ${missing.join(", ")} — read the page list again`,
-        payload: { error: "page_not_found", missing, deleted, painted: false },
-      };
-    }
-    return {
-      name,
-      ok: true,
-      summary: `deleted ${deleted.length} 页`,
-      detail: `已删除 ${deleted.join("、")}；其余页面与顺序不变。`,
-      payload: { deleted, painted: false },
-    };
-  }
-
-  if (name === "reorder_pages") {
-    const guard = state.projectRoot ? readActiveReviewGuard(state.projectRoot) : undefined;
-    const structural = structuralEditGuard(guard);
-    const rewrite = rewriteEditGuard(guard);
-    const authorized = structural?.reorderPageIds ?? [];
-    const requested = (Array.isArray(args.pageIds) ? args.pageIds : [])
-      .map((id) => persistPageKey(String(id ?? "")));
-    // The requested order must equal the authorized permutation exactly —
-    // same ids, same positions, every baseline page exactly once. Under a
-    // full-rewrite lock any permutation of the current manifest is allowed;
-    // the verify step pins the final order to the committed plan.
-    const exact = structural
-      ? authorized.length > 0 && requested.length === authorized.length &&
-        requested.every((id, index) => id === authorized[index])
-      : false;
-    const rewritePermutation = rewrite !== undefined && (() => {
-      if (!state.projectRoot || !requested.length || new Set(requested).size !== requested.length) return false;
-      const current = loadProject(state.projectRoot).pages.map((entry) => persistPageKey(entry.path));
-      return requested.length === current.length &&
-        requested.every((id) => current.includes(id)) &&
-        requested.some((id, index) => id !== current[index]);
-    })();
-    if (!exact && !rewritePermutation) {
-      return {
-        name,
-        ok: false,
-        summary: "reorder outside structural scope",
-        detail: !structural && !rewrite
-          ? "reorder_pages needs an active editor structural authorization with reorderPageIds; this turn has none"
-          : structural
-            ? `reorder_pages must pass exactly this turn's authorized order (${authorized.join(" → ")}); refusing a different pageIds list`
-            : "reorder_pages under a rewrite must pass every current page id exactly once, in the new order",
-        payload: { error: "review_scope_violation", painted: false },
-      };
-    }
-    let missing: string[] = [];
-    withProjectWriteLock(state.projectRoot!, () => {
-      const project = loadProject(state.projectRoot!);
-      const byId = new Map(project.pages.map((entry) => [persistPageKey(entry.path), entry]));
-      missing = requested.filter((id) => !byId.has(id));
-      if (missing.length) return;
-      // Reorder touches the manifest only — page files are never rewritten.
-      project.pages = requested.map((id) => byId.get(id)!);
-      project.presentation.pages = project.pages.map((page) => page.path);
-      saveProject(project);
-    });
-    if (missing.length) {
-      return {
-        name,
-        ok: false,
-        summary: "page not found",
-        detail: `pageIds not on disk: ${missing.join(", ")} — read the page list again`,
-        payload: { error: "page_not_found", missing, painted: false },
-      };
-    }
-    return {
-      name,
-      ok: true,
-      summary: `重排 ${requested.length} 页`,
-      detail: `页面顺序已调整为 ${requested.join(" → ")}；页面内容均未改动。`,
-      payload: { reordered: requested, painted: false },
-    };
-  }
-
-  if (name === "update_deck") {
-    const guard = state.projectRoot ? readActiveReviewGuard(state.projectRoot) : undefined;
-    const rewrite = rewriteEditGuard(guard);
-    const meta = editableMetaGuard(guard);
-    const titleProvided = typeof args.title === "string";
-    const themeProvided =
-      args.theme !== undefined && args.theme !== null &&
-      typeof args.theme === "object" && !Array.isArray(args.theme);
-    if (!guard || !state.projectRoot) {
-      return {
-        name,
-        ok: false,
-        summary: "deck metadata needs authorization",
-        detail: "update_deck needs an active editor authorization with editableMeta covering the requested fields",
-        payload: { error: "review_scope_violation", painted: false },
-      };
-    }
-    if (!titleProvided && !themeProvided) {
-      return {
-        name,
-        ok: false,
-        summary: "nothing to update",
-        detail: "update_deck requires a title and/or theme to apply",
-        payload: { error: "invalid_args", painted: false },
-      };
-    }
-    const denied = [
-      titleProvided && !(meta.has("title") || rewrite) ? "title" : undefined,
-      themeProvided && !(meta.has("theme") || rewrite) ? "theme" : undefined,
-    ].filter(Boolean);
-    if (denied.length) {
-      return {
-        name,
-        ok: false,
-        summary: "deck metadata outside authorized scope",
-        detail: `update_deck may only change the fields this turn authorized (editableMeta: ${[...meta].join(", ") || "none"}); refusing ${denied.join(", ")}`,
-        payload: { error: "review_scope_violation", painted: false },
-      };
-    }
-    let applied: string[] = [];
-    withProjectWriteLock(state.projectRoot, () => {
-      const project = loadProject(state.projectRoot!);
-      if (titleProvided) project.presentation.title = String(args.title).trim();
-      if (themeProvided) project.presentation.theme = structuredClone(args.theme) as typeof project.presentation.theme;
-      saveProject(project);
-      applied = [titleProvided ? "标题" : "", themeProvided ? "主题" : ""].filter(Boolean);
-    });
-    return {
-      name,
-      ok: true,
-      summary: `更新文稿${applied.join("、")}`,
-      detail: `文稿${applied.join("、")}已更新；页面内容均未改动。`,
-      payload: { updatedMeta: [titleProvided ? "title" : "", themeProvided ? "theme" : ""].filter(Boolean), painted: false },
-    };
-  }
+  const structureResult = executePageStructureTool(name, args, state);
+  if (structureResult) return structureResult;
 
   if (name === "write_page") {
     const blocked =
@@ -1461,7 +990,9 @@ export function executeGenerateTool(
         const project = loadProject(state.projectRoot);
         diskPageCount = project.pages.length;
         theme = project.presentation.theme;
-        const persistedPage = project.pages.find((loaded) => pageIdMatchesFile(page.id, loaded.path));
+        const persistedPage = project.pages.find((loaded) =>
+          pageIdMatchesFile(page.id, loaded.path),
+        );
         if (persistedPage?.page.background?.type === "solid") {
           persistedBackgroundColor = persistedPage.page.background.color;
         }
@@ -1481,6 +1012,7 @@ export function executeGenerateTool(
     const schemaCtx = {
       writtenIndex: index,
       writtenLast: last,
+      ...(planKeys.length ? { planLast: planKeys.at(-1) === persistPageKey(page.id) } : {}),
       lastDiskBasename: diskLast,
       diskPageCount: diskLast ? diskPageCount : undefined,
       theme,
@@ -1491,7 +1023,8 @@ export function executeGenerateTool(
         persistedBackgroundColor,
       }),
       ...(siblingImageSrcs.length ? { siblingImageSrcs } : {}),
-      ...(photoExhibit ? { photoExhibit, projectRoot: state.projectRoot } : {}),
+      projectRoot: state.projectRoot,
+      ...(photoExhibit ? { photoExhibit } : {}),
     };
     const schemaIssues = writePageSchemaIssues(page, schemaCtx, args);
     const schemaError = writePageSchemaError(schemaIssues, page, schemaCtx);
@@ -1513,14 +1046,27 @@ export function executeGenerateTool(
     const persisted = persistWrittenPages(state, [page], {
       expectedPageSha256: String(args.expectedPageSha256 ?? "").trim() || undefined,
     });
+    if (!persisted.ok && isPageLayoutRefusalCode(persisted.error)) {
+      return {
+        name,
+        ok: false,
+        summary: persisted.error,
+        detail: persisted.detail ?? persisted.error,
+        payload: { ...persisted, painted: false },
+      };
+    }
     if (!persisted.ok) {
       return {
         name,
         ok: false,
-        summary: persisted.error === "review_scope_violation" ? "edit outside selected target" : "page changed",
-        detail: persisted.error === "review_scope_violation"
-          ? `write_page rejected before saving: ${persisted.detail}. Read the page again and change only the authorized target; preserve all other elements and page settings exactly.`
-          : `write_page rejected because ${persisted.pageId} changed after read_page; read the page again and reapply the requested edit`,
+        summary:
+          persisted.error === "review_scope_violation"
+            ? "edit outside selected target"
+            : "page changed",
+        detail:
+          persisted.error === "review_scope_violation"
+            ? `write_page rejected before saving: ${persisted.detail}. Read the page again and change only the authorized target; preserve all other elements and page settings exactly.`
+            : `write_page rejected because ${persisted.pageId} changed after read_page; read the page again and reapply the requested edit`,
         payload: { ...persisted, painted: false },
       };
     }
@@ -1548,7 +1094,7 @@ export function executeGenerateTool(
         payload: { error: "project_unreadable" },
       };
     }
-    if (!pages.length) {
+    if (!pages.length && !state.todos.length) {
       return {
         name,
         ok: false,
@@ -1557,7 +1103,11 @@ export function executeGenerateTool(
         payload: { error: "need pages" },
       };
     }
-    const review = reviewCurrent(state, pages, "compose");
+    const review = reviewPlanCoverage(
+      state.projectRoot,
+      state.todos,
+      reviewCurrent(state, pages, "compose"),
+    );
     const ok = review.ok;
     const rasterNote = state.lastRaster
       ? `last render_page: ${state.lastRaster.kind} ${state.lastRaster.src ?? ""} — ${state.lastRaster.note}`
@@ -1568,7 +1118,9 @@ export function executeGenerateTool(
       summary: ok ? `${pages.length} 页通过` : `${review.issues.length} 个问题`,
       detail: ok
         ? `${rasterNote}\nstructural QA only unless render_page returned native-slide.\n${review.pages.map((p) => `${p.id} cover=${p.coverage.toFixed(2)} exhibit=${p.exhibit ?? "none"}`).join("\n")}`
-        : review.issues.map((i) => `${i.pageId}: ${i.message}`).join("\n"),
+        : [review.hint, ...review.issues.map((i) => `${i.pageId}: ${i.message}`)]
+            .filter(Boolean)
+            .join("\n"),
       payload: { ...review, lastRaster: state.lastRaster ?? null },
     };
   }
@@ -1593,7 +1145,11 @@ export function executeGenerateTool(
         },
       };
     }
-    const rules = composeBodyRules(state.brief, state.playbook.categoryId, state.requestedPageCount);
+    const rules = composeBodyRules(
+      state.brief,
+      state.playbook.categoryId,
+      state.pageCountRequirement ?? state.requestedPageCount,
+    );
     try {
       const buffered = writtenPages(state);
       const incoming = parseSkillDeck(args);
@@ -1615,19 +1171,18 @@ export function executeGenerateTool(
           payload: { error: "project_unreadable" },
         };
       }
-      const skill =
-        diskPages.length
-          ? {
-              title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),
-              pages: diskPages,
-            }
-          : incoming ??
-            (buffered.length
-              ? {
-                  title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),
-                  pages: buffered,
-                }
-              : null);
+      let skill = diskPages.length
+        ? {
+            title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),
+            pages: diskPages,
+          }
+        : (incoming ??
+          (buffered.length
+            ? {
+                title: String(args.title ?? state.skillDeck?.title ?? "未命名演示"),
+                pages: buffered,
+              }
+            : null));
       if (skill) {
         let composeTheme: Theme | undefined;
         let composeProject: ReturnType<typeof loadProject> | undefined;
@@ -1641,10 +1196,13 @@ export function executeGenerateTool(
         }
         const packCtx = { theme: composeTheme, ...packColorSchemaContext(state, args) };
         for (const page of skill.pages) {
-          const persistedPage = composeProject?.pages.find((loaded) => pageIdMatchesFile(page.id, loaded.path));
-          const persistedBackgroundColor = persistedPage?.page.background?.type === "solid"
-            ? persistedPage.page.background.color
-            : undefined;
+          const persistedPage = composeProject?.pages.find((loaded) =>
+            pageIdMatchesFile(page.id, loaded.path),
+          );
+          const persistedBackgroundColor =
+            persistedPage?.page.background?.type === "solid"
+              ? persistedPage.page.background.color
+              : undefined;
           const pagePackCtx = {
             ...packCtx,
             ...backgroundColorWriteAuthority({
@@ -1696,18 +1254,17 @@ export function executeGenerateTool(
             },
           };
         }
+        // The closer is the last page in reading order. A middle page merely
+        // typed or named "closing" is not the deck's closer — thin closers are
+        // already rejected at write_page time, so compose checks position only.
         const last = skill.pages[skill.pages.length - 1];
-        const closer =
-          skill.pages.find((page, index) =>
-            isCloserPage(page, index, skill.pages.length - 1),
-          ) ?? last;
-        if (closer && skill.pages.length > 1 && !pageHasReadableCopy(closer)) {
+        if (last && skill.pages.length > 1 && !pageHasReadableCopy(last)) {
           return {
             name,
             ok: false,
             summary: "empty closer",
-            detail: EMPTY_CLOSER_PRODUCE_NEXT,
-            payload: { error: "empty_closer", pageId: closer.id, next: "write_page" },
+            detail: `page "${last.id}" is the last page: ${EMPTY_CLOSER_PRODUCE_NEXT}`,
+            payload: { error: "empty_closer", pageId: last.id, next: "write_page" },
           };
         }
         const review = reviewCurrent(state, skill.pages, "compose");
@@ -1720,6 +1277,7 @@ export function executeGenerateTool(
             i.code === "empty_cell" ||
             i.code === "overflow" ||
             i.code === "overlap" ||
+            i.code === "overlap_layout" ||
             i.code === "zero_area" ||
             i.code === "bounds_omitted",
         );
@@ -1734,9 +1292,7 @@ export function executeGenerateTool(
         }
         if (!review.ok) {
           const closerEmpty = review.issues.find(
-            (issue) =>
-              issue.code === "empty" &&
-              /closer|readable copy|结束页/.test(issue.message),
+            (issue) => issue.code === "empty" && /closer|readable copy|结束页/.test(issue.message),
           );
           if (closerEmpty) {
             return {
@@ -1759,9 +1315,27 @@ export function executeGenerateTool(
             payload: { error: "layout QA failed", review },
           };
         }
-        assertSkillDeck(skill, { minPages: rules.minPages });
+        assertSkillDeck(skill, {
+          minPages: rules.minPages,
+          pageCount: rules.pageCount,
+        });
         state.skillDeck = skill;
         state.deck = skillToCompose(skill);
+        // The strict path grades disk pages but never runs applySkillDeck, so
+        // the manifest keeps its brief-derived title forever — stamp the
+        // finalized compose title so chrome/export name the deck properly.
+        const composedTitle = skill.title?.trim();
+        if (composedTitle && state.projectRoot) {
+          withProjectWriteLock(state.projectRoot, () => {
+            // An editor turn whose lease lapsed keeps its deck title.
+            if (editorTurnAuthorityLost(state.projectRoot!)) return;
+            const project = loadProject(state.projectRoot!);
+            if ((project.presentation.title ?? "") !== composedTitle) {
+              project.presentation.title = composedTitle;
+              saveProject(project);
+            }
+          });
+        }
         const detail = skill.pages
           .map((p, i) => {
             const kinds = [...new Set(p.elements.map((el) => el.elementType))].join("+");
@@ -1845,6 +1419,8 @@ export function toolStepMeta(name: string): { tool: string; label: string } {
       return { tool: "search_image", label: "Search Image" };
     case "write_page":
       return { tool: "write_page", label: "Write Page" };
+    case "write_layout":
+      return { tool: "write_layout", label: "Write Layout" };
     case "render_page":
       return { tool: "render_page", label: "Render" };
     case "review_pages":
@@ -1909,7 +1485,9 @@ export async function executeGenerateToolAsync(
       name,
       ok: true,
       summary: uniqueFacts.length ? `${uniqueFacts.length} facts` : "searched",
-      detail: [...texts, ...uniqueCitations.map((url) => `source: ${url}`)].filter(Boolean).join("\n"),
+      detail: [...texts, ...uniqueCitations.map((url) => `source: ${url}`)]
+        .filter(Boolean)
+        .join("\n"),
       payload: {
         queries,
         query: queries[0],
@@ -2055,7 +1633,14 @@ export async function executeGenerateToolAsync(
         payload: { error: "no projectRoot" },
       };
     }
-    const found = hit as { bytes: Buffer; mime: string; width?: number; height?: number; attribution?: string; note: string };
+    const found = hit as {
+      bytes: Buffer;
+      mime: string;
+      width?: number;
+      height?: number;
+      attribution?: string;
+      note: string;
+    };
     const ext = found.mime === "image/jpeg" ? "jpg" : found.mime === "image/webp" ? "webp" : "png";
     const saved = saveMediaFile(state.projectRoot, id, found.bytes, ext);
     return {

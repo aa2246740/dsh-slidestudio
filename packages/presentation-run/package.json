@@ -8,6 +8,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./material-limits": {
+      "types": "./dist/domain/material-limits.d.ts",
+      "import": "./dist/domain/material-limits.js"
+    },
+    "./testkit": {
+      "types": "./dist/testkit.d.ts",
+      "import": "./dist/testkit.js"
     }
   },
   "files": [
@@ -26,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "jszip": "^3.10.1",
     "typescript": "^5.7.0"
   }
 }

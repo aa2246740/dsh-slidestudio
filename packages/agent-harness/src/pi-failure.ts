@@ -38,10 +38,7 @@ export const GOOGLE_PRODUCE_MODELS = [
 export function piErrorTextsFromEvents(events: PiRpcLine[]): string[] {
   const out: string[] = [];
   for (const ev of events) {
-    const msg =
-      ev.message && typeof ev.message === "object"
-        ? (ev.message as Record<string, unknown>)
-        : undefined;
+    const msg = ev.message && typeof ev.message === "object" ? (ev.message as Record<string, unknown>) : undefined;
     const stop = (msg?.stopReason ?? ev.stopReason) as unknown;
     const err = (msg?.errorMessage ?? ev.errorMessage ?? ev.error) as unknown;
     if (typeof err === "string" && err.trim()) {
@@ -54,9 +51,7 @@ export function piErrorTextsFromEvents(events: PiRpcLine[]): string[] {
 }
 
 export function isGoogleDailyQuota(raw: string): boolean {
-  return /GenerateRequestsPerDay|PerDayPerProjectPerModel|requests per day|per day/i.test(
-    raw,
-  );
+  return /GenerateRequestsPerDay|PerDayPerProjectPerModel|requests per day|per day/i.test(raw);
 }
 
 export function isRetiredGoogleModel(raw: string): boolean {
@@ -183,15 +178,11 @@ export function summarizePiError(raw: string): string {
         ? `Pi 模型 ${model} 今天的免费次数用完了。会改试同供应商的其他模型。`
         : "Pi 模型今天的免费次数用完了。会改试同供应商的其他模型。";
     }
-    return delay
-      ? `Pi 模型限流（429），约 ${delay} 后再试。`
-      : "Pi 模型限流（429）。稍后重试。";
+    return delay ? `Pi 模型限流（429），约 ${delay} 后再试。` : "Pi 模型限流（429）。稍后重试。";
   }
-  if (isRetiredGoogleModel(raw) || /404/.test(raw) && /gemini/i.test(raw)) {
+  if (isRetiredGoogleModel(raw) || (/404/.test(raw) && /gemini/i.test(raw))) {
     const next = raw.match(/use models\/([a-z0-9._-]+)/i)?.[1];
-    return next
-      ? `Pi 模型已下线。Google 建议改用 ${next}。`
-      : "Pi 模型已下线或不可用。会改试同供应商的其他模型。";
+    return next ? `Pi 模型已下线。Google 建议改用 ${next}。` : "Pi 模型已下线或不可用。会改试同供应商的其他模型。";
   }
   if (/401|API key|no api key|unauthoriz|unauthenticated|auth failed/i.test(raw)) {
     return "Pi 鉴权失败。请回到创建页重新登录。";
@@ -200,10 +191,7 @@ export function summarizePiError(raw: string): string {
   return flat.slice(0, 240);
 }
 
-export function piModelCandidates(
-  preferred: string | undefined,
-  provider: string | undefined,
-): string[] {
+export function piModelCandidates(preferred: string | undefined, provider: string | undefined): string[] {
   const first = preferred?.trim();
   if (provider === "xai-auth" || provider === "xai") {
     const rest = XAI_PRODUCE_MODELS.filter((id) => id !== first);

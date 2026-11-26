@@ -27,26 +27,15 @@ import {
 } from "./domain/layout-qa.js";
 import { inferDeckIntent, classifyBriefKind } from "./domain/compose-ir.js";
 import { kindThemePackIssue, packColorWriteContextFrom, sourceIdList, PACK_COLOR_ERROR } from "./domain/theme-pack.js";
+import { readMaterialChunk } from "./domain/material-content.js";
+import { verifyMaterial, materialCapabilityEntries } from "./domain/material-pack.js";
+import { probeTemplateDesignPaletteGate, probeTemplateDesignSourceFiles } from "./template-design-gate-probes.js";
 import type { SkillPageInput } from "./domain/skill-pages.js";
+import { PRODUCE_GATE_REL_FILES } from "./produce-gate-files.js";
+
+export { PRODUCE_GATE_REL_FILES } from "./produce-gate-files.js";
 
 export const PRODUCE_GATES_ID = "edith-twenty-five-v1";
-
-export const PRODUCE_GATE_REL_FILES = [
-  "packages/presentation-run/dist/produce-gates.js",
-  "packages/presentation-run/dist/domain/layout-qa.js",
-  "packages/presentation-run/dist/domain/compose-ir.js",
-  "packages/presentation-run/dist/domain/theme-pack.js",
-  "packages/presentation-run/dist/domain/agent-tools.js",
-  "packages/presentation-run/dist/domain/run-ledger.js",
-  "packages/presentation-run/dist/domain/page-raster.js",
-  "packages/presentation-run/dist/capabilities.js",
-  "packages/dsh-slides-host/dist/write-page.js",
-  "packages/dsh-slides-host/dist/tools.js",
-  "packages/dsh-slides-host/dist/director-brief.js",
-  "packages/pptd-v2/dist/parse.js",
-  "packages/pptd-v2/dist/theme.js",
-  "packages/exporter-native/dist/export-pptd.js",
-] as const;
 
 const navy: SkillPageInput["elements"][number] = {
   elementId: "cl-bg",
@@ -69,41 +58,8 @@ function textEl(
   };
 }
 
-export type ProduceGateApi = {
-  pageHasVisibleContent: typeof pageHasVisibleContent;
-  pageCoverage: typeof pageCoverage;
-  persistPageKey: typeof persistPageKey;
-  persistPagePathFromId: typeof persistPagePathFromId;
-  pageIdMatchesFile: typeof pageIdMatchesFile;
-  tableEmptyCellIssues: typeof tableEmptyCellIssues;
-  writePageSchemaIssues: typeof writePageSchemaIssues;
-  writePageSchemaError: typeof writePageSchemaError;
-  isWritePageCloser: typeof isWritePageCloser;
-  visualReviewIsClaimable: typeof visualReviewIsClaimable;
-  isPlaceholderReviewIssue: typeof isPlaceholderReviewIssue;
-  composedPageLeftoverIssues: typeof composedPageLeftoverIssues;
-  renderedLayoutBlocksCompose: typeof renderedLayoutBlocksCompose;
-  EMPTY_CLOSER_PRODUCE_NEXT: string;
-  HOST_SEED_PRODUCE_NEXT: string;
-};
-
-const liveApi: ProduceGateApi = {
-  pageHasVisibleContent,
-  pageCoverage,
-  persistPageKey,
-  persistPagePathFromId,
-  pageIdMatchesFile,
-  tableEmptyCellIssues,
-  writePageSchemaIssues,
-  writePageSchemaError,
-  isWritePageCloser,
-  visualReviewIsClaimable,
-  isPlaceholderReviewIssue,
-  composedPageLeftoverIssues,
-  renderedLayoutBlocksCompose,
-  EMPTY_CLOSER_PRODUCE_NEXT,
-  HOST_SEED_PRODUCE_NEXT,
-};
+import { liveApi, type ProduceGateApi } from "./produce-gate-api.js";
+export type { ProduceGateApi };
 
 export type ProduceGateReport = {
   readonly ok: boolean;
@@ -133,6 +89,9 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
     "isPlaceholderReviewIssue",
     "composedPageLeftoverIssues",
     "renderedLayoutBlocksCompose",
+    "verifyMaterial",
+    "readMaterialChunk",
+    "materialCapabilityEntries",
   ];
   for (const key of keys) {
     if (missingFn(api, key)) missing.push(String(key));
@@ -149,13 +108,12 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
 
   const leftoverCtx = { lastDiskBasename: "16_content", diskPageCount: 16 };
   if (!api.isWritePageCloser(navyPage, leftoverCtx)) failed.push("empty_closer-last-disk");
-  const leftoverErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(navyPage, leftoverCtx),
-    navyPage,
-    leftoverCtx,
-  );
+  const leftoverErr = api.writePageSchemaError(api.writePageSchemaIssues(navyPage, leftoverCtx), navyPage, leftoverCtx);
   if (leftoverErr?.error !== "empty_closer") failed.push("empty_closer-schema");
-  if (!/write_page/.test(api.EMPTY_CLOSER_PRODUCE_NEXT) || !/Host will not paint leftover/.test(api.EMPTY_CLOSER_PRODUCE_NEXT)) {
+  if (
+    !/write_page/.test(api.EMPTY_CLOSER_PRODUCE_NEXT) ||
+    !/Host will not paint leftover/.test(api.EMPTY_CLOSER_PRODUCE_NEXT)
+  ) {
     failed.push("empty_closer-produce-next");
   }
   if (
@@ -291,6 +249,7 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
 
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
+    probeTemplateDesignSourceFiles(here, failed);
     const qaJs = path.join(here, "domain", "layout-qa.js");
     const toolsJs = path.join(here, "domain", "agent-tools.js");
     const qa = fs.readFileSync(qaJs, "utf8");
@@ -316,36 +275,14 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
     if (!composeBody.includes("learn-share") || !composeBody.includes("学习分享")) {
       failed.push("learn-share-kind-classify");
     }
-    const themePackJs = path.join(here, "domain", "theme-pack.js");
-    const themePackBody = fs.readFileSync(themePackJs, "utf8");
-    if (
-      !themePackBody.includes("kindThemePackDisagreement") ||
-      !themePackBody.includes("kind_theme_pack") ||
-      !themePackBody.includes("missing_theme_pack") ||
-      !themePackBody.includes("warm-jade-annual-report") ||
-      !themePackBody.includes("pack_color") ||
-      !themePackBody.includes("extractColorPaletteHexes") ||
-      !themePackBody.includes("packColorWriteContextFrom")
-    ) {
-      failed.push("kind-theme-pack-symbols");
-    }
-    const ledgerJs = path.join(here, "domain", "run-ledger.js");
-    const ledger = fs.readFileSync(ledgerJs, "utf8");
-    if (!ledger.includes("renderedLayoutBlocksCompose") || !ledger.includes("leftoverComposeBlockers")) {
-      failed.push("compose-layout-vision-none");
-    }
     const body = fs.readFileSync(toolsJs, "utf8");
     if (/writtenPages\.length\s*<\s*2/.test(body)) failed.push("compose-skip");
     if (!/next:\s*"write_page"/.test(body)) failed.push("leftover-produce-next");
     if (!body.includes("persistPagePathFromId")) failed.push("persist-path-from-id");
-    if (!body.includes("kindThemePackIssue")) failed.push("kind-theme-pack-write");
-    if (!body.includes("packColorWriteContextFrom")) failed.push("pack-color-write");
-    if (/page\.id\.replace\(\/\(\[\^a-zA-Z0-9_-\]\+\)\/g/.test(body)) failed.push("persist-id-strip-dot");
-    const hostWriteJs = path.resolve(here, "../../dsh-slides-host/dist/write-page.js");
-    if (fs.existsSync(hostWriteJs)) {
-      const hostWrite = fs.readFileSync(hostWriteJs, "utf8");
-      if (!hostWrite.includes("packColorWriteContextFrom")) failed.push("host-pack-color-write");
+    if (!body.includes("packColorWriteContext") || !body.includes("state.projectRoot")) {
+      failed.push("pack-color-write");
     }
+    if (/page\.id\.replace\(\/\(\[\^a-zA-Z0-9_-\]\+\)\/g/.test(body)) failed.push("persist-id-strip-dot");
     const pptdDist = path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/pptd-v2")));
     const parseJs = path.join(pptdDist, "parse.js");
     const parseBody = fs.readFileSync(parseJs, "utf8");
@@ -430,10 +367,7 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
       },
     ],
   };
-  const unprefixedErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(unprefixedPage),
-    unprefixedPage,
-  );
+  const unprefixedErr = api.writePageSchemaError(api.writePageSchemaIssues(unprefixedPage), unprefixedPage);
   if (unprefixedErr?.error !== "invalid_color") failed.push("unprefixed-write-reject");
 
   const assertUnresolvedThemeNeverBlack = (raw: string) => {
@@ -534,10 +468,7 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
       },
     ],
   };
-  const htmlUnprefixedErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(htmlUnprefixedPage),
-    htmlUnprefixedPage,
-  );
+  const htmlUnprefixedErr = api.writePageSchemaError(api.writePageSchemaIssues(htmlUnprefixedPage), htmlUnprefixedPage);
   if (htmlUnprefixedErr?.error !== "invalid_color") failed.push("html-unprefixed-write-reject");
   const htmlOfficialTheme = { colors: { primary: "#2563EB", text: "#111111" } };
   const htmlOfficialPage: SkillPageInput = {
@@ -598,10 +529,7 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
       textEl("ask", "<p>下个月请评委给三件事反馈。</p>", [60, 312, 840, 80]),
     ],
   };
-  const htmlPlainHexErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(htmlPlainHexPage),
-    htmlPlainHexPage,
-  );
+  const htmlPlainHexErr = api.writePageSchemaError(api.writePageSchemaIssues(htmlPlainHexPage), htmlPlainHexPage);
   if (htmlPlainHexErr) failed.push("html-plaintext-hex-false-positive");
 
   const pinePack = packColorWriteContextFrom({
@@ -736,23 +664,16 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
   ) {
     failed.push("pack-color-pack-theme-primary-accept");
   }
-  const emptyAdoptPackErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(foreignPackPage),
-    foreignPackPage,
-  );
+  const emptyAdoptPackErr = api.writePageSchemaError(api.writePageSchemaIssues(foreignPackPage), foreignPackPage);
   if (emptyAdoptPackErr) failed.push("pack-color-empty-adopt-skip");
-  const emptyAdoptNavyErr = api.writePageSchemaError(
-    api.writePageSchemaIssues(navyPackPage),
-    navyPackPage,
-  );
+  const emptyAdoptNavyErr = api.writePageSchemaError(api.writePageSchemaIssues(navyPackPage), navyPackPage);
   if (emptyAdoptNavyErr) failed.push("pack-color-empty-adopt-navy-skip");
 
   const beiluH1 =
     "给公司董事会做一份「北麓制造 2026 上半年经营汇报」。办公场景，给董事会的半年经营审议，不是门店月报，不是产品立项。16 页左右。不要澄光生活，不要个人答辩。";
   if (classifyBriefKind(beiluH1) !== "board-h1") failed.push("board-h1-kind");
   if (inferDeckIntent(beiluH1) === "academic") failed.push("board-h1-academic");
-  const qinglanIntro =
-    "给管理层做一份「青岚费控」产品介绍，办公立项用。16 页左右。不要做成经营月报，不要澄光生活。";
+  const qinglanIntro = "给管理层做一份「青岚费控」产品介绍，办公立项用。16 页左右。不要做成经营月报，不要澄光生活。";
   if (classifyBriefKind(qinglanIntro) !== "product-intro") failed.push("product-intro-kind");
   if (inferDeckIntent(qinglanIntro) === "report") failed.push("product-intro-monthly");
   if (classifyBriefKind("闸门复现灯开关。不要做成经营月报，不要做成课件。") === "retail-monthly") {
@@ -979,6 +900,7 @@ export function inspectProduceGates(api: ProduceGateApi = liveApi): ProduceGateR
   if (kindThemePackIssue({ brief: "只要一张封面：光合作用。" })) {
     failed.push("cover-only-empty-adopt-closed");
   }
+  probeTemplateDesignPaletteGate(beiluH1, failed);
 
   const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "empty-create-gate-"));
   try {

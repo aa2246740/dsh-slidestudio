@@ -3,7 +3,12 @@ import { loadProject, type PptdProject } from "@open-slidestudio/pptd-v2";
 
 /** One identity normalization owner. Filenames and historical hashes are not rewritten. */
 export function persistPageKey(name: string): string {
-  const base = name.replace(/\\/g, "/").split("/").pop()!.replace(/\.page$/i, "").toLowerCase();
+  const base = name
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop()!
+    .replace(/\.page$/i, "")
+    .toLowerCase();
   return base.replace(/^0+(\d)/, "$1");
 }
 
@@ -86,9 +91,7 @@ export type ProjectIdentityResolution =
       readonly conflicts: readonly Readonly<{ key: string; paths: readonly string[] }>[];
     };
 
-export function resolveProjectPageIdentities(
-  projectOrRoot: PptdProject | string,
-): ProjectIdentityResolution {
+export function resolveProjectPageIdentities(projectOrRoot: PptdProject | string): ProjectIdentityResolution {
   let project: PptdProject;
   try {
     project = typeof projectOrRoot === "string" ? loadProject(projectOrRoot) : projectOrRoot;

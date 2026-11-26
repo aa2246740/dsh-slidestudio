@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { loadProject } from "@open-slidestudio/pptd-v2";
-import { filterCatalog, loadReferenceCatalog, resolveRepoRoot } from "./catalog.js";
+import { loadReferenceCatalog, resolveRepoRoot } from "./catalog.js";
+import { listReferences } from "./list-references.js";
 import { inspectProjectCapabilities } from "./capabilities.js";
 import { assertChartEvidence } from "./chart-gate.js";
 import { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";
@@ -18,8 +19,31 @@ import type {
   RunInspection,
 } from "./types.js";
 import { runDomainHand } from "./domain/domain-hands.js";
-import { writeFileAtomic } from "./domain/atomic-file.js";
+import {
+  carriedAdoptedSourceIds,
+  commitAdoptedDesignSources,
+  currentAdoptedSourceSelection,
+} from "./domain/design-adoption.js";
+import { planningReferencePreflight } from "./domain/design-source-preflight.js";
+import {
+  designAuthorityDecision,
+  designAuthoritySourceIssue,
+  effectiveCatalogPackId,
+  readDesignAuthority,
+  readHubDesignSystemId,
+  resolvePlanningStyleAuthority,
+} from "./domain/design-authority.js";
+import {
+  persistPlanningAuthority,
+  readClarificationRecords,
+  requirementAuthorityIssue,
+} from "./domain/report-authority.js";
+import { designAuthorityRefusal, resolvePlanDeclarations } from "./domain/plan-declarations.js";
+import { restrictedDesignAdoptionRefusal } from "./domain/restricted-design-adoption.js";
+import { paletteSourceIds } from "./domain/design-aspects.js";
+import { writeJsonAtomic } from "./domain/atomic-file.js";
 import { parseCanonicalPagePlan, type CanonicalPlanPage } from "./domain/page-plan.js";
+import { forwardPlanFeedback } from "./domain/material-use.js";
 import {
   currentVisualReviewsMissing,
   ensureRunLedgerExecutionPolicy,
@@ -28,8 +52,16 @@ import {
 } from "./domain/run-ledger.js";
 import { inspectGenerationActivity } from "./generation-activity.js";
 import { inspectProjectExecution } from "./execution-observation.js";
-import { kindThemePackIssue, sourceIdList } from "./domain/theme-pack.js";
-import { resolveOpenKimiPresetDesignSourceId, verifyOpenKimiPack } from "./domain/openkimi-source-pack.js";
+import { composeGateFailure } from "./domain/compose-gate-failure.js";
+import {
+  canonicalizeAdoptedSourceIds,
+  catalogPackPaletteHexes,
+  detailWithSubmittedAlias,
+  kindThemePackIssue,
+  resolvePlanningAdoption,
+  sourceIdList,
+  type KindThemePackIssue,
+} from "./domain/theme-pack.js";
 
 const BINDING_REL = path.join("_agent", "presentation-run.v1.json");
 
@@ -50,13 +82,24 @@ function writeBinding(input: BindingFile): void {
   } catch {
     // Unreadable binding file — fall through and overwrite it.
   }
-  writeFileAtomic(file, content);
+  writeJsonAtomic(file, input);
 }
 
 function readBinding(projectRoot: string): BindingFile | undefined {
   const file = bindingPath(projectRoot);
   if (!fs.existsSync(file)) return undefined;
-  return JSON.parse(fs.readFileSync(file, "utf8")) as BindingFile;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as BindingFile;
+  } catch {
+    // A crash or power loss can leave the atomic write as a zero-filled stub.
+    // Quarantine it so one damaged deck cannot stop run hydration for all projects.
+    try {
+      fs.renameSync(file, `${file}.corrupt-${Date.now()}`);
+    } catch {
+      // best effort — an unreadable dir still must not throw here
+    }
+    return undefined;
+  }
 }
 
 function fail(name: string, detail: string): CommandReceipt {
@@ -73,158 +116,14 @@ function ok(name: string, summary: string, payload: Record<string, unknown>, det
   return { ok: true, name, summary, detail, payload };
 }
 
-type MissingReferenceChunk = Readonly<{ sourceId: string; chunkIndex: number }>;
-
-function uniqueMissingChunks(chunks: readonly MissingReferenceChunk[]): MissingReferenceChunk[] {
-  const seen = new Set<string>();
-  return chunks.filter((chunk) => {
-    const key = `${chunk.sourceId}#${chunk.chunkIndex}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function candidateAdoptedMissingChunks(
-  repoRoot: string,
-  projectRoot: string,
-  adoptedSourceIds: readonly string[],
-): MissingReferenceChunk[] {
-  if (!adoptedSourceIds.length) return [];
-  const ledger = readRunLedger(projectRoot);
-  if (!ledger) return [];
-  const pack = verifyOpenKimiPack(repoRoot);
-  const resolved = new Set<string>();
-  for (const raw of adoptedSourceIds) {
-    const sourceId = raw.trim();
-    if (!sourceId || sourceId === "agent-self-directed-plan") continue;
-    if (pack.entriesById.has(sourceId)) {
-      resolved.add(sourceId);
-      continue;
-    }
-    try {
-      resolved.add(resolveOpenKimiPresetDesignSourceId(pack, sourceId));
-    } catch {
-      // A non-pack consulted source is not promoted to a new immutable requirement.
-    }
-  }
-  const missing: MissingReferenceChunk[] = [];
-  for (const sourceId of resolved) {
-    const entry = pack.entriesById.get(sourceId);
-    if (!entry) continue;
-    for (const chunk of entry.chunks) {
-      const read = ledger.facts.some(
-        (fact) =>
-          fact.type === "reference.chunk-returned" &&
-          fact.sourceId === sourceId &&
-          fact.fileSha256 === entry.sha256 &&
-          fact.chunkIndex === chunk.index &&
-          fact.chunkSha256 === chunk.sha256,
-      );
-      if (!read) missing.push({ sourceId, chunkIndex: chunk.index });
-    }
-  }
-  return missing;
-}
-
-function planningReferencePreflight(
-  repoRoot: string,
-  projectRoot: string,
-  name: "commit_design" | "write_todo",
-  adoptedSourceIds: readonly string[],
-): CommandReceipt | undefined {
-  const status = inspectRunLedger(projectRoot);
-  if (!status.initialized) return undefined;
-  const missingReferenceChunks = uniqueMissingChunks([
-    ...status.missingReferenceChunks,
-    ...candidateAdoptedMissingChunks(repoRoot, projectRoot, adoptedSourceIds),
-  ]);
-  if (!missingReferenceChunks.length) return undefined;
-  const exact = missingReferenceChunks.map((chunk) => `${chunk.sourceId}#${chunk.chunkIndex}`);
+/** The refusal for a brief whose theme pack the adopted sources do not supply. */
+function kindThemePackReceipt(name: string, issue: KindThemePackIssue): CommandReceipt {
   return {
     ok: false,
     name,
-    summary: "required references unread",
-    detail: `Read every required source chunk before planning. Call read_reference for: ${exact.join(", ")}`,
-    payload: {
-      error: "required_source_chunks_unread",
-      next: "read_reference",
-      referencesComplete: false,
-      missingReferenceChunks,
-    },
-  };
-}
-
-function composeGateFailure(name: string, projectRoot: string): CommandReceipt | undefined {
-  const status = inspectRunLedger(projectRoot);
-  if (!status.initialized || status.composeReady) return undefined;
-  const blockers = [...status.composeBlockers];
-  const hasBlocker = (needle: string) => blockers.some((blocker) => blocker.includes(needle));
-  const failedLayoutPageIds = status.pages
-    .filter((page) => page.layout === "fail" && hasBlocker(`${page.pageId}: rendered layout`))
-    .map((page) => page.pageId);
-  const missingRasterPageIds = status.pages
-    .filter((page) => page.layout !== "fail" && hasBlocker(`${page.pageId}: rendered layout`))
-    .map((page) => page.pageId);
-  const missingImagePageIds = status.pages
-    .filter((page) => hasBlocker(`${page.pageId}: image content not emitted`))
-    .map((page) => page.pageId);
-  const missingVisualReviewPageIds = status.pages
-    .filter((page) => page.visualReview === "missing" && hasBlocker(`${page.pageId}: visual review`))
-    .map((page) => page.pageId);
-  const failedVisualReviewPageIds = status.pages
-    .filter((page) => page.visualReview === "revise" && hasBlocker(`${page.pageId}: visual review`))
-    .map((page) => page.pageId);
-  const ledger = readRunLedger(projectRoot);
-  const currentPageHashes = Object.fromEntries(status.pages.map((page) => [page.pageId, page.pageSha256]));
-  const structuralFailure = ledger
-    ? [...ledger.facts]
-        .reverse()
-        .find(
-          (fact) =>
-            fact.type === "deck.structural-review-recorded" &&
-            fact.ok === false &&
-            Object.keys(currentPageHashes).length === Object.keys(fact.pageRevisions).length &&
-            Object.entries(currentPageHashes).every(([pageId, sha]) => fact.pageRevisions[pageId] === sha),
-        )
-    : undefined;
-  const structuralIssues =
-    structuralFailure?.type === "deck.structural-review-recorded" ? [...structuralFailure.issues] : [];
-  const structuralFailedPageIds = status.pages
-    .filter((page) => structuralIssues.some((issue) => issue.includes(page.pageId)))
-    .map((page) => page.pageId);
-  const next = status.missingReferenceChunks.length
-    ? "read_reference"
-    : status.todoCount === 0
-      ? "write_todo"
-      : failedLayoutPageIds.length || failedVisualReviewPageIds.length || status.structuralReview === "fail"
-        ? "write_page"
-        : missingRasterPageIds.length || missingImagePageIds.length
-          ? "render_page"
-          : missingVisualReviewPageIds.length
-            ? "review_page"
-            : status.structuralReview !== "pass"
-              ? "review_pages"
-              : "resolve_reported_blockers";
-  return {
-    ok: false,
-    name,
-    summary: "compose gate rejected",
-    detail: `compose_deck is not ready. Next: ${next}. Blockers: ${blockers.join("; ")}`,
-    payload: {
-      error: "compose_not_ready",
-      next,
-      missingReferenceChunks: status.missingReferenceChunks,
-      failedLayoutPageIds,
-      missingRasterPageIds,
-      missingImagePageIds,
-      missingVisualReviewPageIds,
-      failedVisualReviewPageIds,
-      structuralReview: status.structuralReview,
-      structuralFailedPageIds,
-      structuralIssues,
-      blockers,
-    },
+    summary: "kind/theme pack",
+    detail: issue.detail,
+    payload: { error: issue.code, packId: issue.packId, kind: issue.kind, painted: false },
   };
 }
 
@@ -342,45 +241,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         return ok(name, capabilities.note, { ...capabilities });
       }
       if (name === "list_references") {
-        const catalog = loadReferenceCatalog(repoRoot);
-        const filtered = filterCatalog(catalog, {
-          family: typeof args.family === "string" ? args.family : undefined,
-          kind: args.kind === "visual" || args.kind === "source" ? args.kind : undefined,
-          tag: typeof args.tag === "string" ? args.tag : undefined,
-        });
-        const ledger = inspectRunLedger(context.projectRoot, epochFor(context.sessionId));
-        const requiredReferenceChunks =
-          readRunLedger(context.projectRoot)?.sourcePack.requirements.flatMap((requirement) =>
-            requirement.chunkIndexes.map((chunkIndex) => ({
-              sourceId: requirement.sourceId,
-              chunkIndex,
-              reason: requirement.reason,
-            })),
-          ) ?? [];
-        const prefix = ledger.initialized
-          ? ledger.referencesComplete
-            ? "All required source chunks are read."
-            : `Read these required chunks before commit_design or write_todo: ${ledger.missingReferenceChunks
-                .map((chunk) => `${chunk.sourceId}#${chunk.chunkIndex}`)
-                .join(", ")}.`
-          : "No strict source ledger is initialized.";
-        return ok(
-          name,
-          `${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`,
-          {
-            referencesComplete: ledger.initialized && ledger.referencesComplete,
-            requiredReferenceChunks,
-            missingReferenceChunks: ledger.missingReferenceChunks,
-            next: ledger.initialized && !ledger.referencesComplete ? "read_reference" : undefined,
-            sourceFiles: catalog.sourceFiles,
-            visualFiles: catalog.visualFiles,
-            listedSourceFiles: filtered.sourceFiles,
-            listedVisualFiles: filtered.visualFiles,
-            sources: [...filtered.sources, ...filtered.visuals],
-            uncropped: true,
-          },
-          `${prefix}\n${filtered.sourceFiles} sources · ${filtered.visualFiles} visuals`,
-        );
+        return listReferences(repoRoot, context.projectRoot, epochFor(context.sessionId), args);
       }
       if (name === "read_reference") {
         const receipt = await invokeDomain(name, args, context);
@@ -396,16 +257,88 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
       }
       if (name === "commit_design" || name === "write_todo") {
         const binding = readBinding(context.projectRoot);
-        const requestedSources = sourceIdList(args.adoptedSourceIds, args.adopt);
-        const adopted = requestedSources.length
-          ? requestedSources
-          : sourceIdList(
-              listSourceReceipts(context.projectRoot)
-                .filter((row) => row.state === "adopted" || row.state === "executed")
-                .map((row) => row.sourceId),
-            );
-        const preflight = planningReferencePreflight(repoRoot, context.projectRoot, name, adopted);
-        if (preflight) return preflight;
+        const rawRequested = sourceIdList(args.adoptedSourceIds, args.adopt);
+        const carried = carriedAdoptedSourceIds(args);
+        // Omitting the field reuses the persisted selection. An explicit array, including [], replaces it.
+        const planning = resolvePlanningAdoption({
+          requested: carried ? rawRequested : [],
+          persisted: carried ? [] : currentAdoptedSourceSelection(context.projectRoot),
+        });
+        if (planning.refusal) return fail(name, planning.refusal);
+        const adopted = planning.ids;
+        const bindingPackId = binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined;
+        // The Hub pack can live only in runtime.json when the binding omits the directive.
+        const hubPackId = bindingPackId ?? readHubDesignSystemId(context.projectRoot);
+        const epoch = epochFor(context.sessionId);
+        const clarificationRecords = readClarificationRecords(context.projectRoot);
+        const plannedAuthority = resolvePlanningStyleAuthority({
+          projectRoot: context.projectRoot,
+          args,
+          hubPackId,
+          records: clarificationRecords,
+          contextEpochId: epoch,
+        });
+        if (plannedAuthority.issue) return designAuthorityRefusal(name, plannedAuthority.issue);
+        // "" is explicit: the current authority replaced the catalog pack.
+        const stylePackId = plannedAuthority.stylePackId ?? "";
+        const declarations = resolvePlanDeclarations({
+          projectRoot: context.projectRoot,
+          args,
+          adoptedSourceIds: adopted,
+          stylePackId,
+        });
+        if (!declarations.ok) return fail(name, declarations.detail);
+        const { designAspects, userColors, reportRequirements } = declarations;
+        const outOfScope = restrictedDesignAdoptionRefusal(name, context.projectRoot, {
+          adopted,
+          designAspects,
+          planned: plannedAuthority,
+        });
+        if (outOfScope) return outOfScope;
+        if (plannedAuthority.authority) {
+          const sourceIssue = designAuthoritySourceIssue({
+            projectRoot: context.projectRoot,
+            authority: plannedAuthority.authority,
+            hubPackId,
+            adoptedSourceIds: adopted,
+            designAspects,
+            knownCatalogPack: (id) => catalogPackPaletteHexes().has(id),
+          });
+          if (sourceIssue) return designAuthorityRefusal(name, sourceIssue);
+        }
+        const authorityIssue = requirementAuthorityIssue(reportRequirements, clarificationRecords, epoch);
+        if (authorityIssue) {
+          return {
+            ok: false,
+            name,
+            summary: "requirement authority rejected",
+            detail: authorityIssue.detail,
+            payload: {
+              error: authorityIssue.code,
+              questionId: authorityIssue.questionId,
+              next: "ask_user_question",
+              painted: false,
+            },
+          };
+        }
+        const preflight = planningReferencePreflight(
+          repoRoot,
+          context.projectRoot,
+          name,
+          adopted,
+          epochFor(context.sessionId),
+          designAspects,
+          {
+            modelAcceptsImages: inspectProjectCapabilities(context.projectRoot).vision.modelAcceptsImages === true,
+          },
+          reportRequirements,
+        );
+        if (preflight) {
+          return {
+            ...preflight,
+            detail: detailWithSubmittedAlias(preflight.detail, rawRequested, String(preflight.payload.sourceId ?? "")),
+          };
+        }
         let items: readonly CanonicalPlanPage[];
         try {
           items = parseCanonicalPagePlan(args.items ?? args.slidePlan);
@@ -414,51 +347,57 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         }
         const packIssue = kindThemePackIssue({
           brief: binding?.brief ?? "",
-          adoptedSourceIds: adopted,
-          designSystemId: binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
-          userExplicitPack: binding?.design.kind === "explicit-style",
+          adoptedSourceIds: paletteSourceIds(adopted, designAspects),
+          designAspects,
+          designSystemId: stylePackId || undefined,
+          userExplicitPack: Boolean(stylePackId),
         });
-        if (packIssue) {
-          return {
-            ok: false,
-            name,
-            summary: "kind/theme pack",
-            detail: packIssue.detail,
-            payload: {
-              error: packIssue.code,
-              packId: packIssue.packId,
-              kind: packIssue.kind,
-              painted: false,
-            },
-          };
-        }
+        if (packIssue) return kindThemePackReceipt(name, packIssue);
+        let planFeedback: Record<string, unknown> = {};
         if (readRunLedger(context.projectRoot)) {
-          // Validate the same chosen sources at both layers. Persist their
-          // adoption only after the domain plan commit succeeds.
-          const committed = await invokeDomain("write_todo", { items, adoptedSourceIds: adopted }, context);
+          // Declarations the plan call may carry; the domain validates each before it records any.
+          const declarations = Object.fromEntries(
+            (["materialUse", "periodMap", "missingItems"] as const).flatMap((key) =>
+              args[key] === undefined ? [] : [[key, args[key]]],
+            ),
+          );
+          const committed = await invokeDomain("write_todo", { items, ...declarations }, context);
           if (!committed.ok) return { ...committed, name };
+          planFeedback = forwardPlanFeedback(committed.payload);
         }
-        if (adopted.length === 0) {
-          recordSourceReceipt(context.projectRoot, {
-            sourceId: "agent-self-directed-plan",
-            state: "adopted",
-            toolCallId: context.toolCallId,
-          });
-        } else {
-          for (const sourceId of adopted) {
-            recordSourceReceipt(context.projectRoot, {
-              sourceId,
-              state: "adopted",
-              toolCallId: context.toolCallId,
-            });
-          }
-        }
-        return ok(name, "design plan adopted", {
-          outcome: "committed",
-          items,
-          plannedPageIds: items.map((page) => page.pageId),
-          adoptedSourceIds: adopted.length ? adopted : ["agent-self-directed-plan"],
+        const saved = commitAdoptedDesignSources(
+          context.projectRoot,
+          adopted,
+          context.toolCallId,
+          designAspects,
+          userColors,
+        );
+        if (saved.error) return fail(name, saved.error);
+        // One atomic write: requirements and the effective style authority change together.
+        const decided = plannedAuthority.authority
+          ? designAuthorityDecision(plannedAuthority.authority, plannedAuthority.existing)
+          : undefined;
+        persistPlanningAuthority(context.projectRoot, reportRequirements, {
+          mode: plannedAuthority.declared ? "set" : "keep",
+          ...(decided ? { decision: decided } : {}),
         });
+        return ok(
+          name,
+          "design plan adopted",
+          {
+            outcome: "committed",
+            items,
+            plannedPageIds: items.map((page) => page.pageId),
+            adoptedSourceIds: saved.adoptedSourceIds,
+            designAspects,
+            reportRequirements,
+            ...(decided ? { designAuthority: decided } : {}),
+            ...(userColors.length ? { userColors } : {}),
+            ...planFeedback,
+            ...(saved.hint ? { hint: saved.hint } : {}),
+          },
+          saved.hint ?? "design plan adopted",
+        );
       }
       if (name === "web_search" || name === "search_image" || name === "generate_image") {
         const caps = inspectProjectCapabilities(context.projectRoot);
@@ -471,52 +410,72 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         if (!on) return fail(name, `${name} is not configured; do not invent media`);
       }
       if (name === "write_page") {
-        const chart = assertChartEvidence(args);
-        if (!chart.ok) return fail(name, chart.detail);
-        const binding = readBinding(context.projectRoot);
-        const adopted = listSourceReceipts(context.projectRoot)
-          .filter((row) => row.state === "adopted" || row.state === "executed")
-          .map((row) => row.sourceId);
-        const packIssue = kindThemePackIssue({
-          brief: binding?.brief ?? "",
-          adoptedSourceIds: sourceIdList(args.adoptedSourceIds, args.adopt, adopted),
-          designSystemId: binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
-          userExplicitPack: binding?.design.kind === "explicit-style",
-        });
-        if (packIssue) {
-          return {
-            ok: false,
-            name,
-            summary: "kind/theme pack",
-            detail: packIssue.detail,
-            payload: {
-              error: packIssue.code,
-              packId: packIssue.packId,
-              kind: packIssue.kind,
-              painted: false,
-            },
-          };
-        }
-        const blocked = requireConsultAdoptBeforeWrite(context.projectRoot);
-        if (blocked) return fail(name, blocked);
-        const receipt = await invokeDomain(name, args, context);
-        if (receipt.ok) {
-          const pageId = String(receipt.payload.pageId ?? args.id ?? "");
-          // "executed" must name a source this page actually used — a blanket
-          // mark of every adopted row would credit sources the page never drew.
-          const pageSources = new Set(sourceIdList(args.adoptedSourceIds, args.adopt).map((id) => id.trim()));
-          for (const row of listSourceReceipts(context.projectRoot).filter(
-            (item) => item.state === "adopted" && pageSources.has(item.sourceId),
-          )) {
-            recordSourceReceipt(context.projectRoot, {
-              sourceId: row.sourceId,
-              state: "executed",
-              toolCallId: context.toolCallId,
-              pageId,
-            });
+        const writePage = async () => {
+          const chart = assertChartEvidence(args);
+          if (!chart.ok) return fail(name, chart.detail);
+          const binding = readBinding(context.projectRoot);
+          const rawPageSources = sourceIdList(args.adoptedSourceIds, args.adopt);
+          const pagePlan = resolvePlanningAdoption({ requested: rawPageSources });
+          if (pagePlan.refusal) return fail(name, pagePlan.refusal);
+          const adopted = canonicalizeAdoptedSourceIds(currentAdoptedSourceSelection(context.projectRoot));
+          const pageSources = new Set(pagePlan.ids);
+          // The current authority decides whether a catalog pack may still restrict this page.
+          const writePackId = effectiveCatalogPackId(
+            context.projectRoot,
+            binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
+          );
+          const packIssue = kindThemePackIssue({
+            brief: binding?.brief ?? "",
+            adoptedSourceIds: [...adopted, ...pageSources],
+            projectRoot: context.projectRoot,
+            designSystemId: writePackId,
+            userExplicitPack: Boolean(writePackId),
+          });
+          if (packIssue) return kindThemePackReceipt(name, packIssue);
+          const blocked = requireConsultAdoptBeforeWrite(context.projectRoot);
+          if (blocked) return fail(name, blocked);
+          const receipt = await invokeDomain(name, args, context);
+          if (receipt.ok) {
+            const pageId = String(receipt.payload.pageId ?? args.id ?? "");
+            // "executed" must name a source this page actually used — a blanket
+            // mark of every adopted row would credit sources the page never drew.
+            for (const row of listSourceReceipts(context.projectRoot).filter(
+              (item) => item.state === "adopted" && pageSources.has(item.sourceId),
+            )) {
+              recordSourceReceipt(context.projectRoot, {
+                sourceId: row.sourceId,
+                state: "executed",
+                toolCallId: context.toolCallId,
+                pageId,
+              });
+            }
           }
-        }
-        return receipt;
+          return receipt;
+        };
+        return writePage();
+      }
+      if (name === "write_layout") {
+        const writeLayout = () => {
+          // The brief, pack and consult rules that gate write_page also gate a layout, before its checks.
+          const binding = readBinding(context.projectRoot);
+          const adopted = canonicalizeAdoptedSourceIds(currentAdoptedSourceSelection(context.projectRoot));
+          const layoutPackId = effectiveCatalogPackId(
+            context.projectRoot,
+            binding?.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
+          );
+          const packIssue = kindThemePackIssue({
+            brief: binding?.brief ?? "",
+            adoptedSourceIds: adopted,
+            projectRoot: context.projectRoot,
+            designSystemId: layoutPackId,
+            userExplicitPack: Boolean(layoutPackId),
+          });
+          if (packIssue) return kindThemePackReceipt(name, packIssue);
+          const blocked = requireConsultAdoptBeforeWrite(context.projectRoot, name);
+          if (blocked) return fail(name, blocked);
+          return invokeDomain(name, args, context);
+        };
+        return writeLayout();
       }
       if (name === "export_deck") {
         const exported = await exportEditablePptx(context.projectRoot, {
@@ -550,7 +509,11 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
       if (binding.contextEpochId?.trim()) {
         epochs.set(binding.sessionId, binding.contextEpochId.trim());
       }
-      return { runId: binding.runId, sessionId: binding.sessionId, projectRoot: binding.projectRoot };
+      return {
+        runId: binding.runId,
+        sessionId: binding.sessionId,
+        projectRoot: binding.projectRoot,
+      };
     },
 
     async inspect(runId: RunId): Promise<RunInspection> {
@@ -572,7 +535,12 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
       const ledger = inspectRunLedger(binding.projectRoot);
       const composed = ledger.composed;
       const exported = Boolean(readVerifiedDelivery(binding.projectRoot));
-      const designSystemId = binding.design.kind === "explicit-style" ? binding.design.designSystemId : undefined;
+      const authorityReading = readDesignAuthority(binding.projectRoot);
+      const designAuthority = authorityReading.kind === "valid" ? authorityReading.authority : undefined;
+      const designSystemId = effectiveCatalogPackId(
+        binding.projectRoot,
+        binding.design.kind === "explicit-style" ? binding.design.designSystemId : undefined,
+      );
       return {
         runId: binding.runId,
         sessionId: binding.sessionId,
@@ -585,6 +553,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         hostDirected: false,
         categoryId: undefined,
         designSystemId,
+        ...(designAuthority ? { designAuthority } : {}),
         receipts: listSourceReceipts(binding.projectRoot),
         catalog: { sourceFiles: catalog.sourceFiles, visualFiles: catalog.visualFiles },
         capabilities: inspectProjectCapabilities(binding.projectRoot),

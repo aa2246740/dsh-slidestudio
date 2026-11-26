@@ -56,9 +56,7 @@ export type DetectCapabilitiesOpts = {
   piModelInput?: readonly string[];
 };
 
-export function detectCapabilities(
-  opts: DetectCapabilitiesOpts = {},
-): CapabilityCard {
+export function detectCapabilities(opts: DetectCapabilitiesOpts = {}): CapabilityCard {
   const env = opts.env ?? process.env;
   const research = researchConfigFromEnv(env);
   const search = imageSearchConfigFromEnv(env);
@@ -73,9 +71,7 @@ export function detectCapabilities(
   const rasterOn = opts.rasterAvailable ?? Boolean(env.SLIDESTUDIO_EDITOR_URL?.trim());
 
   return {
-    research: research
-      ? { mode: "http", configured: true }
-      : { mode: "attachments-gap", configured: false },
+    research: research ? { mode: "http", configured: true } : { mode: "attachments-gap", configured: false },
     imageSearch: {
       configured: imageSearchConfigured(search),
       via: imageSearchConfigured(search) ? "http" : "none",
@@ -84,22 +80,21 @@ export function detectCapabilities(
       configured: imageConfigured(generate),
       via: imageConfigured(generate) ? "http" : "none",
     },
-    vision:
-      visionReady
-        ? {
-            mode: "main-model",
-            note:
-              opts.runtimeKind === "pi"
-                ? "The selected Pi model declares image input. render_page returns a real PNG image content block."
-                : "Main chat may accept image_url parts. If it cannot, admit you did not see the slide.",
-          }
-        : {
-            mode: "none",
-            note:
-              opts.runtimeKind === "pi"
-                ? "The selected Pi model does not declare image input. Production visual review must fail closed."
-                : "No vision. Structural QA only. Do not pretend you saw the page.",
-          },
+    vision: visionReady
+      ? {
+          mode: "main-model",
+          note:
+            opts.runtimeKind === "pi"
+              ? "The selected Pi model declares image input. render_page returns a real PNG image content block."
+              : "Main chat may accept image_url parts. If it cannot, admit you did not see the slide.",
+        }
+      : {
+          mode: "none",
+          note:
+            opts.runtimeKind === "pi"
+              ? "The selected Pi model does not declare image input. Production visual review must fail closed."
+              : "No vision. Structural QA only. Do not pretend you saw the page.",
+        },
     pageRaster: rasterOn
       ? {
           mode: "native-slide",

@@ -1,4 +1,10 @@
 /** Structured deck IR the playbook brain (LLM or deterministic) must emit. */
+import {
+  minimumPageCount,
+  pageCountDeliveryHint,
+  pageCountRequirementFromBrief,
+  type PageCountRequirement,
+} from "./page-count-requirement.js";
 
 export type ComposeRole = "cover" | "toc" | "content" | "evidence" | "timeline" | "matrix" | "close";
 
@@ -27,15 +33,7 @@ export type ComposeDeck = {
   pages: ComposePage[];
 };
 
-const ROLES: ComposeRole[] = [
-  "cover",
-  "toc",
-  "content",
-  "evidence",
-  "timeline",
-  "matrix",
-  "close",
-];
+const ROLES: ComposeRole[] = ["cover", "toc", "content", "evidence", "timeline", "matrix", "close"];
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
@@ -161,8 +159,7 @@ export function fillComposeFromTodos(deck: ComposeDeck, todos: ComposeTodo[]): C
         todos[i] ??
         todos.find(
           (t) =>
-            (t.title && p.title.includes(t.title.slice(0, 6))) ||
-            (t.title && t.title.includes(p.title.slice(0, 6))),
+            (t.title && p.title.includes(t.title.slice(0, 6))) || (t.title && t.title.includes(p.title.slice(0, 6))),
         );
       if (!todo?.note) return p;
       const extra = splitNote(todo.note).filter((line) => !existing.includes(line));
@@ -177,12 +174,18 @@ export function fillComposeFromTodos(deck: ComposeDeck, todos: ComposeTodo[]): C
 
 export function assertComposeHasBody(
   deck: ComposeDeck,
-  opts: { minPages?: number; minBullets?: number } = {},
+  opts: {
+    minPages?: number;
+    minBullets?: number;
+    pageCount?: PageCountRequirement;
+  } = {},
 ): void {
   const minPages = opts.minPages ?? 5;
   const minBullets = opts.minBullets ?? 3;
   const problems: string[] = [];
-  if (deck.pages.length < minPages) {
+  const countProblem = pageCountDeliveryHint(opts.pageCount ?? { kind: "unspecified" }, deck.pages.length);
+  if (countProblem) problems.push(countProblem);
+  else if (deck.pages.length < minPages) {
     problems.push(`need at least ${minPages} pages with bodies, got ${deck.pages.length}`);
   }
   for (const [i, p] of deck.pages.entries()) {
@@ -191,9 +194,7 @@ export function assertComposeHasBody(
     const n = (p.bullets?.length ?? 0) + (p.items?.length ?? 0);
     const need = p.role === "close" ? Math.min(2, minBullets) : minBullets;
     if (n < need) {
-      problems.push(
-        `page ${i + 1} 「${p.title}」 (${p.role}) needs ≥${need} bullets/items, got ${n}`,
-      );
+      problems.push(`page ${i + 1} 「${p.title}」 (${p.role}) needs ≥${need} bullets/items, got ${n}`);
     }
   }
   if (problems.length) {
@@ -201,54 +202,51 @@ export function assertComposeHasBody(
   }
 }
 
-/** Accept ordinary Chinese answers such as 两页, without reading 第2页 as a total. */
+/**
+ * The numeric count legacy minimum-only callers consume. Exact totals and
+ * explicit ranges contribute a lower bound; approximate and unspecified totals
+ * never become a minimum because the user authorized no such bound.
+ */
 export function requestedPageCountFromBrief(brief: string): number | undefined {
-  const count = "([0-9零〇一二两三四五六七八九十百]+)";
-  const patterns = [
-    new RegExp(`页数\\s*[:：为是]?\\s*${count}`),
-    new RegExp(`(?:总共|一共|合计|共|做成|制作|生成|做|需要|只要|保持|改成|改为)\\s*${count}\\s*页`),
-    new RegExp(`^\\s*${count}\\s*页(?:$|[，,。.!！\\s]|即可|就好|左右|的)`),
-    new RegExp(`(?:约|大约)\\s*${count}\\s*页`),
-    new RegExp(`(?<![第0-9零〇一二两三四五六七八九十百])${count}\\s*页\\s*左右`),
-    /(?<![第\d])(\d+)\s*页/,
-  ];
-  for (const pattern of patterns) {
-    const raw = brief.match(pattern)?.[1];
-    if (!raw) continue;
-    let value = Number(raw);
-    if (!Number.isFinite(value)) {
-      const digits: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-      let total = 0, digit = 0;
-      for (const char of raw) {
-        if (char === "十" || char === "百") { total += (digit || 1) * (char === "十" ? 10 : 100); digit = 0; }
-        else digit = digits[char] ?? NaN;
-      }
-      value = total + digit;
-    }
-    if (Number.isInteger(value) && value > 0) return value;
-  }
-  return undefined;
+  return minimumPageCount(pageCountRequirementFromBrief(brief));
 }
 
-/** Classroom lessons need a full path only when the user omitted a count. */
+export type ComposeBodyRules = Readonly<{
+  /** Structural floor only; exact and range lower bounds still come from the user. */
+  minPages: number;
+  minBullets: number;
+  /** The count authority carried to compose and delivery checks. */
+  pageCount: PageCountRequirement;
+}>;
+
+/**
+ * Body richness rules plus the user's page-count requirement. A numeric legacy
+ * override is a fixed total; production passes the shared PageCountRequirement.
+ */
 export function composeBodyRules(
   brief: string,
-  categoryId?: string,
-  requestedPageCount?: number,
-): { minPages: number; minBullets: number } {
-  const requestedPages = Number.isInteger(requestedPageCount) && requestedPageCount! > 0
-    ? requestedPageCount : requestedPageCountFromBrief(brief);
-  return {
-    minPages: requestedPages ?? (inferDeckIntent(brief, categoryId) === "teach" ? 6 : 4),
-    minBullets: 3,
-  };
+  _categoryId?: string,
+  requestedPageCount?: number | PageCountRequirement,
+): ComposeBodyRules {
+  const pageCount: PageCountRequirement =
+    typeof requestedPageCount === "number"
+      ? Number.isInteger(requestedPageCount) && requestedPageCount > 0
+        ? { kind: "exact", count: requestedPageCount }
+        : pageCountRequirementFromBrief(brief)
+      : (requestedPageCount ?? pageCountRequirementFromBrief(brief));
+  const minPages = pageCount.kind === "exact" ? pageCount.count : pageCount.kind === "range" ? pageCount.min : 1;
+  return { minPages, minBullets: 3, pageCount };
 }
 
 /** Parse + fill from todos + reject title-only pages. Agent compose must go through here. */
 export function finalizeComposeDeck(
   raw: unknown,
   todos: ComposeTodo[] = [],
-  opts: { minPages?: number; minBullets?: number } = {},
+  opts: {
+    minPages?: number;
+    minBullets?: number;
+    pageCount?: PageCountRequirement;
+  } = {},
 ): ComposeDeck {
   const filled = fillComposeFromTodos(parseComposeDeck(raw), todos);
   assertComposeHasBody(filled, opts);
@@ -259,12 +257,8 @@ export function finalizeComposeDeck(
 export function briefToOutline(brief: string): { title: string; claims: string[] } {
   const lines = brief.split(/\r?\n/);
   const headerIndex = lines.findIndex((line) => /^\s*#{1,6}\s+\S/.test(line));
-  const headerTitle = headerIndex >= 0
-    ? lines[headerIndex]!.replace(/^\s*#{1,6}\s+/, "").trim()
-    : "";
-  const body = headerIndex >= 0
-    ? lines.filter((_, index) => index !== headerIndex).join("\n")
-    : brief;
+  const headerTitle = headerIndex >= 0 ? lines[headerIndex]!.replace(/^\s*#{1,6}\s+/, "").trim() : "";
+  const body = headerIndex >= 0 ? lines.filter((_, index) => index !== headerIndex).join("\n") : brief;
   const cleaned = body
     .replace(/(\d)\s*[:：]\s*(\d)/g, "$1∶$2")
     .replace(/\s+/g, " ")
@@ -307,13 +301,14 @@ export type DeckIntent = "teach" | "decide" | "report" | "promo" | "academic" | 
 const TEACH_RE =
   /小学|小学生|中学生|高中生|幼儿园|课堂|课件|课程|科普|教学|讲解|讲一讲|讲讲|讲清楚|[一二三四五六七八九十]年级|小朋友|孩子们|培训课件|培训课程|培训教材|培训讲义|新员工培训|入门|怎么学|怎么记|面向.{0,12}学生|面向孩子|勾股|课文|口诀|种子.{0,8}发芽|怎么发芽|lesson|courseware|pupils|classroom|teach/i;
 const ACADEMIC_RE = /开题|答辩|论文|综述|实验方法|课题组|thesis|defense/i;
-const TRAVEL_RE =
-  /旅游|攻略|旅行|行程|景点|度假|手册|东京|京都|大阪|北海道|itinerary|travel guide|city guide/i;
+const TRAVEL_RE = /旅游|攻略|旅行|行程|景点|度假|手册|东京|京都|大阪|北海道|itinerary|travel guide|city guide/i;
 const PROMO_RE = /品牌|发布会|营销|推广|海报|活动视觉|创意|brand|campaign/i;
 const REPORT_RE = /周报|月报|年报|汇报|述职|OKR|进度|工作报告/i;
 const DECIDE_RE = /复盘|增长|试点|决策|判断|战略|投资|渠道|Q[1-4]|季度/;
-const PERFORMANCE_RE = /述职|履职报告|绩效复盘|晋升答辩|转正答辩|个人(?:年中|年度|年终)总结|(?:年中|年度|年终)个人总结/i;
-const WORK_REPORT_RE = /工作汇报|工作总结|项目(?:阶段|进展)汇报|项目进度(?:汇报|报告)|阶段性汇报|专项汇报|部门汇报|团队汇报/i;
+const PERFORMANCE_RE =
+  /述职|履职报告|绩效复盘|晋升答辩|转正答辩|个人(?:年中|年度|年终)总结|(?:年中|年度|年终)个人总结/i;
+const WORK_REPORT_RE =
+  /工作汇报|工作总结|项目(?:阶段|进展)汇报|项目进度(?:汇报|报告)|阶段性汇报|专项汇报|部门汇报|团队汇报/i;
 const TRAINING_RE = /培训课件|培训课程|培训教材|培训讲义|新员工培训|岗前培训|操作培训|业务培训|内训|工作坊/i;
 const TEACHING_RE = /教学课件|课堂课件|课程课件|教案|授课|课堂教学|教学设计|面向.{0,12}(?:学生|学员).{0,12}课件/i;
 const PROJECT_PROPOSAL_RE = /项目立项|立项方案|项目方案|实施方案|解决方案|项目提案|项目建议书|可行性方案/i;
@@ -344,26 +339,14 @@ function categoryIntent(categoryId?: string): DeckIntent | undefined {
  */
 export function briefWithoutNegatedDocTypes(brief: string): string {
   return brief
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:科普|课件|课程|培训|教学|讲解)/gi,
-      " ",
-    )
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:科普|课件|课程|培训|教学|讲解)/gi, " ")
     .replace(
       /(?:不是|并非|不做|避免|不要(?:做成|使用|采用)?|无需|无须|非)\s*(?:一份)?\s*(?:门店)?(?:经营)?(?:月报|年报|周报|汇报)(?:换皮|样式|风格)?/gi,
       " ",
     )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:产品)?立项/gi,
-      " ",
-    )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:个人)?答辩/gi,
-      " ",
-    )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:花哨)?营销(?:页)?/gi,
-      " ",
-    )
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:产品)?立项/gi, " ")
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:个人)?答辩/gi, " ")
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:花哨)?营销(?:页)?/gi, " ")
     .replace(
       /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一次|一份|一场)?\s*(?:内部)?(?:「)?(?:学习分享|分享会|内部分享)/gi,
       " ",
@@ -433,7 +416,7 @@ function isProductIntroBrief(text: string): boolean {
 function isRetailMonthlyBrief(text: string): boolean {
   if (/经营月报/.test(text)) return true;
   if (/月报/.test(text) && /经营/.test(text)) return true;
-  if ((/20\s*页|二十页/.test(text)) && /月报/.test(text)) return true;
+  if (/20\s*页|二十页/.test(text) && /月报/.test(text)) return true;
   return false;
 }
 
@@ -475,12 +458,8 @@ export function inferDeckIntent(brief: string, categoryId?: string): DeckIntent 
   if (kind === "performance-review" || kind === "work-report") return "report";
   if (kind === "product-intro" || kind === "project-proposal") return "decide";
   if (kind === "academic") return "academic";
-  if (
-    kind === "teach-pythagoras" ||
-    kind === "teaching" ||
-    kind === "training" ||
-    kind === "learn-share"
-  ) return "teach";
+  if (kind === "teach-pythagoras" || kind === "teaching" || kind === "training" || kind === "learn-share")
+    return "teach";
   const text = briefWithoutNegatedDocTypes(brief);
   if (TRAVEL_RE.test(text)) return "travel";
   if (REPORT_RE.test(text)) return "report";

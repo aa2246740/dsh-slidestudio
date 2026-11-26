@@ -17,13 +17,7 @@ export type AgentToolTrace = {
 
 export const GENERATE_CHECKPOINT_FILE = "generate-checkpoint.json";
 
-export type AgentPauseKind =
-  | "rate_limit"
-  | "busy"
-  | "timeout"
-  | "auth"
-  | "model_unavailable"
-  | "transient";
+export type AgentPauseKind = "rate_limit" | "busy" | "timeout" | "auth" | "model_unavailable" | "transient";
 
 export type AgentCheckpoint = {
   v: 1;
@@ -142,8 +136,7 @@ export function recoverGenerateCheckpoint(root: string): AgentCheckpoint | undef
     const raw = JSON.parse(fs.readFileSync(runtimeFile, "utf8")) as Record<string, unknown>;
     const brief = typeof raw.brief === "string" ? raw.brief.trim() : "";
     const categoryId = typeof raw.categoryId === "string" ? raw.categoryId.trim() : "";
-    const designSystemId =
-      typeof raw.designSystemId === "string" ? raw.designSystemId.trim() : "";
+    const designSystemId = typeof raw.designSystemId === "string" ? raw.designSystemId.trim() : "";
     if (!brief || !categoryId || !designSystemId || raw.strictExecution !== true) {
       return undefined;
     }
@@ -157,7 +150,7 @@ export function recoverGenerateCheckpoint(root: string): AgentCheckpoint | undef
       turnsUsed: 0,
       maxTurns: 10,
       pausedAt: new Date().toISOString(),
-      reason: "Recovered from the durable DSH SlideStudio run ledger after an interrupted provider session.",
+      reason: "Recovered from the durable Open SlideStudio run ledger after an interrupted provider session.",
       kind: "transient",
     };
   } catch {

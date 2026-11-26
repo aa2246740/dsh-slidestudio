@@ -1,10 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import {
-  readOpenKimiSource,
-  verifyOpenKimiPack,
-} from "./openkimi-source-pack.js";
+import { readOpenKimiSource, verifyOpenKimiPack } from "./openkimi-source-pack.js";
 
 /**
  * The reference pack is mandatory reading for the design agent, so anything the

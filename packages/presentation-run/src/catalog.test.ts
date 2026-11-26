@@ -12,12 +12,18 @@ test("catalog joins every real preview to the exact guide linked by the pinned t
   const blocks = index.split(/^#### /m);
   const catalog = buildCatalogDto(root);
   assert.equal(catalog.styles.length, 44);
-  assert.deepEqual(catalog.formats, [{ kind: "Slides", layout: "16:9" }, { kind: "Slides", layout: "4:3" }]);
+  assert.deepEqual(catalog.formats, [
+    { kind: "Slides", layout: "16:9" },
+    { kind: "Slides", layout: "4:3" },
+  ]);
   assert.equal(new Set(catalog.styles.map((style) => style.id)).size, 44);
   for (const style of catalog.styles) {
     const matches = blocks.filter((block) => block.includes(`](docs/themes/${style.id}.jpg)`));
     assert.equal(matches.length, 1, `${style.id} must have one pinned index entry`);
-    assert.ok(matches[0]!.includes(`](skills/open-kimi-ppt/${style.designSourceId.replace(/^openkimi:/, "")})`), `${style.id} must use its linked source, not a similar slug`);
+    assert.ok(
+      matches[0]!.includes(`](skills/open-kimi-ppt/${style.designSourceId.replace(/^openkimi:/, "")})`),
+      `${style.id} must use its linked source, not a similar slug`,
+    );
     assert.equal(style.category, style.id.split("/")[0]);
     for (const preview of style.previews) {
       const file = resolveCatalogPreviewFile(preview.sourceId, root);

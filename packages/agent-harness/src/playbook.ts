@@ -37,13 +37,7 @@ export type PlaybookBundle = {
   palette: Palette;
 };
 
-const SKILL_REL = path.join(
-  "vendor",
-  "open-kimi-ppt",
-  "skill-1.2.0",
-  "skills",
-  "open-kimi-ppt",
-);
+const SKILL_REL = path.join("vendor", "open-kimi-ppt", "skill-1.2.0", "skills", "open-kimi-ppt");
 
 export function resolveSkillRoot(start = process.cwd()): string {
   const env = process.env.SLIDESTUDIO_SKILL_ROOT;
@@ -102,10 +96,7 @@ const DESIGN_ALIASES: Record<string, string> = {
   meridian: "academic/paper-white-courseware",
 };
 
-export function resolveDesignSystemFile(
-  skillRoot: string,
-  id: string,
-): string {
+export function resolveDesignSystemFile(skillRoot: string, id: string): string {
   const systems = listDesignSystems(skillRoot);
   const raw = String(id || "").trim();
   const aliased = DESIGN_ALIASES[raw] || DESIGN_ALIASES[raw.split("/").pop() || ""];
@@ -113,9 +104,7 @@ export function resolveDesignSystemFile(
   const exact = systems.find((s) => s.id === wanted);
   if (exact) return exact.file;
   const slug = wanted.split("/").pop() || wanted;
-  const tail = systems.find(
-    (s) => s.id.endsWith("/" + slug) || s.id.split("/")[1] === slug,
-  );
+  const tail = systems.find((s) => s.id.endsWith("/" + slug) || s.id.split("/")[1] === slug);
   if (tail) return tail.file;
   const fuzzy = systems.find((s) => {
     const name = s.id.split("/")[1] || s.id;
@@ -132,9 +121,7 @@ export function resolveDesignSystemFile(
 
 /** Pull a usable 6-color palette from a design.md hex soup. */
 export function extractPalette(markdown: string): Palette {
-  const hexes = [...markdown.matchAll(/#([0-9A-Fa-f]{6})\b/g)].map(
-    (m) => `#${m[1]!.toUpperCase()}`,
-  );
+  const hexes = [...markdown.matchAll(/#([0-9A-Fa-f]{6})\b/g)].map((m) => `#${m[1]!.toUpperCase()}`);
   const unique = [...new Set(hexes)];
   const scored = unique.map((hex) => {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -153,31 +140,14 @@ export function extractPalette(markdown: string): Palette {
 
   const lights = scored.filter((c) => c.lum > 0.85).sort((a, b) => b.lum - a.lum);
   const structural = scored
-    .filter(
-      (c) =>
-        c.lum < 0.38 &&
-        c.sat > 0.15 &&
-        (c.hue === "green" || c.hue === "blue"),
-    )
+    .filter((c) => c.lum < 0.38 && c.sat > 0.15 && (c.hue === "green" || c.hue === "blue"))
     .sort((a, b) => a.lum - b.lum);
-  const darks = scored
-    .filter((c) => c.lum < 0.35 && c.sat > 0.15 && c.hue !== "red")
-    .sort((a, b) => a.lum - b.lum);
+  const darks = scored.filter((c) => c.lum < 0.35 && c.sat > 0.15 && c.hue !== "red").sort((a, b) => a.lum - b.lum);
   const accents = scored
-    .filter(
-      (c) =>
-        c.lum >= 0.35 &&
-        c.lum <= 0.75 &&
-        c.sat > 0.25 &&
-        c.hue !== "red",
-    )
+    .filter((c) => c.lum >= 0.35 && c.lum <= 0.75 && c.sat > 0.25 && c.hue !== "red")
     .sort((a, b) => b.sat - a.sat);
-  const midGray = scored
-    .filter((c) => c.sat < 0.12 && c.lum > 0.25 && c.lum < 0.55)
-    .sort((a, b) => a.lum - b.lum);
-  const reds = scored
-    .filter((c) => c.hue === "red" && c.sat > 0.3)
-    .sort((a, b) => b.sat - a.sat);
+  const midGray = scored.filter((c) => c.sat < 0.12 && c.lum > 0.25 && c.lum < 0.55).sort((a, b) => a.lum - b.lum);
+  const reds = scored.filter((c) => c.hue === "red" && c.sat > 0.3).sort((a, b) => b.sat - a.sat);
 
   const label = (re: RegExp): string | undefined => {
     const m = markdown.match(re);
@@ -188,11 +158,8 @@ export function extractPalette(markdown: string): Palette {
     label(/Copper brown\s+#?([0-9A-Fa-f]{6})/i) ??
     label(/Primary accent\s+#?([0-9A-Fa-f]{6})/i) ??
     label(/secondary accent\s+#?([0-9A-Fa-f]{6})/i);
-  const labeledDark =
-    label(/Dark background\s+#?([0-9A-Fa-f]{6})/i);
-  const labeledTitle =
-    label(/Title color\s+#?([0-9A-Fa-f]{6})/i) ??
-    label(/\btitles?\s+#?([0-9A-Fa-f]{6})/i);
+  const labeledDark = label(/Dark background\s+#?([0-9A-Fa-f]{6})/i);
+  const labeledTitle = label(/Title color\s+#?([0-9A-Fa-f]{6})/i) ?? label(/\btitles?\s+#?([0-9A-Fa-f]{6})/i);
 
   const isCream = lights[0] ? lights[0].hex !== "#FFFFFF" : false;
   const background = lights[0]?.hex ?? "#FFFFFF";
@@ -203,33 +170,21 @@ export function extractPalette(markdown: string): Palette {
     darks[0]?.hex ??
     labeledDark ??
     (isCream && labeledAccent ? labeledAccent : "#03522C");
-  const primary = [
-    primaryCandidate,
-    labeledTitle,
-    structural[0]?.hex,
-    darks[0]?.hex,
-    labeledDark,
-    text,
-    "#111111",
-    "#FFFFFF",
-  ].find((candidate): candidate is string =>
-    Boolean(candidate && contrastRatio(candidate, background) >= 4.5),
-  ) ?? (contrastRatio("#111111", background) >= contrastRatio("#FFFFFF", background)
-    ? "#111111"
-    : "#FFFFFF");
-  const accent =
-    labeledAccent && labeledAccent !== primary
-      ? labeledAccent
-      : (accents[0]?.hex ?? "#29B974");
+  const primary =
+    [primaryCandidate, labeledTitle, structural[0]?.hex, darks[0]?.hex, labeledDark, text, "#111111", "#FFFFFF"].find(
+      (candidate): candidate is string => Boolean(candidate && contrastRatio(candidate, background) >= 4.5),
+    ) ?? (contrastRatio("#111111", background) >= contrastRatio("#FFFFFF", background) ? "#111111" : "#FFFFFF");
+  const accent = labeledAccent && labeledAccent !== primary ? labeledAccent : (accents[0]?.hex ?? "#29B974");
 
   const mutedCandidate = midGray[1]?.hex ?? "#7E7E7E";
-  const muted = contrastRatio(mutedCandidate, background) >= 4.5
-    ? mutedCandidate
-    : contrastRatio(text, background) >= 4.5
-      ? text
-      : contrastRatio("#111111", background) >= contrastRatio("#FFFFFF", background)
-        ? "#111111"
-        : "#FFFFFF";
+  const muted =
+    contrastRatio(mutedCandidate, background) >= 4.5
+      ? mutedCandidate
+      : contrastRatio(text, background) >= 4.5
+        ? text
+        : contrastRatio("#111111", background) >= contrastRatio("#FFFFFF", background)
+          ? "#111111"
+          : "#FFFFFF";
   return {
     background,
     text,
@@ -277,13 +232,15 @@ export function catalogOnlyPlaybook(skillRoot = resolveSkillRoot()): PlaybookBun
   };
 }
 
-export function loadPlaybook(opts: {
-  skillRoot?: string;
-  designSystemId?: string;
-  categoryId?: string;
-  /** When false, missing ids do not fall back to pine-green / analysis-decision. */
-  hostDefaults?: boolean;
-} = {}): PlaybookBundle {
+export function loadPlaybook(
+  opts: {
+    skillRoot?: string;
+    designSystemId?: string;
+    categoryId?: string;
+    /** When false, missing ids do not fall back to pine-green / analysis-decision. */
+    hostDefaults?: boolean;
+  } = {},
+): PlaybookBundle {
   const skillRoot = opts.skillRoot ?? resolveSkillRoot();
   const explicitDesign = opts.designSystemId?.trim() ?? "";
   const explicitCategory = opts.categoryId?.trim() ?? "";
@@ -299,9 +256,7 @@ export function loadPlaybook(opts: {
     return {
       ...catalog,
       categoryId,
-      categoryMarkdown: fs.existsSync(categoryFile)
-        ? fs.readFileSync(categoryFile, "utf8")
-        : catalog.categoryMarkdown,
+      categoryMarkdown: fs.existsSync(categoryFile) ? fs.readFileSync(categoryFile, "utf8") : catalog.categoryMarkdown,
     };
   }
   const designFile = resolveDesignSystemFile(skillRoot, designSystemId);
@@ -315,12 +270,7 @@ export function loadPlaybook(opts: {
       palette: extractPalette(designMarkdown),
     };
   }
-  const categoryFile = path.join(
-    skillRoot,
-    "reference",
-    "slides_categories",
-    `${categoryId}.md`,
-  );
+  const categoryFile = path.join(skillRoot, "reference", "slides_categories", `${categoryId}.md`);
   if (!fs.existsSync(categoryFile)) {
     throw new Error(`slides category not found: ${categoryId} (${categoryFile})`);
   }

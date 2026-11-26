@@ -27,15 +27,7 @@ export type ComposeDeck = {
   pages: ComposePage[];
 };
 
-const ROLES: ComposeRole[] = [
-  "cover",
-  "toc",
-  "content",
-  "evidence",
-  "timeline",
-  "matrix",
-  "close",
-];
+const ROLES: ComposeRole[] = ["cover", "toc", "content", "evidence", "timeline", "matrix", "close"];
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
@@ -161,8 +153,7 @@ export function fillComposeFromTodos(deck: ComposeDeck, todos: ComposeTodo[]): C
         todos[i] ??
         todos.find(
           (t) =>
-            (t.title && p.title.includes(t.title.slice(0, 6))) ||
-            (t.title && t.title.includes(p.title.slice(0, 6))),
+            (t.title && p.title.includes(t.title.slice(0, 6))) || (t.title && t.title.includes(p.title.slice(0, 6))),
         );
       if (!todo?.note) return p;
       const extra = splitNote(todo.note).filter((line) => !existing.includes(line));
@@ -175,10 +166,7 @@ export function fillComposeFromTodos(deck: ComposeDeck, todos: ComposeTodo[]): C
   };
 }
 
-export function assertComposeHasBody(
-  deck: ComposeDeck,
-  opts: { minPages?: number; minBullets?: number } = {},
-): void {
+export function assertComposeHasBody(deck: ComposeDeck, opts: { minPages?: number; minBullets?: number } = {}): void {
   const minPages = opts.minPages ?? 5;
   const minBullets = opts.minBullets ?? 3;
   const problems: string[] = [];
@@ -191,9 +179,7 @@ export function assertComposeHasBody(
     const n = (p.bullets?.length ?? 0) + (p.items?.length ?? 0);
     const need = p.role === "close" ? Math.min(2, minBullets) : minBullets;
     if (n < need) {
-      problems.push(
-        `page ${i + 1} 「${p.title}」 (${p.role}) needs ≥${need} bullets/items, got ${n}`,
-      );
+      problems.push(`page ${i + 1} 「${p.title}」 (${p.role}) needs ≥${need} bullets/items, got ${n}`);
     }
   }
   if (problems.length) {
@@ -203,12 +189,7 @@ export function assertComposeHasBody(
 
 /** Respect an explicit user page count before applying genre defaults. */
 export function requestedPageCountFromBrief(brief: string): number | undefined {
-  const patterns = [
-    /页数\s*[:：]?\s*(\d+)/,
-    /(\d+)\s*页\s*左右/,
-    /约\s*(\d+)\s*页/,
-    /(\d+)\s*页/,
-  ];
+  const patterns = [/页数\s*[:：]?\s*(\d+)/, /(\d+)\s*页\s*左右/, /约\s*(\d+)\s*页/, /(\d+)\s*页/];
   for (const pattern of patterns) {
     const value = Number(brief.match(pattern)?.[1]);
     if (Number.isInteger(value) && value > 0) return value;
@@ -217,10 +198,7 @@ export function requestedPageCountFromBrief(brief: string): number | undefined {
 }
 
 /** Classroom lessons need a full path only when the user omitted a count. */
-export function composeBodyRules(
-  brief: string,
-  categoryId?: string,
-): { minPages: number; minBullets: number } {
+export function composeBodyRules(brief: string, categoryId?: string): { minPages: number; minBullets: number } {
   const requestedPages = requestedPageCountFromBrief(brief);
   return {
     minPages: requestedPages ?? (inferDeckIntent(brief, categoryId) === "teach" ? 6 : 4),
@@ -243,12 +221,8 @@ export function finalizeComposeDeck(
 export function briefToOutline(brief: string): { title: string; claims: string[] } {
   const lines = brief.split(/\r?\n/);
   const headerIndex = lines.findIndex((line) => /^\s*#{1,6}\s+\S/.test(line));
-  const headerTitle = headerIndex >= 0
-    ? lines[headerIndex]!.replace(/^\s*#{1,6}\s+/, "").trim()
-    : "";
-  const body = headerIndex >= 0
-    ? lines.filter((_, index) => index !== headerIndex).join("\n")
-    : brief;
+  const headerTitle = headerIndex >= 0 ? lines[headerIndex]!.replace(/^\s*#{1,6}\s+/, "").trim() : "";
+  const body = headerIndex >= 0 ? lines.filter((_, index) => index !== headerIndex).join("\n") : brief;
   const cleaned = body
     .replace(/(\d)\s*[:：]\s*(\d)/g, "$1∶$2")
     .replace(/\s+/g, " ")
@@ -291,8 +265,7 @@ export type DeckIntent = "teach" | "decide" | "report" | "promo" | "academic" | 
 const TEACH_RE =
   /小学|小学生|中学生|高中生|幼儿园|课堂|课件|课程|科普|教学|讲解|讲一讲|讲讲|讲清楚|[一二三四五六七八九十]年级|小朋友|孩子们|培训课件|培训课程|培训教材|培训讲义|新员工培训|入门|怎么学|怎么记|面向.{0,12}学生|面向孩子|勾股|课文|口诀|种子.{0,8}发芽|怎么发芽|lesson|courseware|pupils|classroom|teach/i;
 const ACADEMIC_RE = /开题|答辩|论文|综述|实验方法|课题组|thesis|defense/i;
-const TRAVEL_RE =
-  /旅游|攻略|旅行|行程|景点|度假|手册|东京|京都|大阪|北海道|itinerary|travel guide|city guide/i;
+const TRAVEL_RE = /旅游|攻略|旅行|行程|景点|度假|手册|东京|京都|大阪|北海道|itinerary|travel guide|city guide/i;
 const PROMO_RE = /品牌|发布会|营销|推广|海报|活动视觉|创意|brand|campaign/i;
 const REPORT_RE = /周报|月报|年报|汇报|述职|OKR|进度|工作报告/i;
 const DECIDE_RE = /复盘|增长|试点|决策|判断|战略|投资|渠道|Q[1-4]|季度/;
@@ -334,26 +307,14 @@ function looseHubCategory(categoryId?: string): boolean {
 /** Remove document types that the brief explicitly rejects before routing. */
 export function briefWithoutNegatedDocTypes(brief: string): string {
   return brief
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:科普|课件|课程|培训|教学|讲解)/gi,
-      " ",
-    )
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:科普|课件|课程|培训|教学|讲解)/gi, " ")
     .replace(
       /(?:不是|并非|不做|避免|不要(?:做成|使用|采用)?|无需|无须|非)\s*(?:一份)?\s*(?:门店)?(?:经营)?(?:月报|年报|周报|汇报)(?:换皮|样式|风格)?/gi,
       " ",
     )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:产品)?立项/gi,
-      " ",
-    )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:个人)?答辩/gi,
-      " ",
-    )
-    .replace(
-      /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:花哨)?营销(?:页)?/gi,
-      " ",
-    )
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:产品)?立项/gi, " ")
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:个人)?答辩/gi, " ")
+    .replace(/(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一份)?\s*(?:花哨)?营销(?:页)?/gi, " ")
     .replace(
       /(?:不是|并非|不做|不要(?:做成)?|无需|无须|非)\s*(?:一次|一份|一场)?\s*(?:内部)?(?:「)?(?:学习分享|分享会|内部分享)/gi,
       " ",
@@ -430,11 +391,7 @@ const DEFAULT_DESIGN_BY_INTENT: Record<DeckIntent, string> = {
  * Hub Freestyle / pine-green remaps by brief intent.
  * An explicit wall tile other than Freestyle / pine-green still wins.
  */
-export function resolveGenerateDesign(
-  brief: string,
-  requested?: string,
-  categoryId?: string,
-): string {
+export function resolveGenerateDesign(brief: string, requested?: string, categoryId?: string): string {
   const req = (requested || "").trim();
   const category = categoryId || resolvePlaybookCategory(brief);
   const isHubDefault = !req || req === HUB_DEFAULT_DESIGN || req === "freestyle";
@@ -543,9 +500,7 @@ function placeholderChart(): ComposeChart {
 }
 
 function evidenceNote(refs: { names: string[] }): string {
-  return refs.names.length
-    ? `来源：${refs.names.join("、")}，数值为占位`
-    : "图表数值为结构占位，非正式统计。";
+  return refs.names.length ? `来源：${refs.names.join("、")}，数值为占位` : "图表数值为结构占位，非正式统计。";
 }
 
 function coverPage(title: string, subtitle?: string): ComposePage {
@@ -595,7 +550,7 @@ function teachDeck(
       ];
 
   const pages: ComposePage[] = [
-    coverPage(title, audience ? `面向${audience}` : extra[0] ?? claims[0]),
+    coverPage(title, audience ? `面向${audience}` : (extra[0] ?? claims[0])),
     {
       role: "toc",
       title: "今天要搞懂什么",
@@ -606,18 +561,14 @@ function teachDeck(
     },
     {
       role: "content",
-      title: py
-        ? "直角三角形里，斜边最长，另外两边叫直角边"
-        : `${topic}是什么，先讲清再往下走`,
+      title: py ? "直角三角形里，斜边最长，另外两边叫直角边" : `${topic}是什么，先讲清再往下走`,
       chapter: "01 概念",
       bullets: conceptBullets,
       soWhat: "这一页只建立对象，不考试，不堆课外统计。",
     },
     {
       role: "content",
-      title: py
-        ? "记住：先找直角，再认斜边，最后写 a²+b²=c²"
-        : `记住「${topic}」的一句话`,
+      title: py ? "记住：先找直角，再认斜边，最后写 a²+b²=c²" : `记住「${topic}」的一句话`,
       chapter: "02 记住",
       bullets: rememberBullets,
       soWhat: "能复述，才算过关。",
@@ -649,9 +600,7 @@ function teachDeck(
       bullets: [
         extra[1] ?? `把「${topic}」放到一个具体情境里走一遍。`,
         "例子用来降低抽象，不编造课外调查。",
-        refs.names.length
-          ? `只引用：${refs.names.join("、")}。`
-          : "没有参考资料时，例子保持示意并标明占位。",
+        refs.names.length ? `只引用：${refs.names.join("、")}。` : "没有参考资料时，例子保持示意并标明占位。",
       ],
       soWhat: "例子服务于理解，不是证据链。",
     });
@@ -662,11 +611,7 @@ function teachDeck(
     title: "今天带走什么",
     chapter: "04 收束",
     bullets: py
-      ? [
-          "能指认直角边和斜边。",
-          "能写出 a²+b²=c²，并说明 c 是斜边。",
-          "回去画一个直角三角形，用 3、4、5 检查一次。",
-        ]
+      ? ["能指认直角边和斜边。", "能写出 a²+b²=c²，并说明 c 是斜边。", "回去画一个直角三角形，用 3、4、5 检查一次。"]
       : [
           `能用自己的话讲清「${topic}」。`,
           "能举一个例子，并指出容易搞混的地方。",
@@ -683,8 +628,7 @@ function decideDeck(
   claims: string[],
   refs: { names: string[]; lines: string[] },
 ): ComposeDeck {
-  const needEvidence =
-    refs.names.length > 0 || /数据|增长|试点|证据|对比|口径|成效/.test(brief);
+  const needEvidence = refs.names.length > 0 || /数据|增长|试点|证据|对比|口径|成效/.test(brief);
   const needTimeline = /阶段|下周|试点|节奏|路线|里程碑/.test(brief);
   const needMatrix = /四象限|支撑面|矩阵|对照面/.test(brief);
   const quotes = refs.lines.slice(0, 3);
@@ -743,25 +687,16 @@ function decideDeck(
     chapter: "04 收束",
     bullets: [
       `围绕「${title}」先核对数据来源`,
-      needEvidence
-        ? "把占位图换成带单位与时间窗的真实序列"
-        : "缺数据的位置保持占位，不编造外部统计",
-      /下周/.test(brief)
-        ? "动作项需指定负责人与截止日期后再定稿"
-        : "下一步只写已经能核对的动作，不发明截止日期",
+      needEvidence ? "把占位图换成带单位与时间窗的真实序列" : "缺数据的位置保持占位，不编造外部统计",
+      /下周/.test(brief) ? "动作项需指定负责人与截止日期后再定稿" : "下一步只写已经能核对的动作，不发明截止日期",
     ],
   });
 
   return { title, pages };
 }
 
-function reportDeck(
-  title: string,
-  claims: string[],
-  refs: { names: string[]; lines: string[] },
-): ComposeDeck {
-  const needEvidence =
-    refs.names.length > 0 || /数据|指标|完成率/.test(title + claims.join(""));
+function reportDeck(title: string, claims: string[], refs: { names: string[]; lines: string[] }): ComposeDeck {
+  const needEvidence = refs.names.length > 0 || /数据|指标|完成率/.test(title + claims.join(""));
   const pages: ComposePage[] = [
     coverPage(title, claims[0]),
     { role: "toc", title: "汇报结构", items: ["进展", "问题", "下一步"] },
@@ -786,11 +721,7 @@ function reportDeck(
     role: "close",
     title: "问题与下一步",
     chapter: "03 收束",
-    bullets: [
-      `围绕「${title}」先核对口径`,
-      "未完成项保持占位，不编造完成率",
-      "下一步只写能在下一汇报核验的动作",
-    ],
+    bullets: [`围绕「${title}」先核对口径`, "未完成项保持占位，不编造完成率", "下一步只写能在下一汇报核验的动作"],
   });
   return { title, pages };
 }
@@ -812,21 +743,13 @@ function promoDeck(title: string, claims: string[]): ComposeDeck {
         role: "close",
         title: "带走的记忆点",
         chapter: "02 收束",
-        bullets: [
-          `一句话记住「${title}」`,
-          "缺素材的位置保持占位，不编造评价",
-          "下一步只写已经能沟通的动作",
-        ],
+        bullets: [`一句话记住「${title}」`, "缺素材的位置保持占位，不编造评价", "下一步只写已经能沟通的动作"],
       },
     ],
   };
 }
 
-function academicDeck(
-  title: string,
-  claims: string[],
-  refs: { names: string[]; lines: string[] },
-): ComposeDeck {
+function academicDeck(title: string, claims: string[], refs: { names: string[]; lines: string[] }): ComposeDeck {
   const pages: ComposePage[] = [
     coverPage(title, claims[0]),
     { role: "toc", title: "报告结构", items: ["问题", "方法", "结论"] },

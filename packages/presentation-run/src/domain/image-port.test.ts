@@ -109,7 +109,6 @@ describe("Grok hosted image generate", () => {
     await assert.rejects(() => port.generate("cover"), /no API key/);
   });
 });
-
 describe("vendor presets", () => {
   it("dashscope-sync posts multimodal-generation and downloads the image url", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];

@@ -3,15 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  ensureRunLedger,
-  inspectRunLedger,
-  recordPageRevision,
-  recordTodo,
-} from "./run-ledger.js";
+import { ensureRunLedger, inspectRunLedger, recordPageRevision, recordTodo } from "./run-ledger.js";
 import { executeGenerateTool, type AgentToolState } from "./agent-tools.js";
 import { loadPlaybook } from "./playbook.js";
 import type { SkillPageInput } from "./skill-pages.js";
+import { createEmptyProject, saveProject } from "@open-slidestudio/pptd-v2";
+import { readRunLedger } from "./run-ledger.js";
 
 const EPOCH = "epoch-1";
 const context = { commandId: "cmd-1", contextEpochId: EPOCH };
@@ -27,10 +24,25 @@ function ledgerRoot(): string {
 }
 
 function todoItems(ids: readonly string[]) {
-  return ids.map((pageId) => ({ pageId, title: `Title ${pageId}`, layoutFamily: "content", exhibits: [] }));
+  return ids.map((pageId) => ({
+    pageId,
+    title: `Title ${pageId}`,
+    layoutFamily: "content",
+    exhibits: [],
+  }));
 }
 
 function blockersFor(root: string): readonly string[] {
+  // Coverage now checks disk SSOT, so these identity-only fixtures also persist
+  // their synthetic pages rather than treating ledger facts as document files.
+  const project = createEmptyProject(root, { title: "Identity fixture" });
+  project.pages = (readRunLedger(root)?.facts ?? []).flatMap((fact) =>
+    fact.type === "page.revision-committed"
+      ? [{ path: `pages/${fact.pageId}.page`, page: contentPage(fact.pageId) }]
+      : [],
+  );
+  project.presentation.pages = project.pages.map((entry) => entry.path);
+  saveProject(project);
   return inspectRunLedger(root, EPOCH, {
     ...process.env,
     SLIDESTUDIO_VISION_REVIEWER: "plan-page-identity-test",
@@ -88,10 +100,7 @@ describe("plan to pages identity gate", () => {
     recordPageRevision(root, context, "a", { id: "a" });
     recordPageRevision(root, context, "b", { id: "b" });
     const blockers = blockersFor(root);
-    assert.ok(
-      !blockers.some((blocker) => /missing pages|not in todo/.test(blocker)),
-      blockers.join("; "),
-    );
+    assert.ok(!blockers.some((blocker) => /missing pages|not in todo/.test(blocker)), blockers.join("; "));
   });
 
   it("extra pages are named as pages not in todo", () => {
@@ -141,29 +150,43 @@ describe("plan to pages identity gate", () => {
       ],
       [pageA],
     );
-    const refused = executeGenerateTool("write_page", {
-      id: "c",
-      pageType: "content",
-      elements: contentPage("c").elements,
-    }, state);
+    const refused = executeGenerateTool(
+      "write_page",
+      {
+        id: "c",
+        pageType: "content",
+        elements: contentPage("c").elements,
+      },
+      state,
+    );
     assert.equal(refused.ok, false);
     assert.equal((refused.payload as { error?: string }).error, "not_in_plan");
     assert.match(refused.detail, /not in the current plan/);
-    const rewrite = executeGenerateTool("write_page", {
-      id: "a",
-      pageType: "content",
-      elements: contentPage("a").elements,
-    }, state);
+    const rewrite = executeGenerateTool(
+      "write_page",
+      {
+        id: "a",
+        pageType: "content",
+        elements: contentPage("a").elements,
+      },
+      state,
+    );
     assert.equal(rewrite.ok, true);
   });
 
   it("legacy todo facts without pageIds keep the cardinality blocker", () => {
     const root = ledgerRoot();
     const file = path.join(root, "_agent", "run-ledger.v1.json");
-    const ledger = JSON.parse(fs.readFileSync(file, "utf8")) as { facts: Array<Record<string, unknown>> };
+    const ledger = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      facts: Array<Record<string, unknown>>;
+    };
     ledger.facts.push({
-      type: "todo.committed", factId: "legacy-todo", at: new Date().toISOString(),
-      contextEpochId: EPOCH, todoSha256: "legacy", itemCount: 2,
+      type: "todo.committed",
+      factId: "legacy-todo",
+      at: new Date().toISOString(),
+      contextEpochId: EPOCH,
+      todoSha256: "legacy",
+      itemCount: 2,
     });
     fs.writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
     recordPageRevision(root, context, "a", { id: "a" });

@@ -1,14 +1,7 @@
 /** Turn ComposeDeck + playbook palette into a YAML PPTD v2 project. */
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  Page,
-  PptdElement,
-  PptdProject,
-  TableCell,
-  TableElement,
-  TextElement,
-} from "@open-slidestudio/pptd-v2";
+import type { Page, PptdElement, PptdProject, TableCell, TableElement, TextElement } from "@open-slidestudio/pptd-v2";
 import type { ComposeChart, ComposeDeck, ComposePage } from "./compose-ir.js";
 import type { Palette } from "./playbook.js";
 
@@ -50,11 +43,7 @@ function text(
   };
 }
 
-function rect(
-  id: string,
-  bounds: [number, number, number, number],
-  color: string,
-): PptdElement {
+function rect(id: string, bounds: [number, number, number, number], color: string): PptdElement {
   return {
     elementId: id,
     elementType: "shape",
@@ -70,9 +59,7 @@ export function pageFile(index: number, role: string): string {
 }
 
 export function stripIndexPrefix(s: string): string {
-  return s
-    .replace(/^\s*(?:\d+[\.、\)\:：]\s*|[（(]\d+[）)]\s*)/, "")
-    .trim();
+  return s.replace(/^\s*(?:\d+[\.、\)\:：]\s*|[（(]\d+[）)]\s*)/, "").trim();
 }
 
 export function chartHasNumericY(chart: ComposeChart): boolean {
@@ -119,32 +106,23 @@ function tableEl(
   };
 }
 
-function footer(
-  elements: PptdElement[],
-  pal: Palette,
-  index: number,
-  note?: string,
-): void {
+function footer(elements: PptdElement[], pal: Palette, index: number, note?: string): void {
   const footnote = text("fn", [GUTTER, 516, 800, 14], note ?? "", {
-      fontSize: 9,
-      color: pal.muted,
-    });
+    fontSize: 9,
+    color: pal.muted,
+  });
   footnote.layoutRole = "footer";
   const pageNumber = text("pg", [880, 516, 40, 14], String(index + 1), {
-      fontSize: 10,
-      color: pal.muted,
-      align: ["right", "middle"],
-      wrap: false,
-    });
+    fontSize: 10,
+    color: pal.muted,
+    align: ["right", "middle"],
+    wrap: false,
+  });
   pageNumber.layoutRole = "footer";
   elements.push(footnote, pageNumber);
 }
 
-function bodyChrome(
-  elements: PptdElement[],
-  p: ComposePage,
-  pal: Palette,
-): void {
+function bodyChrome(elements: PptdElement[], p: ComposePage, pal: Palette): void {
   elements.push(rect("top", [0, 0, SLIDE_W, 6], pal.primary));
   if (p.chapter) {
     elements.push(rect("vrule", [GUTTER, 22, 3, 16], pal.primary));
@@ -173,11 +151,7 @@ function bodyChrome(
   }
 }
 
-function soWhatBar(
-  elements: PptdElement[],
-  pal: Palette,
-  message: string,
-): void {
+function soWhatBar(elements: PptdElement[], pal: Palette, message: string): void {
   elements.push(rect("swbg", [GUTTER, 448, 880, 56], ZONE));
   elements.push(rect("swacc", [GUTTER, 448, 4, 56], pal.primary));
   elements.push(
@@ -214,11 +188,11 @@ function buildCover(p: ComposePage, pal: Palette, index: number): Page {
     );
   }
   const pageNumber = text("pg", [900, 500, 36, 14], String(index + 1), {
-      fontSize: 10,
-      color: pal.muted,
-      align: ["right", "middle"],
-      wrap: false,
-    });
+    fontSize: 10,
+    color: pal.muted,
+    align: ["right", "middle"],
+    wrap: false,
+  });
   pageNumber.layoutRole = "footer";
   elements.push(pageNumber);
   return {
@@ -278,10 +252,7 @@ function buildToc(p: ComposePage, pal: Palette, index: number): Page {
       color: pal.primary,
     }),
   );
-  const railBody =
-    p.soWhat ||
-    (!isWeakSubtitle(p.subtitle) ? p.subtitle : undefined) ||
-    tocRailFallback(p);
+  const railBody = p.soWhat || (!isWeakSubtitle(p.subtitle) ? p.subtitle : undefined) || tocRailFallback(p);
   elements.push(
     text("railb", [656, 198, 248, 210], railBody, {
       fontSize: 13,
@@ -398,9 +369,7 @@ function buildTimeline(p: ComposePage, pal: Palette, index: number): Page {
     const x = x0 + (span * i) / Math.max(1, n - 1);
     const above = i % 2 === 0;
     const lx = Math.max(8, Math.min(SLIDE_W - 8 - labelW, x - labelW / 2));
-    const label = item.length > maxLabelChars
-      ? `${item.slice(0, Math.max(1, maxLabelChars - 1))}…`
-      : item;
+    const label = item.length > maxLabelChars ? `${item.slice(0, Math.max(1, maxLabelChars - 1))}…` : item;
     const bodyY = above ? y - 14 - labelH : y + 38;
     const numberY = above ? bodyY - 22 : y + 16;
     elements.push({
@@ -476,11 +445,7 @@ function buildPage(p: ComposePage, pal: Palette, index: number): Page {
   return buildClaims(p, pal, index);
 }
 
-export function materializeDeck(
-  project: PptdProject,
-  deck: ComposeDeck,
-  pal: Palette,
-): void {
+export function materializeDeck(project: PptdProject, deck: ComposeDeck, pal: Palette): void {
   project.presentation.title = deck.title;
   project.presentation.theme = {
     colors: {

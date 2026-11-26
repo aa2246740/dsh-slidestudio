@@ -31,24 +31,12 @@ import {
   type AgentToolState,
   type ToolExecution,
 } from "./agent-tools.js";
-import {
-  detectCapabilities,
-  formatCapabilityCard,
-  type CapabilityCard,
-} from "./capability-card.js";
+import { detectCapabilities, formatCapabilityCard, type CapabilityCard } from "./capability-card.js";
 import type { ImagePort } from "./image-port.js";
 import type { ImageSearchPort } from "./image-search-port.js";
 import type { PageRasterPort } from "./page-raster.js";
-import {
-  createLocalResearchPort,
-  type ResearchPort,
-} from "./research-port.js";
-import {
-  assertSkillDeck,
-  parseSkillDeck,
-  skillToCompose,
-  type SkillDeckInput,
-} from "./skill-pages.js";
+import { createLocalResearchPort, type ResearchPort } from "./research-port.js";
+import { assertSkillDeck, parseSkillDeck, skillToCompose, type SkillDeckInput } from "./skill-pages.js";
 
 export type { AgentCheckpoint, AgentPause, AgentPauseKind, AgentToolTrace };
 
@@ -99,7 +87,7 @@ function buildSystemPrompt(
       ? "No attachments. research() may return classroom_common for 勾股 3-4-5 only. Never fake a source."
       : "No attachments. research() must report a gap — never classroom_common, never a fake source.";
   return [
-    "You are the DSH SlideStudio HOST executing vendored SKILL.md rules. You are not Kimi Slides and not Codex.",
+    "You are the Open SlideStudio HOST executing vendored SKILL.md rules. You are not Kimi Slides and not Codex.",
     formatCapabilityCard(card),
     "",
     "Tools you MAY use (only if the card says the hand exists):",
@@ -164,12 +152,7 @@ function parseDeckFromText(
 }
 
 function fallbackDeck(opts: AgentLoopOptions): ComposeDeck {
-  return deterministicDeck(
-    opts.brief,
-    opts.playbook.designSystemId,
-    opts.referenceText,
-    opts.playbook.categoryId,
-  );
+  return deterministicDeck(opts.brief, opts.playbook.designSystemId, opts.referenceText, opts.playbook.categoryId);
 }
 
 async function composeOnceFromJson(
@@ -178,19 +161,10 @@ async function composeOnceFromJson(
   if (!opts.llm.completeJson) return undefined;
   try {
     const raw = await opts.llm.completeJson(
-      buildSystemPrompt(
-        opts.playbook,
-        opts.brief,
-        opts.referenceText,
-        opts.capability ?? detectCapabilities(),
-      ),
+      buildSystemPrompt(opts.playbook, opts.brief, opts.referenceText, opts.capability ?? detectCapabilities()),
       `User brief:\n${opts.brief}\n\nEmit compose_deck JSON now. Prefer pages[].elements PPTD. role+bullets is fallback only.`,
     );
-    return acceptComposePayload(
-      raw,
-      [],
-      composeBodyRules(opts.brief, opts.playbook.categoryId),
-    );
+    return acceptComposePayload(raw, [], composeBodyRules(opts.brief, opts.playbook.categoryId));
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
@@ -200,12 +174,12 @@ function composeTrace(deck: ComposeDeck, skillDeck?: SkillDeckInput): ToolExecut
   return {
     name: "compose_deck",
     ok: true,
-    summary: skillDeck
-      ? `${skillDeck.pages.length} 页 PPTD`
-      : `${deck.pages.length} 页 · IR fallback`,
+    summary: skillDeck ? `${skillDeck.pages.length} 页 PPTD` : `${deck.pages.length} 页 · IR fallback`,
     detail: skillDeck
       ? skillDeck.pages
-          .map((p, i) => `${String(i + 1).padStart(2, "0")}  ${p.pageType ?? "page"}  ${p.id}  · ${p.elements.length} el`)
+          .map(
+            (p, i) => `${String(i + 1).padStart(2, "0")}  ${p.pageType ?? "page"}  ${p.id}  · ${p.elements.length} el`,
+          )
           .join("\n")
       : `role+bullets only — skill did not write PPTD elements.\n${deck.pages
           .map((p, i) => `${String(i + 1).padStart(2, "0")}  ${p.role}  ${p.title}`)
@@ -288,12 +262,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     : [
         {
           role: "system",
-          content: buildSystemPrompt(
-            opts.playbook,
-            opts.brief,
-            opts.referenceText,
-            capability,
-          ),
+          content: buildSystemPrompt(opts.playbook, opts.brief, opts.referenceText, capability),
         },
         {
           role: "user",
@@ -301,17 +270,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         },
       ];
 
-  const maxTurns = Math.max(
-    4,
-    Math.min(24, opts.resume?.maxTurns ?? opts.maxTurns ?? 18),
-  );
+  const maxTurns = Math.max(4, Math.min(24, opts.resume?.maxTurns ?? opts.maxTurns ?? 18));
   const startTurn = Math.max(0, opts.resume?.turnsUsed ?? 0);
   let lastError = "";
 
   const pauseLoop = (err: unknown, turnsUsed: number): AgentLoopResult => {
     const info = classifyLlmFailure(err);
-    const kind: AgentPauseKind =
-      info.kind === "client" ? "transient" : info.kind;
+    const kind: AgentPauseKind = info.kind === "client" ? "transient" : info.kind;
     const reason = info.message;
     return {
       source: "paused",
@@ -367,11 +332,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             name: call.function.name,
             content: JSON.stringify(payload.forModel),
           });
-          if (
-            exec.name === "render_page" &&
-            payload.dataUrl &&
-            capability.vision.mode === "main-model"
-          ) {
+          if (exec.name === "render_page" && payload.dataUrl && capability.vision.mode === "main-model") {
             messages.push({
               role: "user",
               content: [
@@ -383,15 +344,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
               ],
             });
           }
-          const alreadyRendering = result.toolCalls.some(
-            (c) => c.function.name.trim() === "render_page",
-          );
-          if (
-            exec.name === "write_page" &&
-            exec.ok &&
-            !alreadyRendering &&
-            state.raster?.available
-          ) {
+          const alreadyRendering = result.toolCalls.some((c) => c.function.name.trim() === "render_page");
+          if (exec.name === "write_page" && exec.ok && !alreadyRendering && state.raster?.available) {
             const writtenId =
               exec.payload &&
               typeof exec.payload === "object" &&
@@ -409,10 +363,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             );
             await push(renderExec);
             const renderPayload = asToolPayload(renderExec.payload);
-            if (
-              renderPayload.dataUrl &&
-              capability.vision.mode === "main-model"
-            ) {
+            if (renderPayload.dataUrl && capability.vision.mode === "main-model") {
               messages.push({
                 role: "user",
                 content: [
@@ -488,11 +439,7 @@ function asToolPayload(raw: unknown): {
   return { forModel: rest, dataUrl };
 }
 
-async function dispatchCall(
-  call: LlmToolCall,
-  state: AgentToolState,
-  research: ResearchPort,
-): Promise<ToolExecution> {
+async function dispatchCall(call: LlmToolCall, state: AgentToolState, research: ResearchPort): Promise<ToolExecution> {
   const name = call.function.name.trim();
   if (!ALLOWED.has(name)) {
     return {

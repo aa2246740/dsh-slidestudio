@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  logoutPiProvider,
-  piLoginSnapshot,
-  savePiApiKey,
-} from "./pi-login.js";
+import { logoutPiProvider, piLoginSnapshot, savePiApiKey } from "./pi-login.js";
 import { resolvePiAuth } from "./pi-auth.js";
 
 describe("pi product login", () => {
@@ -20,7 +16,9 @@ describe("pi product login", () => {
     assert.equal(after.kind, "api_key");
     assert.equal(after.source, "auth.json");
     assert.equal(after.provider, "google");
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { google?: { type?: string; key?: string } };
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      google?: { type?: string; key?: string };
+    };
     assert.equal(raw.google?.type, "api_key");
     assert.equal(raw.google?.key, "test-key-not-real");
     const snap = piLoginSnapshot(env);
@@ -58,10 +56,7 @@ describe("pi product login", () => {
   it("exposes xAI OAuth as a supported login without leaking its credential", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-login-existing-"));
     const file = path.join(dir, "auth.json");
-    fs.writeFileSync(
-      file,
-      `${JSON.stringify({ "xai-auth": { type: "oauth", access: "secret" } })}\n`,
-    );
+    fs.writeFileSync(file, `${JSON.stringify({ "xai-auth": { type: "oauth", access: "secret" } })}\n`);
     const snap = piLoginSnapshot({ HOME: dir, SLIDESTUDIO_PI_AUTH_PATH: file });
     const xai = snap.providers.find((row) => row.id === "xai-auth");
     assert.equal(xai?.existingOnly, undefined);
