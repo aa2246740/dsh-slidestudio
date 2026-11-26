@@ -1,0 +1,53 @@
+{
+  "id": "theme.layout.enter",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "编辑版式",
+  "description": "Page-mode 页面 section: 编辑版式 opens the page's layout as its own surface, with the banner at the top of the canvas. Double-clicking an inherited copy on the page enters that copy's layout or master with the element selected; this row covers the button path.",
+  "kimiUi": {
+    "controlLabel": "编辑版式",
+    "location": "右侧属性面板 / 页面 / 版式",
+    "appearsWhen": "page mode with a layout on the page and no element selected"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 4,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Committed as test-fixtures/layouts-project. Page 5 uses 正文."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["点击「编辑版式」"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "entering a layout changes the editor surface only; the PPTD document stays unchanged"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "layoutEnter"
+  },
+  "test": {
+    "id": "EO-LAYOUT-002",
+    "automated": true,
+    "selfTestChecklist": [
+      "编辑版式 opens the page's layout",
+      "a page without a layout explains why 编辑版式 is off",
+      "a double-click on an inherited copy enters its layout or master with that element selected"
+    ]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

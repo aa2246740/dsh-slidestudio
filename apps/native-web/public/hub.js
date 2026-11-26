@@ -6,6 +6,7 @@ import { t, lang, onLangChange } from "./i18n.js";
 import { collectEndpoint, fillEndpoint, toggleTplBlock } from "./tool-endpoint-settings.js";
 import { parseCatalog, buildGenerationRequest } from "./hub-input.js";
 import { editorHref, launchHref, readLaunch, saveLaunch } from "./launch-flow.js";
+import { mountHubAttachments } from "./hub-attachments.js";
 import { STYLE_NAME_TABLE as STYLE_NAMES } from "./style-catalog-names.js";
 import { THEMES, applyTheme, currentTheme } from "./theme.js";
 import {
@@ -50,7 +51,6 @@ const brief = document.getElementById("brief");
 const send = document.getElementById("btn-send");
 const grid = document.getElementById("grid");
 const tabs = document.getElementById("tabs");
-const attachRow = document.getElementById("attach-row");
 const toast = document.getElementById("toast");
 
 let cat = "All";
@@ -65,14 +65,18 @@ let serverDshReady = false;
 let serverMinimaxReady = false;
 let serverCapability = null;
 let piProductLoggedIn = false;
-const attachments = [];
+/** @type {ReturnType<typeof mountHubAttachments> | null} */
+let attachments = null;
+let attachmentModelKey = "";
 function syncCreateButton() {
-  send.disabled =
-    creationInFlight ||
-    !generationCatalog ||
-    !selectedModelKey() ||
-    !brief.value.trim() ||
-    attachments.some((attachment) => attachment.status !== "parsed");
+  const modelKey = selectedModelKey();
+  if (attachments && modelKey !== attachmentModelKey) {
+    attachmentModelKey = modelKey;
+    attachments.setModel({ provider: selectedPiProvider(), model: selectedPiModel() });
+  }
+  const gate = attachments?.sendState({ briefFilled: Boolean(brief.value.trim()) });
+  send.disabled = creationInFlight || !generationCatalog || !modelKey || !brief.value.trim() || Boolean(gate?.disabled);
+  send.title = gate?.disabled && gate.reason ? gate.reason : t("生成");
 }
 let generateSeq = 0;
 let generateAbort = null;
@@ -735,273 +739,12 @@ window.addEventListener("resize", positionModelPanel);
 window.addEventListener("scroll", positionModelPanel, { passive: true });
 document.addEventListener("click", hideMenus);
 
-let attachLocalSeq = 0;
-let attachPaintFrame = 0;
-
-function chipStatusText(f) {
-  if (f.status === "uploading") return `${t("上传中")} ${f.progress ?? 0}%`;
-  if (f.status === "parsed") return `${t("已解析")} (${f.chars ?? 0})`;
-  if (f.status === "recorded") return t("已记录·不可解析");
-  if (f.status === "failed") return f.error || t("上传失败");
-  return f.status || "";
-}
-
-function renderChip(f) {
-  const chip = document.createElement("div");
-  chip.className = `reference-chip is-${f.status || "parsed"}`;
-  chip.dataset.localId = f.localId;
-  if (f.id) chip.dataset.attachId = f.id;
-  const note = f.note || "";
-  chip.innerHTML = `<span title="${escapeHtml(note)}"><b>${escapeHtml(f.name)}</b><small>${escapeHtml(chipStatusText(f))}</small>${
-    f.status === "uploading"
-      ? `<i class="chip-progress"><i class="chip-progress-bar" style="width: ${Math.max(0, f.progress ?? 0)}%"></i></i>`
-      : ""
-  }</span>`;
-  const actions = document.createElement("div");
-  actions.className = "chip-actions";
-  if (f.status === "failed") {
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "chip-retry";
-    retry.textContent = t("重试");
-    retry.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (f.file) uploadAttachment(f);
-    });
-    actions.append(retry);
-  }
-  const rm = document.createElement("button");
-  rm.type = "button";
-  rm.textContent = "×";
-  rm.title = t("移除");
-  rm.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    removeAttachment(f.localId);
-  });
-  actions.append(rm);
-  chip.append(actions);
-  return chip;
-}
-
-function paintAttachments() {
-  const modalList = document.getElementById("attach-modal-list");
-  attachRow.innerHTML = "";
-  if (modalList) modalList.innerHTML = "";
-  for (const f of attachments) {
-    attachRow.append(renderChip(f));
-    if (modalList) modalList.append(renderChip(f));
-  }
-  syncCreateButton();
-}
-
-function paintAttachmentsSoon() {
-  if (attachPaintFrame) return;
-  attachPaintFrame = requestAnimationFrame(() => {
-    attachPaintFrame = 0;
-    paintAttachments();
-  });
-}
-
-function removeAttachment(localId) {
-  const i = attachments.findIndex((a) => a.localId === localId);
-  if (i < 0) return;
-  const rec = attachments[i];
-  try {
-    rec.xhr?.abort();
-  } catch {
-    /* already closed */
-  }
-  try {
-    rec.reader?.abort();
-  } catch {
-    /* already closed */
-  }
-  attachments.splice(i, 1);
-  paintAttachments();
-}
-
-function applyServerAttachment(rec, data) {
-  rec.id = data.id;
-  rec.name = data.name || rec.name;
-  rec.bytes = data.bytes;
-  rec.chars = data.chars;
-  rec.note = data.note;
-  rec.progress = 100;
-  rec.status = data.parsed ? "parsed" : "recorded";
-  rec.error = "";
-}
-
-function fileToDataUrl(file, rec, onProgress) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    rec.reader = reader;
-    reader.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
-    };
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("read failed"));
-    reader.onabort = () => reject(new Error("aborted"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function postAttachmentXhr(payload, rec, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    rec.xhr = xhr;
-    xhr.open("POST", nativeApi("/api/attachments"));
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch (e) {
-          reject(e);
-        }
-      } else {
-        let msg = `HTTP ${xhr.status}`;
-        try {
-          msg = JSON.parse(xhr.responseText).error || msg;
-        } catch {
-          /* keep status */
-        }
-        reject(new Error(msg));
-      }
-    };
-    xhr.onerror = () => reject(new Error("network"));
-    xhr.onabort = () => reject(new Error("aborted"));
-    xhr.send(JSON.stringify(payload));
-  });
-}
-
-async function uploadAttachment(rec) {
-  const file = rec.file;
-  if (!file) {
-    rec.status = "failed";
-    rec.error = t("没有可重试的文件");
-    paintAttachments();
-    return;
-  }
-  rec.status = "uploading";
-  rec.progress = 0;
-  rec.error = "";
-  paintAttachments();
-  try {
-    const dataUrl = await fileToDataUrl(file, rec, (frac) => {
-      rec.status = "uploading";
-      rec.progress = Math.max(1, Math.round(frac * 40));
-      paintAttachmentsSoon();
-    });
-    rec.progress = Math.max(rec.progress, 40);
-    paintAttachments();
-    const data = await postAttachmentXhr({ name: file.name, data: dataUrl, size: file.size }, rec, (frac) => {
-      rec.status = "uploading";
-      rec.progress = 40 + Math.round(frac * 60);
-      paintAttachmentsSoon();
-    });
-    applyServerAttachment(rec, data);
-    paintAttachments();
-  } catch (e) {
-    if (String(e?.message || e) === "aborted") return;
-    rec.status = "failed";
-    rec.error = e instanceof Error ? e.message : t("上传失败");
-    rec.progress = 0;
-    paintAttachments();
-  }
-}
-
-function ingestFiles(fileList) {
-  const files = [...(fileList || [])];
-  if (!files.length) return;
-  const added = [];
-  for (const file of files) {
-    const rec = {
-      localId: `local-${++attachLocalSeq}`,
-      name: file.name,
-      file,
-      status: "uploading",
-      progress: 0,
-    };
-    attachments.push(rec);
-    added.push(rec);
-  }
-  paintAttachments();
-  for (const rec of added) uploadAttachment(rec);
-}
-
-const attachModal = document.getElementById("attach-modal");
-const attachBox = attachModal.querySelector(".attach-modal");
-document.getElementById("btn-attach").addEventListener("click", () => {
-  attachModal.hidden = false;
+attachments = mountHubAttachments({
+  onChange: syncCreateButton,
+  onMessage: showToast,
+  onOpenModels: () => document.getElementById("btn-model")?.click(),
 });
-document.getElementById("btn-attach-close").addEventListener("click", () => {
-  attachModal.hidden = true;
-});
-document.getElementById("btn-pick-files").addEventListener("click", () => {
-  document.getElementById("attach-file").click();
-});
-document.getElementById("btn-demo-ref").addEventListener("click", async () => {
-  try {
-    const res = await fetch(nativeApi("/api/attachments/demo"), { method: "POST" });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
-    const data = await res.json();
-    for (const a of data.attachments || []) {
-      attachments.push({
-        localId: `local-${++attachLocalSeq}`,
-        id: a.id,
-        name: a.name,
-        status: a.parsed ? "parsed" : "recorded",
-        chars: a.chars,
-        note: a.note,
-        bytes: a.bytes,
-        progress: 100,
-      });
-    }
-    paintAttachments();
-    attachModal.hidden = true;
-    showToast(t("已加入本地品牌样例"));
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : t("样例加入失败"));
-  }
-});
-document.getElementById("attach-file").addEventListener("change", (ev) => {
-  ingestFiles(ev.target.files);
-  ev.target.value = "";
-});
-function bindDropTarget(el) {
-  if (!el) return;
-  const stop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-  el.addEventListener("dragenter", (e) => {
-    stop(e);
-    el.classList.add("is-dragover");
-  });
-  el.addEventListener("dragover", (e) => {
-    stop(e);
-    el.classList.add("is-dragover");
-  });
-  el.addEventListener("dragleave", () => {
-    el.classList.remove("is-dragover");
-  });
-  el.addEventListener("drop", (e) => {
-    stop(e);
-    el.classList.remove("is-dragover");
-    ingestFiles(e.dataTransfer?.files);
-  });
-}
-bindDropTarget(document.getElementById("drop-zone"));
-bindDropTarget(attachBox);
-attachModal.addEventListener("click", (ev) => {
-  if (ev.target === attachModal) attachModal.hidden = true;
-});
-document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape" && !attachModal.hidden) attachModal.hidden = true;
-});
+syncCreateButton();
 
 function toggleStylePop(ev) {
   ev.stopPropagation();
@@ -1472,7 +1215,7 @@ function runHubGenerate() {
       kind,
       layout,
       designSystemId,
-      attachments,
+      attachments: attachments?.selection() ?? [],
       provider: selectedPiProvider(),
       model: selectedPiModel(),
       reasoningEffort: efforts?.includes(rawEffort) ? rawEffort : undefined,
@@ -2105,7 +1848,7 @@ onLangChange(() => {
   paintChip();
   paintGrid();
   renderCatalogTabs();
-  paintAttachments();
+  attachments?.repaint();
   paintProjectList(lastProjects);
   paintThemeOptions();
   paintPiPanel();

@@ -355,7 +355,14 @@ test("a non-zh settings menu matches aria-keyshortcuts and times out without thr
 test("surface manifest names the four thin server services", () => {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   assert.equal(manifest.schema, "dsh-surface-manifest-v1");
-  assert.deepEqual(manifest.server.targetThinShell, ["webServer", "connection", "llm", "attachments"]);
+  assert.equal(manifest.phase, "3B-2");
+  const thin = ["webServer", "connection", "llm", "attachments"];
+  assert.deepEqual(manifest.server.targetThinShell, thin);
+  // Phase 3B-2 is complete: the current server surface IS the thin shell.
+  assert.deepEqual(
+    manifest.server.current.map((row) => row.service),
+    thin,
+  );
   assert.deepEqual(manifest.client.targetThinShell, ["slots", "layout", "locale"]);
   const allowed = new Set(["keep-thin", "remove-after-core-loop"]);
   for (const row of [...manifest.server.current, ...manifest.client.current]) {
@@ -363,17 +370,44 @@ test("surface manifest names the four thin server services", () => {
     assert.equal(Array.isArray(row.symbols) && row.symbols.length > 0, true, row.service);
     assert.equal(allowed.has(row.status), true, row.service);
   }
-  for (const service of manifest.server.targetThinShell) {
-    const row = manifest.server.current.find((item) => item.service === service);
-    assert.equal(row?.status, "keep-thin", service);
-  }
+  for (const row of manifest.server.current) assert.equal(row.status, "keep-thin", row.service);
   for (const service of manifest.client.targetThinShell) {
     const row = manifest.client.current.find((item) => item.service === service);
     assert.equal(row?.status, "keep-thin", service);
   }
+  assert.deepEqual(
+    manifest.server.optional.map((row) => row.service),
+    ["mcpManager"],
+  );
+  const removed = new Set(manifest.server.removed.map((row) => row.service));
+  for (const service of [
+    "tools",
+    "agents",
+    "agentPresets",
+    "profileContext",
+    "workspaceRegistry",
+    "sessionQuery",
+    "sessionProjections",
+  ]) {
+    assert.equal(removed.has(service), true, service);
+  }
+  assert.equal(manifest.server.removedEvents.includes("session/event"), true);
   assert.equal(Array.isArray(manifest.rc5Adaptations) && manifest.rc5Adaptations.length >= 4, true);
-  const tools = manifest.server.current.find((item) => item.service === "tools");
-  const presets = manifest.server.current.find((item) => item.service === "agentPresets");
-  assert.equal(tools.symbols.includes("tools.restrict"), true);
-  assert.equal(presets.symbols.includes("agentPresets.register"), true);
+  assert.equal(
+    manifest.rc5Adaptations.some((row) => row.id === "core-loop-cutover"),
+    true,
+  );
+});
+
+test("plugin server entry injects exactly the four thin services and never reaches DSH agent services", () => {
+  const source = readFileSync(fileURLToPath(new URL("../src/dsh-slidestudio.ts", import.meta.url)), "utf8");
+  const inject = source.match(/export const inject = (\[[^\]]*\])/);
+  assert.ok(inject, "server inject literal");
+  assert.deepEqual(JSON.parse(inject[1]), ["webServer", "connection", "llm", "attachments"]);
+  for (const forbidden of ["profileContext", "agentPresets", "registerSlidesPreset", "ctx.agents", "ctx.tools"]) {
+    assert.equal(source.includes(forbidden), false, forbidden);
+  }
+  const bundle = readFileSync(fileURLToPath(new URL("../lib/dsh-slidestudio.js", import.meta.url)), "utf8");
+  assert.equal(bundle.includes('"profileContext"'), false);
+  assert.equal(bundle.includes('"agentPresets"'), false);
 });

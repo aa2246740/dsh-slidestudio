@@ -8,7 +8,7 @@
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
     "typecheck": "node ../../scripts/quality/check-types.mjs --app native-web",
-    "test": "node --test --test-concurrency=4 src/*.test.mjs",
+    "test": "node --test --test-concurrency=4 \"src/**/*.test.mjs\"",
     "test:quality": "vitest run --config ../../vitest.config.mjs --project native-web",
     "test:list": "vitest list --config ../../vitest.config.mjs --project native-web"
   },
@@ -17,10 +17,15 @@
     "@open-slidestudio/exporter-native": "0.1.0",
     "@open-slidestudio/pptd-v2": "0.1.0",
     "@open-slidestudio/presentation-run": "0.1.0",
-    "@open-slidestudio/project-store": "0.1.0"
+    "@open-slidestudio/project-store": "0.1.0",
+    "@open-slidestudio/slides-tools": "0.1.0",
+    "@xmldom/xmldom": "0.8.15",
+    "fflate": "0.8.3",
+    "unpdf": "1.9.0"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-session-persistence": "^0.2.0-rc.2",
+    "@open-slidestudio/slides-mcp": "0.1.0",
     "jsdom": "^30.1.3"
   }
 }

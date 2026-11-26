@@ -15,7 +15,7 @@
       },
       {
         "service": "connection",
-        "symbols": ["connection.requestRejection"],
+        "symbols": ["connection.requestRejection", "connection.authorizeIndex"],
         "status": "keep-thin",
         "owners": ["dsh-slidestudio", "dsh-slides-host"]
       },
@@ -30,51 +30,68 @@
         "symbols": ["ctx.attachments.saveImage"],
         "status": "keep-thin",
         "owners": ["dsh-slides-host"]
-      },
+      }
+    ],
+    "targetThinShell": ["webServer", "connection", "llm", "attachments"],
+    "optional": [
+      {
+        "service": "mcpManager",
+        "symbols": ["mcpManager.register"],
+        "status": "optional",
+        "flag": "mcp_register",
+        "owners": ["dsh-slidestudio"],
+        "note": "rc.5 only; rc.2 hosts without mcpManager skip the registration with a warning."
+      }
+    ],
+    "removed": [
       {
         "service": "tools",
         "symbols": ["tools.register", "tools.guard", "tools.execute", "tools.restrict"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+        "replacedBy": "slides-runtime canonical tools (createSlideTools) with the Hub tool policy as excludeTools"
       },
       {
         "service": "agents",
         "symbols": ["ctx.agents.create", "ctx.agents.resume", "ctx.agents.get", "ctx.agents.list"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+        "replacedBy": "SessionRuntimeManager: one SlidesAgentRuntime per session"
       },
       {
         "service": "agentPresets",
         "symbols": ["agentPresets.mount", "agentPresets.composedPreset", "agentPresets.register"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+        "replacedBy": "runtime systemPrompt (SLIDES_DIRECTOR_PERSONA + conversation interaction section)"
       },
       {
         "service": "profileContext",
         "symbols": ["profileContext.home"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slidestudio", "dsh-slides-host"]
+        "replacedBy": "resolveUserDshHome(): DSH_HOME, else ~/.dsh"
       },
       {
         "service": "workspaceRegistry",
         "symbols": ["workspaceRegistry"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slides-host"]
+        "replacedBy": "none: runtime sessions never enter the DSH Work sidebar"
       },
       {
         "service": "sessionQuery",
         "symbols": ["sessionQuery.listSessions"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slides-host"]
+        "replacedBy": "none: runtime sessions never enter the DSH Work sidebar"
       },
       {
         "service": "sessionProjections",
         "symbols": ["sessionProjections.stateOf"],
-        "status": "remove-after-core-loop",
-        "owners": ["dsh-slides-host"]
+        "replacedBy": "none: no DSH preset binding to probe"
       }
     ],
-    "targetThinShell": ["webServer", "connection", "llm", "attachments"]
+    "removedEvents": [
+      "agent/created",
+      "agent/status",
+      "agent/error",
+      "agent/disposed",
+      "agent/assistant-stream",
+      "agent-preset/selected",
+      "session/event",
+      "system-prompt/assemble",
+      "user-questions/request",
+      "agent/pre-step"
+    ]
   },
   "client": {
     "current": [
@@ -114,16 +131,12 @@
   },
   "rc5Adaptations": [
     {
-      "id": "prompt-presentation-no-tools",
-      "note": "system-prompt/assemble 在 0.2.2-rc.5 交给 PromptPresentation，没有 tools。patchProduceAssembly 只在 tools 是数组时过滤，否则不读这个字段，也不写入 tools: undefined。"
+      "id": "core-loop-cutover",
+      "note": "Phase 3B-2：dsh-slidestudio 服务端只注入 webServer、connection、llm、attachments（mcpManager 可选）。每个会话由 slides-runtime 的 SlidesAgentRuntime 运行，DshLlmPort 走 ctx.llm.stream 与 ctx.attachments.saveImage。不再创建 DSH Agent、注册工具或预设、监听 agent/* 与 session/event。rc.2 与 rc.5 共用同一路径，原有的 prompt-presentation-no-tools、tools-register-when、model-selection-compat 适配随之退役。"
     },
     {
-      "id": "tools-register-when",
-      "note": "步级裁剪改由 tools.register(definition, { when }) 表达。0.2.0-rc.2 的类型只有一个参数，调用用窄类型封装，guard 仍保留。"
-    },
-    {
-      "id": "model-selection-compat",
-      "note": "installModelSelection 在 rc.5 只收 agentCtx。实时读写走 agent.model.current/select，rc.2 继续写 selectionRef。首步 reasoningEffort 放进 agentOptions。"
+      "id": "dsh-home-without-profile-context",
+      "note": "DSH 0.2.2-rc.5 只在 profileContext 里给出 home，且不写 process.env.DSH_HOME。插件按 Host 的 resolveDshHome 规则自行解析：DSH_HOME（非空，展开 ~），否则 ~/.dsh，因此不依赖 profileContext。"
     },
     {
       "id": "self-contained-client-bundle",
@@ -137,5 +150,6 @@
       "id": "engines",
       "note": "dsh-slidestudio engines.node 为 ^22.19.0 || >=24.9.0：接受 22.19.0 与 22 的后续补丁，拒绝 23.0.0，接受 24.9.0 及以上。engines.dsh 为 >=0.2.0-rc.2 <0.3.0-0，同时覆盖 0.2.0-rc.2 与 0.2.2-rc.5。"
     }
-  ]
+  ],
+  "phase": "3B-2"
 }

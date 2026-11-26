@@ -13,7 +13,32 @@ import { classifyLlmFailure, type RuntimeFault } from "./faults.js";
 import { INVALID_ARGS_CODE, type GuardEvent, type GuardToolError } from "./guard-events.js";
 import { readLlmFailure } from "./llm-port.js";
 import type { TurnEndReason } from "./session-store.js";
-import type { ProjectBinding } from "./tool-adapter.js";
+import type { ProjectBinding, RuntimeToolArgsError } from "./tool-adapter.js";
+
+export type TurnState = {
+  turn: number;
+  step: number;
+  fault?: RuntimeFault;
+  readonly toolNames: string[];
+  readonly prepared: Set<string>;
+  readonly invalidArgs: Map<string, RuntimeToolArgsError>;
+  readonly deliveries: Map<string, () => Promise<void>>;
+  inFlightImageCallIds: Set<string>;
+  readonly signal: AbortController;
+};
+
+export function createTurnState(turn: number): TurnState {
+  return {
+    turn,
+    step: 0,
+    toolNames: [],
+    prepared: new Set(),
+    invalidArgs: new Map(),
+    deliveries: new Map(),
+    inFlightImageCallIds: new Set(),
+    signal: new AbortController(),
+  };
+}
 
 export type RuntimeTurnStatus = "completed" | "aborted" | "paused" | "failed" | "max-tokens";
 
@@ -37,6 +62,30 @@ export type RuntimeEvent =
   | { readonly type: "post-turn"; readonly results: readonly { name: string; ok: boolean; error?: string }[] };
 
 export type PromptInput = string | { readonly text: string; readonly images?: readonly ImageContent[] };
+
+export function userPromptMessage(input: PromptInput): AgentMessage {
+  const text = typeof input === "string" ? input : input.text;
+  const images = typeof input === "string" ? [] : (input.images ?? []);
+  return {
+    role: "user",
+    content: images.length ? [{ type: "text", text }, ...images] : text,
+    timestamp: Date.now(),
+  };
+}
+
+/** Fan out a runtime event while containing both synchronous throws and async listener rejections. */
+export function notifyListeners(listeners: Iterable<(event: RuntimeEvent) => void>, event: RuntimeEvent): void {
+  for (const listener of listeners) {
+    try {
+      const out = listener(event) as unknown;
+      if (out && typeof (out as PromiseLike<unknown>).then === "function") {
+        void Promise.resolve(out).catch(() => undefined);
+      }
+    } catch {
+      // Listener failures never break the loop.
+    }
+  }
+}
 
 /** Derive the final turn outcome from the turn's fault state and trailing assistant message. */
 export function resolveTurnOutcome(

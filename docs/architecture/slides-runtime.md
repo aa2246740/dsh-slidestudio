@@ -109,6 +109,44 @@ continuing.
 cacheWrite` when `totalTokens` is omitted), failure code, status and
   `providerRetryAfterMs`.
 
+## DSH host (Phase 3B-2, complete)
+
+The `dsh-slidestudio` plugin runs every Hub slide session on this loop. Its
+server surface is the four thin DSH services (`webServer`, `connection`, `llm`,
+`attachments`) plus the optional, flag-gated `mcpManager` registration
+([surface manifest](dsh-surface-manifest.json)). `packages/dsh-slides-host`
+never calls `ctx.agents`, `ctx.tools`, agent presets, session projections,
+`workspaceRegistry`, `sessionQuery`, `profileContext`, or listens to
+`agent/*` / `session/event`.
+
+| Host module                  | Role                                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session-runtime-manager.ts` | one `SlidesAgentRuntime` per session: followup / resume / steer / operator stop; rebuilds an idle runtime on route or policy change                |
+| `session-runtime-config.ts`  | `DshLlmPort` route (`ctx.llm.resolveModelInfo` limits), `SliceSessionStore` project port, `hub-run:<sessionId>` caller, `rateLimit.maxAttempts: 0` |
+| `produce-tool-policy.ts`     | per-turn allowlist (capabilities, discussion mode, editor edit scopes) passed as `excludeTools`; Hub hides `web_search` and `open_in_editor`       |
+| `runtime-stream-bridge.ts`   | `message_update` text/thinking deltas, tool and turn events → live `AgentTraceRow` snapshots on `/slides/sessions/:id/events`                      |
+| `session-recovery.ts`        | turn outcomes → durable faults, same-session 429 wait/resume and provider failover (Grok fallback, minimax-cn ⇄ openrouter)                        |
+| `session-commands.ts`        | create / resume / model switch (transactional rollback) / operator stop (bounded wait, lease release)                                              |
+| `assistant-questions.ts`     | HTTP bridge to the running runtime's `QuestionBroker`; idle sessions read `_agent/assistant-questions.v1.json`                                     |
+
+Conventions the host keeps:
+
+- A session runtime is fixed at construction (route, tool set, discussion
+  guard), so the manager recomputes the runtime key before every turn and
+  rebuilds an idle runtime when it changes. History survives the rebuild
+  through `_agent/runtime-session.v1.jsonl` recovery.
+- The host's `RateLimitResumeController` owns the disk-persisted 429 wait
+  (`_agent/dsh-rate-limit-wait.json`), so the loop runs with no in-turn
+  retries; failover rebinds the store provider and resumes the transcript.
+- Discussion turns expose only `inspect_capabilities`, `list_references`,
+  `read_reference`, `read_page` and `ask_user_question`, and disable the
+  durable progress guard.
+- Personal mode reads the user's DSH home from `DSH_HOME` (else `~/.dsh`),
+  matching the Host's own resolution, so `profileContext` is not needed.
+- Disposing the plugin disposes every session runtime: a running turn is
+  aborted and releases its writer lease. Activation marks turns left open by a
+  dead process interrupted and drops that process's Hub writer leases.
+
 ## Verification
 
 `npm test -w @open-slidestudio/slides-runtime` is fully offline: the
@@ -117,6 +155,12 @@ end-to-end produce chain (open → references → plan → write → synthetic r
 heartbeat/takeover/preemption, steering/abort, backoff and overflow retry run
 against a scripted port; `PiAiLlmPort` is exercised against closed and
 loopback-only endpoints. `packages/dsh-slides-host/src/guard-parity.test.ts`
-replays `packages/slides-runtime/fixtures/guard-ab.v1.json` through the DSH
-host guards and the runtime guards and requires identical trips, fault codes
-and backoff values.
+replays `packages/slides-runtime/fixtures/guard-ab.v1.json` through the frozen
+reference host guards (`tool-loop-guard.ts`, `product-progress-guard.ts`, no
+longer on the production path) and the runtime guards and requires identical
+trips, fault codes and backoff values.
+`packages/dsh-slides-host/src/four-service.e2e.test.ts` activates the host on a
+context that offers only `webServer`, `connection`, `llm` and `attachments`
+(any other service access throws) and drives create → live SSE deltas →
+question answer → follow-up → model switch → operator stop offline through
+`SlidesAgentRuntime` + `DshLlmPort`.

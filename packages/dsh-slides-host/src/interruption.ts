@@ -3,11 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import {
   DEFAULT_WRITER_LEASE_TTL_MS,
+  leaseHolderActive,
   readProjectLease,
   releaseProjectLease as releaseWriterLease,
   renewProjectLease,
+  withProjectLeaseLock,
   type ProjectLeaseHolder,
 } from "@open-slidestudio/slides-tools";
+import { readRuntimeTurnLease, readTraceHighWater } from "@open-slidestudio/slides-runtime";
 import { AGENT_TRACE_REL, appendAgentTrace, type AgentTraceRow } from "./agent-trace.js";
 import { readAgentError, readRateLimitWait, recordAgentError } from "./agent-fault.js";
 import { readAttempt } from "./session-transition.js";
@@ -58,10 +61,17 @@ function isWriteLockContention(error: unknown): boolean {
   return error instanceof Error && /project write lock/i.test(error.message);
 }
 
-/** Release a Hub session's single-writer lease; never throws on corrupt or missing files. */
+/**
+ * Release a Hub session's leftover writer lease atomically under the lease lock:
+ * never revokes an active turn lease or an active lease owned by another live process.
+ */
 export function releaseHubWriterLease(projectRoot: string, sessionId: string): boolean {
   try {
-    return releaseWriterLease(projectRoot, `hub-run:${sessionId}`);
+    return releaseWriterLease(projectRoot, `hub-run:${sessionId}`, {
+      canRelease: (holder) =>
+        !readRuntimeTurnLease(projectRoot).active &&
+        (!leaseHolderActive(holder) || (holder.pid === process.pid && holder.hostname === os.hostname())),
+    });
   } catch {
     return false;
   }
@@ -174,8 +184,22 @@ export function renewBoundHubWriterLease(
   }
 }
 
+/**
+ * True when any live process (or another in-process runtime instance) currently
+ * holds an active runtime turn lease, or when another live process owns an
+ * active Hub writer lease for this project.
+ */
+export function hasActiveLiveTurn(projectRoot: string, sessionId?: string): boolean {
+  if (readRuntimeTurnLease(projectRoot).active) return true;
+  const writer = readProjectLease(projectRoot);
+  if (!writer.active || writer.holder?.kind !== "hub-run") return false;
+  if (sessionId && writer.holder.ownerId !== `hub-run:${sessionId}`) return false;
+  return writer.holder.pid !== process.pid || writer.holder.hostname !== os.hostname();
+}
+
 /** Activation recovery: drop any leftover Hub writer lease before marking interrupted turns. */
 export function recoverSessionOnActivation(projectRoot: string, sessionId: string, now = new Date()): boolean {
+  if (hasActiveLiveTurn(projectRoot, sessionId)) return false;
   releaseHubWriterLease(projectRoot, sessionId);
   return markInterruptedTurn(projectRoot, now);
 }
@@ -425,45 +449,54 @@ function scanOpenTurns(projectRoot: string): OpenTurnScan {
  * latest turn ended normally.
  */
 export function markInterruptedTurn(projectRoot: string, now = new Date()): boolean {
-  if (readAgentError(projectRoot)) return false;
-  const wait = readRateLimitWait(projectRoot);
-  if (wait && wait.nextRetryAt > Date.now()) return false;
-  const scan = scanOpenTurns(projectRoot);
-  if (!scan.openTurns.length && !scan.openSteps.length && scan.lastTurnTerminal !== "cancelled") return false;
-  const at = now.toISOString();
-  const rows: AgentTraceRow[] = [];
-  // Close steps before their turn so readers fold terminal states in order.
-  for (const row of scan.openSteps) {
-    rows.push({ ...row, at, status: "cancelled", detail: INTERRUPTED_DETAIL, detailMode: "replace" });
-  }
-  // A step can outlive its turn's start row in the tail window; any turn with
-  // an open step is by definition unclosed, so close it by number either way.
-  const openTurnsByNumber = new Map<number, AgentTraceRow>();
-  for (const row of scan.openTurns) {
-    if (typeof row.turn === "number") openTurnsByNumber.set(row.turn, row);
-  }
-  for (const row of scan.openSteps) {
-    if (typeof row.turn === "number" && !openTurnsByNumber.has(row.turn)) {
-      openTurnsByNumber.set(row.turn, {
-        id: `turn:${row.turn}`,
-        at: row.at,
-        turn: row.turn,
-        kind: "turn",
-        name: "turn",
-        status: "running",
-        detailMode: "replace",
-      });
+  if (!fs.existsSync(path.join(projectRoot, AGENT_TRACE_REL))) return false;
+  return withProjectLeaseLock(projectRoot, () => {
+    if (hasActiveLiveTurn(projectRoot)) return false;
+    if (readAgentError(projectRoot)) return false;
+    const wait = readRateLimitWait(projectRoot);
+    if (wait && wait.nextRetryAt > Date.now()) return false;
+    const scan = scanOpenTurns(projectRoot);
+    if (!scan.openTurns.length && !scan.openSteps.length && scan.lastTurnTerminal !== "cancelled") return false;
+    const at = now.toISOString();
+    let nextSeq = readTraceHighWater(projectRoot).maxSeq;
+    const assignSeq = (row: AgentTraceRow): AgentTraceRow => {
+      const { seq: _ignored, ...rest } = row;
+      return { ...rest, seq: ++nextSeq };
+    };
+    const rows: AgentTraceRow[] = [];
+    // Close steps before their turn so readers fold terminal states in order.
+    for (const row of scan.openSteps) {
+      rows.push(assignSeq({ ...row, at, status: "cancelled", detail: INTERRUPTED_DETAIL, detailMode: "replace" }));
     }
-  }
-  for (const row of openTurnsByNumber.values()) {
-    rows.push({ ...row, at, status: "cancelled", detail: INTERRUPTED_DETAIL, detailMode: "replace" });
-  }
-  appendAgentTrace(projectRoot, rows);
-  const attemptId = readAttempt(projectRoot)?.attemptId;
-  recordAgentError(projectRoot, {
-    code: HOST_INTERRUPTED_CODE,
-    detail: "应用或主机已重启，生成中断；已完成的内容保留，可在编辑器中继续。",
-    ...(attemptId ? { attemptId } : {}),
+    // A step can outlive its turn's start row in the tail window; any turn with
+    // an open step is by definition unclosed, so close it by number either way.
+    const openTurnsByNumber = new Map<number, AgentTraceRow>();
+    for (const row of scan.openTurns) {
+      if (typeof row.turn === "number") openTurnsByNumber.set(row.turn, row);
+    }
+    for (const row of scan.openSteps) {
+      if (typeof row.turn === "number" && !openTurnsByNumber.has(row.turn)) {
+        openTurnsByNumber.set(row.turn, {
+          id: `turn:${row.turn}`,
+          at: row.at,
+          turn: row.turn,
+          kind: "turn",
+          name: "turn",
+          status: "running",
+          detailMode: "replace",
+        });
+      }
+    }
+    for (const row of openTurnsByNumber.values()) {
+      rows.push(assignSeq({ ...row, at, status: "cancelled", detail: INTERRUPTED_DETAIL, detailMode: "replace" }));
+    }
+    appendAgentTrace(projectRoot, rows);
+    const attemptId = readAttempt(projectRoot)?.attemptId;
+    recordAgentError(projectRoot, {
+      code: HOST_INTERRUPTED_CODE,
+      detail: "应用或主机已重启，生成中断；已完成的内容保留，可在编辑器中继续。",
+      ...(attemptId ? { attemptId } : {}),
+    });
+    return true;
   });
-  return true;
 }

@@ -1,0 +1,52 @@
+{
+  "id": "chrome.createhub.attach.pick.files",
+  "version": 1,
+  "status": "verified",
+  "surface": "chrome.global",
+  "title": "Pick files from system dialog",
+  "description": "选择文件 button inside #attach-modal triggers the hidden file input",
+  "kimiUi": {
+    "controlLabel": "附件",
+    "location": "Create Hub prompt / attach modal",
+    "appearsWhen": "user opens the reference-material modal"
+  },
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "pageIndex": 0,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Product-only control; the frozen Kimi capture has no attachment modal"
+  },
+  "action": {
+    "type": "click",
+    "steps": ["Open #attach-modal, click #btn-pick-files"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "no PPTD — Hub intake control"
+    },
+    "network": "POST /api/attachments/upload (binary) when applicable"
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "POST /api/attachments/upload",
+    "uiParityNotes": "Product attachment UX; no direct Kimi counterpart captured"
+  },
+  "test": {
+    "id": "EO-HUB-ATT-003",
+    "automated": true,
+    "selfTestChecklist": ["DOM tests in apps/native-web/src/hub-attachment-dom.test.mjs"]
+  },
+  "oracle": {
+    "source": "product-only",
+    "capturedAt": "2026-10-19T00:00:00.000Z",
+    "agent": "hub-attachment-ui",
+    "sessionId": "70e493e54348"
+  },
+  "updatedAt": "2026-10-19T00:00:00.000Z"
+}

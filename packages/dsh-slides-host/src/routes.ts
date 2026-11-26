@@ -11,8 +11,7 @@ import {
   type ConversationMessage,
 } from "./assistant-conversation.js";
 import path from "node:path";
-import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import type { Agent } from "@deepseek-ai/dsh-agent";
+import { userTurnMessage, type SlidesSessionHandle } from "./session-handle.js";
 import {
   authorizePageEdits,
   inspectProjectCapabilities,
@@ -33,8 +32,8 @@ import { loadProject } from "@open-slidestudio/pptd-v2";
 import { editorOrigin as defaultEditorOrigin, proxyToEditor, shouldProxyToEditor } from "./product-proxy.js";
 import { isForbiddenGenerateRoute, type SlidesLlmModel } from "./args.js";
 import { removeLocalProviderProfile, upsertLocalProviderProfile, type RuntimeModelCatalog } from "./local-models.js";
-import { isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
-import { markInterruptedTurn } from "./interruption.js";
+import { clearRateLimitWait, isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
+import { hasActiveLiveTurn, markInterruptedTurn } from "./interruption.js";
 import {
   assertExpectedAttempt,
   beginAttempt,
@@ -72,9 +71,8 @@ export type SlidesHostRuntime = {
   markBusy: (sessionId: string) => void;
   cancelRateLimitWait: (sessionId: string) => void;
   operatorStop: (sessionId: string) => Promise<void>;
-  getAgent(sessionId: string): Agent | undefined;
-  /** Awaits any in-flight re-archive, then unarchives a legacy session. */
-  ensureSessionRunnable?(sessionId: string): Promise<void>;
+  /** The live session runtime handle, or undefined until the session is opened in this process. */
+  getAgent(sessionId: string): SlidesSessionHandle | undefined;
   resolveAssistantIntent?: (input: AssistantIntentInput) => Promise<AssistantIntent>;
   /**
    * Last observed call outcome per provider, fed by the intent/turn path.
@@ -118,7 +116,7 @@ function currentExecution(
   const fault = readAgentError(root);
   return inspectProjectExecution({
     root,
-    agentBusy: runtime.agentBusy(binding.dshSessionId),
+    agentBusy: runtime.agentBusy(binding.dshSessionId) || hasActiveLiveTurn(root, binding.dshSessionId),
     retryScheduled: Boolean(wait && wait.nextRetryAt > Date.now()),
     capability: inspectProjectCapabilities(root),
     verifiedDelivery: readVerifiedDelivery(root),
@@ -584,7 +582,8 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
       // trace turn still open means the process that owned it is gone. Mark it
       // interrupted before projecting so the reader sees paused, not thinking.
       const boundRoot = binding ? runtime.store.resolveRoot(binding) : undefined;
-      if (boundRoot && !runtime.agentBusy(sessionId)) {
+      const liveBusy = runtime.agentBusy(sessionId) || Boolean(boundRoot && hasActiveLiveTurn(boundRoot, sessionId));
+      if (boundRoot && !liveBusy) {
         try {
           markInterruptedTurn(boundRoot);
         } catch {
@@ -605,7 +604,7 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
       sendJson(res, 200, {
         ...snap,
         questions: binding ? (runtime.questions?.list(sessionId) ?? []) : [],
-        agentStatus: runtime.agentBusy(sessionId) ? "busy" : "idle",
+        agentStatus: liveBusy ? "busy" : "idle",
         kernel: "dsh",
         hostDirected: false,
         inspection,
@@ -819,13 +818,16 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
           }
           const binding = runtime.store.bindingFor(sessionId);
           if (!binding) throw new Error("unknown session");
-          assertExpectedAttempt(runtime.store.resolveRoot(binding), expectedAttemptId);
+          const root = runtime.store.resolveRoot(binding);
+          assertExpectedAttempt(root, expectedAttemptId);
           await runtime.switchModel(
             sessionId,
             model,
             provider || undefined,
             String(body.reasoningEffort ?? "").trim() || undefined,
           );
+          runtime.cancelRateLimitWait(sessionId);
+          clearRateLimitWait(root);
         });
       } catch (error) {
         if (error instanceof SessionTransitionConflict) {
@@ -1009,13 +1011,7 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
               }
               recordConversationMessage(root, String(body.userText || text), readConversation(root).mode);
             }
-            await runtime.ensureSessionRunnable?.(sessionId);
-            live.steer(
-              createUserMessage({
-                content: [{ type: "text", text: turnText }],
-                source: { kind: "user" },
-              }),
-            );
+            live.steer(userTurnMessage(turnText));
             return;
           }
           if (modelSelection) {
@@ -1026,7 +1022,6 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
               modelSelection.reasoningEffort,
             );
           }
-          runtime.cancelRateLimitWait(sessionId);
           let agent = runtime.getAgent(sessionId);
           if (!agent) {
             await runtime.resumeAgent(sessionId);
@@ -1048,15 +1043,12 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
               reviewSubmissionId,
               typeof body.clientRequestId === "string" ? body.clientRequestId : undefined,
             );
+            clearRateLimitWait(root);
           }
+          // Only cancel automatic 429 recovery once validation, model switch, and session open succeed.
+          runtime.cancelRateLimitWait(sessionId);
           runtime.markBusy(sessionId);
-          await runtime.ensureSessionRunnable?.(sessionId);
-          agent.followup(
-            createUserMessage({
-              content: [{ type: "text", text: turnText }],
-              source: { kind: "user" },
-            }),
-          );
+          agent.followup(userTurnMessage(turnText));
         });
       } catch (error) {
         if (error instanceof SessionTransitionConflict) {

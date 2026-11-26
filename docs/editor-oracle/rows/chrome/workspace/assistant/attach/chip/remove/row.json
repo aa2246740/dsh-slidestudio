@@ -1,0 +1,52 @@
+{
+  "id": "chrome.workspace.assistant.attach.chip.remove",
+  "version": 1,
+  "status": "verified",
+  "surface": "chrome.global",
+  "title": "Remove composer attachment chip",
+  "description": "× on a composer chip removes the attachment and aborts an in-flight upload",
+  "kimiUi": {
+    "controlLabel": "附件",
+    "location": "Editor assistant composer",
+    "appearsWhen": "assistant chat panel is open"
+  },
+  "preconditions": {
+    "fixtureId": "syn-empty",
+    "pageIndex": 0,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Product-only control; the frozen Kimi capture has no composer attachment flow"
+  },
+  "action": {
+    "type": "click",
+    "steps": ["Attach a file in the editor composer, click × on the chip"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "no PPTD — composer intake control"
+    },
+    "network": "DELETE /api/attachments/:id when applicable"
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "DELETE /api/attachments/:id",
+    "uiParityNotes": "Product attachment UX; no direct Kimi counterpart captured"
+  },
+  "test": {
+    "id": "EO-ASSISTANT-ATT-004",
+    "automated": true,
+    "selfTestChecklist": ["DOM tests in apps/native-web/src/editor-attachment-dom.test.mjs"]
+  },
+  "oracle": {
+    "source": "product-only",
+    "capturedAt": "2026-10-19T00:00:00.000Z",
+    "agent": "editor-composer-attachments",
+    "sessionId": "5b7d7ef527b2"
+  },
+  "updatedAt": "2026-10-19T00:00:00.000Z"
+}

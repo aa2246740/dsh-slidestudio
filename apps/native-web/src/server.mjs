@@ -37,7 +37,25 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { readProjectSessionTrace } from "./session-trace-journal.mjs";
 import { buildPdfFromPngs } from "./png-pdf.mjs";
-import { AttachmentStore, parseAttachmentBuffer, attachmentPublic, decodeAttachmentUpload as decodeDataUrl } from "./attachments.mjs";
+import { AttachmentStore, decodeAttachmentUpload as decodeDataUrl } from "./attachments.mjs";
+import { guardEditorWrite } from "./editor-lease.mjs";
+import { createEditorExtensionRoutes, extensionContentTypeAllowed } from "./editor-extension-routes.mjs";
+import {
+  LAYOUT_CONTROL_IDS,
+  LAYOUT_MUTATING_COMMANDS,
+  handleLayoutRoutes,
+  layoutCommandAction,
+  recordEditorLayoutRevisions,
+  withLayoutPreviews,
+} from "./layout-routes.mjs";
+import { sharedParsePool } from "./materials/parse-pool.mjs";
+import { sharedPdfRenderQueue } from "./materials/pdf-render.mjs";
+import { sharedPdfImages } from "./materials/pdf-images-run.mjs";
+import { lazyLegacyConverter } from "./materials/legacy-convert.mjs";
+import { enqueuePdfRender, publicPdfRenderStatus, readPdfPage } from "./materials/pdf-render-store.mjs";
+import { sendExportResponse } from "./export-response.mjs";
+import { exportWireReport, rasterWireReport } from "./export-wire-report.mjs";
+import { deliveryActivityFields } from "./delivery-note.mjs";
 import { diagnostics } from "./logger.mjs";
 import { loadRootEnv } from "../../../scripts/lib/root-env.mjs";
 import { loadFeatureFlags } from "../../../scripts/lib/feature-flags.mjs";
@@ -255,8 +273,14 @@ const ORACLE_CONTROLS = [
   "chrome.workspace.assistant.send",
   "chrome.workspace.assistant.model",
   "chrome.workspace.assistant.question",
+  "chrome.workspace.assistant.attach.open",
+  "chrome.workspace.assistant.attach.chip.expand",
+  "chrome.workspace.assistant.attach.chip.retry",
+  "chrome.workspace.assistant.attach.chip.remove",
+  "chrome.workspace.assistant.attach.vision.models",
   "chrome.comments.targets",
   "contextmenu.open",
+  ...LAYOUT_CONTROL_IDS,
 ];
 
 // Commands in this set change project content and are persisted to PPTD.
@@ -323,6 +347,7 @@ const PROJECT_MUTATING_COMMANDS = new Set([
   "setAnimation",
   "undo",
   "redo",
+  ...LAYOUT_MUTATING_COMMANDS,
 ]);
 
 /**
@@ -350,13 +375,17 @@ function tabIdFor(url, body) {
   return s && /^[\w-]{1,64}$/.test(s) ? s : "default";
 }
 
+/**
+ * @param {string} root
+ * @param {string} [tabId]
+ * @returns {{ session: import('@open-slidestudio/canvas-session').CanvasSession | null, diskRevision: string | null }}
+ */
 function liveEntryFor(root, tabId = "default") {
   const key = `${path.resolve(root)}\0${tabId}`;
-  let entry = liveSessions.get(key);
-  if (!entry) {
-    entry = { session: null, diskRevision: null, projectRoot: path.resolve(root) };
-    liveSessions.set(key, entry);
-  }
+  const existing = liveSessions.get(key);
+  if (existing) return existing;
+  const entry = { session: null, diskRevision: null, projectRoot: path.resolve(root) };
+  liveSessions.set(key, entry);
   return entry;
 }
 
@@ -677,7 +706,8 @@ function liveModel(native, s, root = s?.project?.rootDir) {
     })),
   };
   const reason = readGenerateReason(root);
-  return reason ? { ...withLayoutRoles, reason } : withLayoutRoles;
+  const shown = reason ? { ...withLayoutRoles, reason } : withLayoutRoles;
+  return withLayoutPreviews(native.canvas, s, shown);
 }
 
 function requireFinite(value, label) {
@@ -1889,6 +1919,7 @@ async function readGenerationActivity(native, root) {
     inspection,
     execution: snapshot.execution,
     error,
+    ...deliveryActivityFields({ projectRoot: root, activityPhase: activity.phase, fault: persistedFault, inspection }),
   };
 }
 
@@ -2279,7 +2310,19 @@ function proxyToKernel(req, res) {
 }
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024; // media uploads ride JSON base64
-async function readBody(req) {
+/** One parse per request: the lease guard and the route read the same body. */
+const parsedBodies = new WeakMap();
+
+function readBody(req) {
+  let pending = parsedBodies.get(req);
+  if (!pending) {
+    pending = readBodyOnce(req);
+    parsedBodies.set(req, pending);
+  }
+  return pending;
+}
+
+async function readBodyOnce(req) {
   const chunks = [];
   let total = 0;
   for await (const c of req) {
@@ -2350,31 +2393,24 @@ function resolveHubCategory(body) {
 }
 
 const attachmentStore = new AttachmentStore(path.join(DATA_ROOT, "output", "attachments"));
-const storeAttachment = (name, bytes) => attachmentStore.store(name, bytes);
-
-const DEMO_BRAND_FILES = [
-  {
-    name: "brand-voice.md",
-    text: [
-      "# 品牌语气",
-      "松绿主色贯穿封面与证据页",
-      "标题必须是完整断言句",
-      "禁止编造客户案例与外部统计",
-      "",
-    ].join("\n"),
+const legacyConverter = lazyLegacyConverter({ dataDir: path.join(DATA_ROOT, "output", "legacy-convert") });
+const editorExtensions = createEditorExtensionRoutes({
+  json,
+  readBody,
+  projectForRequest,
+  tabIdFor,
+  mutatingCommands: PROJECT_MUTATING_COMMANDS,
+  reviewLocked: (root) => Boolean(activeReviewAiLock(root)),
+  attachments: {
+    store: attachmentStore,
+    pool: sharedParsePool,
+    decodeDataUrl,
+    renderQueue: sharedPdfRenderQueue,
+    pdfImages: sharedPdfImages,
+    legacyConverter,
+    pdf: { queue: sharedPdfRenderQueue, publicPdfRenderStatus, enqueuePdfRender, readPdfPage },
   },
-  {
-    name: "brand-palette.md",
-    text: [
-      "# 品牌色板",
-      "背景留白，强调只用松绿与石墨灰",
-      "证据页必须标注资料来源",
-      "色值未给出时不要发明百分比",
-      "",
-    ].join("\n"),
-  },
-];
-
+});
 
 function wantsPi(model) {
   const value = String(model || "Pi").trim();
@@ -2420,8 +2456,9 @@ function requestOriginAllowed(req, url) {
   return true;
 }
 
-function requestContentTypeAllowed(req) {
+function requestContentTypeAllowed(req, url) {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method || "")) return true;
+  if (extensionContentTypeAllowed(req, url)) return true;
   // Only a request that actually carries a body must speak JSON — bodyless
   // POSTs (e.g. attachment demos, session stop) have nothing to type.
   const length = Number(req.headers?.["content-length"] || 0);
@@ -2462,9 +2499,10 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
     }
     // Bodies on mutating routes are JSON; anything else is not our API shape.
     // The kernel proxies below carry their own payload rules.
-    if (isMutating && !url.pathname.startsWith("/slides") && !url.pathname.startsWith("/plugins/") && !requestContentTypeAllowed(req)) {
+    if (isMutating && !url.pathname.startsWith("/slides") && !url.pathname.startsWith("/plugins/") && !requestContentTypeAllowed(req, url)) {
       return json(res, 415, { error: "mutating requests require application/json" });
     }
+    if (await editorExtensions.handle(req, res, url)) return;
 
     if (url.pathname === "/slides" || url.pathname.startsWith("/slides/")) {
       proxyToKernel(req, res);
@@ -2524,6 +2562,7 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         piModel: "",
         minimaxReady: hasNativeModelKey(process.env),
         capability,
+        legacyConvert: legacyConverter().info(),
         lastRebuildMode,
       });
     }
@@ -3387,62 +3426,6 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
       return json(res, 200, { ok: true, projects: discoverProjects() });
     }
 
-    if (req.method === "POST" && url.pathname === "/api/attachments/demo") {
-      const created = DEMO_BRAND_FILES.map((file) =>
-        storeAttachment(file.name, Buffer.from(file.text, "utf8")),
-      );
-      return json(res, 200, { attachments: created.map(attachmentPublic) });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/attachments") {
-      const body = await readBody(req);
-      const name = String(body?.name || "").trim();
-      if (!name) return json(res, 400, { error: "name required" });
-      const data = String(body?.data || "");
-      if (!data) return json(res, 400, { error: "data required" });
-      let buf;
-      try {
-        buf = decodeDataUrl(data);
-      } catch {
-        return json(res, 400, { error: "invalid data URL" });
-      }
-      if (!buf.length) return json(res, 400, { error: "empty file" });
-      if (buf.length > 20 * 1024 * 1024) {
-        return json(res, 413, { error: "file larger than 20MB" });
-      }
-      const parsed = parseAttachmentBuffer(name, buf);
-      if (!parsed.parsed) {
-        return json(res, 415, {
-          error: parsed.note || "attachment format is not readable by the Agent",
-          code: "UNSUPPORTED_AGENT_ATTACHMENT",
-        });
-      }
-      const rec = storeAttachment(name, buf);
-      return json(res, 200, attachmentPublic(rec));
-    }
-
-    const attachGet = url.pathname.match(/^\/api\/attachments\/([^/]+)$/);
-    if (req.method === "GET" && attachGet) {
-      const id = decodeURIComponent(attachGet[1] || "");
-      try {
-        const rec = attachmentStore.read(id);
-        if (!rec) return json(res, 404, { error: `attachment not found: ${id}` });
-        return json(res, 200, rec);
-      } catch (error) {
-        return json(res, 400, { error: error.message, code: "invalid_attachment" });
-      }
-    }
-
-    if (req.method === "DELETE" && attachGet) {
-      const id = decodeURIComponent(attachGet[1] || "");
-      try {
-        if (!attachmentStore.delete(id)) return json(res, 404, { error: `attachment not found: ${id}` });
-        return json(res, 200, { ok: true, id });
-      } catch (error) {
-        return json(res, 400, { error: error.message, code: "invalid_attachment" });
-      }
-    }
-
     if (req.method === "POST" && url.pathname === "/api/generate") {
       return json(res, 410, {
         error: "Hub generate uses DSH. POST /slides/sessions. createPiBrain is not the product path.",
@@ -3577,6 +3560,37 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         revision: liveEntryFor(projectRoot, tabId).diskRevision,
         llmConfigured: Boolean(harnessLlmConfig()),
       });
+    }
+
+    if (
+      await handleLayoutRoutes({
+        req,
+        res,
+        url,
+        native,
+        json,
+        readBody,
+        projectForRequest,
+        tabIdFor,
+        ensureSession,
+        liveEntryFor,
+        activeReviewAiLock,
+        guardWrite: (projectRoot, tabId) => {
+          const grant = guardEditorWrite(projectRoot, { tabId });
+          if (!grant.ok) {
+            throw Object.assign(new Error(grant.body.error), {
+              statusCode: grant.status,
+              code: grant.body.code,
+            });
+          }
+        },
+        ensureInitialVersion,
+        persistLiveSession,
+        liveModel,
+        rememberPage,
+      })
+    ) {
+      return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/command") {
@@ -4141,11 +4155,20 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
             break;
           case "persist":
             break;
-          default:
-            return json(res, 400, { error: `unknown cmd: ${cmd}` });
+          default: {
+            const layoutAction = layoutCommandAction(native, body, s, cmd);
+            if (!layoutAction) return json(res, 400, { error: `unknown cmd: ${cmd}` });
+            layoutAction();
+            break;
+          }
         }
         if (mutatesProject || cmd === "persist") {
           persistLiveSession(native, s, projectRoot, baseSession, tabId);
+          await recordEditorLayoutRevisions(
+            projectRoot,
+            baseSession?.project?.presentation,
+            s?.project?.presentation,
+          );
         } else if (liveEntryFor(projectRoot, tabId).session !== baseSession) {
           throw conflictError("editor session changed while command was running; retry the edit");
         } else {
@@ -4214,18 +4237,12 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
         const title = String(exportSession.project.presentation.title || "slides")
           .replace(/[^\w\u4e00-\u9fff-]+/g, "_")
           .replace(/^_+|_+$/g, "") || "slides";
-        res.writeHead(200, {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`${title}.pdf`)}`,
-          "X-Export-Report": Buffer.from(
-            JSON.stringify({
-              ok: true,
-              slideCount: shots.length,
-              bytes: pdf.length,
-            }),
-          ).toString("base64url"),
+        return sendExportResponse(res, {
+          contentType: "application/pdf",
+          filename: `${title}.pdf`,
+          body: pdf,
+          report: rasterWireReport({ slideCount: shots.length, bytes: pdf.length }),
         });
-        return res.end(pdf);
       }
       if (format === "png") {
         const rasterModule = await import(
@@ -4255,20 +4272,17 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           .replace(/[^\w\u4e00-\u9fff-]+/g, "_")
           .replace(/^_+|_+$/g, "") || "slide";
         const filename = `${title}-p${exportSession.pageIndex + 1}.png`;
-        res.writeHead(200, {
-          "Content-Type": "image/png",
-          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-          "X-Export-Report": Buffer.from(
-            JSON.stringify({
-              ok: true,
-              slideCount: 1,
-              bytes: shot.bytes.length,
-              kind: shot.kind,
-              layoutOk: shot.layout?.ok ?? null,
-            }),
-          ).toString("base64url"),
+        return sendExportResponse(res, {
+          contentType: "image/png",
+          filename,
+          body: shot.bytes,
+          report: rasterWireReport({
+            slideCount: 1,
+            bytes: shot.bytes.length,
+            kind: shot.kind,
+            layoutOk: shot.layout?.ok ?? null,
+          }),
         });
-        return res.end(shot.bytes);
       }
       if (format !== "pptx") {
         return json(res, 400, { error: `unsupported export format: ${format}` });
@@ -4278,26 +4292,12 @@ const server = http.createServer(diagnostics.wrap(async (req, res) => {
           ? { fontsDir: FONTS_DIR, families: FONT_FAMILIES }
           : undefined,
       });
-      res.writeHead(200, {
-        "Content-Type": contentType(".pptx"),
-        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
-        "X-Export-Report": Buffer.from(
-          JSON.stringify({
-            ok: result.report.ok,
-            slideCount: result.report.slideCount,
-            coverage: result.report.nativeCoverage,
-            degradations: result.report.degradations.length,
-            bytes: result.report.bytes,
-            ...(result.report.embeddedFonts
-              ? { embeddedFonts: result.report.embeddedFonts }
-              : {}),
-            ...(result.report.skippedFonts
-              ? { skippedFonts: result.report.skippedFonts }
-              : {}),
-          }),
-        ).toString("base64url"),
+      return sendExportResponse(res, {
+        contentType: contentType(".pptx"),
+        filename: result.filename,
+        body: result.data,
+        report: exportWireReport(result.report),
       });
-      return res.end(result.data);
     }
 
     if (req.method === "POST" && url.pathname === "/api/media") {

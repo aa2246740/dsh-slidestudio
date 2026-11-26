@@ -97,7 +97,7 @@ describe("produce gates fingerprint", () => {
   it("fingerprints the layout-scope gate that offers and refuses write_layout", () => {
     const listed = [
       "packages/presentation-run/dist/domain/layout-edit-scope.js",
-      "packages/dsh-slides-host/dist/produce-request-header.js",
+      "packages/dsh-slides-host/dist/produce-tool-policy.js",
     ];
     for (const rel of listed) {
       assert.ok(

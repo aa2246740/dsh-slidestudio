@@ -15,7 +15,7 @@ import { localProjectPort } from "./local-project-port.js";
 import type { PersistentProductSnapshot } from "./progress-snapshot.js";
 import { ProgressGuard, type ProductProgressConfig } from "./progress-guard.js";
 import type { RuntimeFault } from "./faults.js";
-import { WriterLeaseKeeper } from "./lease-keeper.js";
+import { WriterLeaseKeeper, type LeaseMode } from "./lease-keeper.js";
 import { observingPort, piAiSchemaValidator } from "./runtime-support.js";
 import { estimateMessagesTokens } from "./token-estimate.js";
 import { adaptSlideTool, SerialGate, type ProjectBinding, type RuntimeToolArgsError } from "./tool-adapter.js";
@@ -45,7 +45,7 @@ export type SlidesRuntimeOptions = {
     readonly progress?: ProductProgressConfig | false;
     readonly sampleProgress?: (projectRoot: string) => PersistentProductSnapshot;
   };
-  readonly lease?: { readonly ttlMs?: number; readonly heartbeatMs?: number } | false;
+  readonly lease?: { readonly mode?: LeaseMode; readonly ttlMs?: number; readonly heartbeatMs?: number } | false;
   readonly toolTimeoutMs?: number;
   readonly rateLimit?: {
     readonly maxAttempts?: number;
@@ -155,6 +155,7 @@ export function leaseKeeperFor(
   if (lease === false) return undefined;
   return new WriterLeaseKeeper({
     caller,
+    ...(lease?.mode ? { mode: lease.mode } : {}),
     ...(lease?.ttlMs ? { ttlMs: lease.ttlMs } : {}),
     ...(lease?.heartbeatMs ? { heartbeatMs: lease.heartbeatMs } : {}),
     onLost,

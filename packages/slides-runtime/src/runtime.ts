@@ -32,37 +32,29 @@ import {
   type SlidesRuntimeOptions,
 } from "./runtime-config.js";
 import {
+  createTurnState,
   imageResultCallIds,
   lastAssistant,
+  notifyListeners,
   resolveTurnOutcome,
   sleep,
   toolResultEvent,
   turnEndReason,
+  userPromptMessage,
   withRecoveredSystemHeader,
   withoutTrailingFailure,
   type PromptInput,
   type RuntimeEvent,
   type RuntimeTurnResult,
+  type TurnState,
 } from "./runtime-support.js";
 import { RuntimeSessionStore, type RecoveredSession } from "./session-store.js";
 import { ToolInvalidArgsLoopGuard } from "./tool-loop-guard.js";
-import type { ProjectBinding, RuntimeToolArgsError } from "./tool-adapter.js";
-import { assistantRows, resultRow, toolRow, TraceWriter, turnRow } from "./trace-projection.js";
+import type { ProjectBinding } from "./tool-adapter.js";
+import { assistantRows, readTraceHighWater, resultRow, toolRow, TraceWriter, turnRow } from "./trace-projection.js";
 import { QuestionBroker, type AssistantQuestionRow } from "./user-question.js";
 
 export type { PromptInput, RuntimeEvent } from "./runtime-support.js";
-
-type TurnState = {
-  turn: number;
-  step: number;
-  fault?: RuntimeFault;
-  readonly toolNames: string[];
-  readonly prepared: Set<string>;
-  readonly invalidArgs: Map<string, RuntimeToolArgsError>;
-  readonly deliveries: Map<string, () => Promise<void>>;
-  inFlightImageCallIds: Set<string>;
-  readonly signal: AbortController;
-};
 
 export class SlidesAgentRuntime {
   readonly sessionId: string;
@@ -127,7 +119,7 @@ export class SlidesAgentRuntime {
     const inspected = this.store.inspect(project.projectRoot);
     this.bound = project;
     const interruptedQuestions = this.questions?.stalePendingIds() ?? [];
-    this.turnCounter = inspected.lastTurn;
+    this.turnCounter = Math.max(inspected.lastTurn, readTraceHighWater(project.projectRoot).maxTurn);
     const messages = withRecoveredSystemHeader(inspected.messages, this.systemPrompt(), tools);
     return { ...inspected, messages, interruptedQuestions };
   }
@@ -141,7 +133,7 @@ export class SlidesAgentRuntime {
     );
     this.store.attach(projectRoot);
     this.trace.attach(projectRoot);
-    this.turnCounter = Math.max(this.turnCounter, fresh.lastTurn);
+    this.turnCounter = Math.max(this.turnCounter, fresh.lastTurn, readTraceHighWater(projectRoot).maxTurn);
     if (fresh.records.length > 0 && diskMaxSeq > this.syncedDiskSeq) {
       this.agent.state.messages = withRecoveredSystemHeader(fresh.messages, this.systemPrompt(), this.tools);
     }
@@ -210,13 +202,7 @@ export class SlidesAgentRuntime {
   }
 
   private emit(event: RuntimeEvent): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(event);
-      } catch {
-        // Listener failures never break the loop.
-      }
-    }
+    notifyListeners(this.listeners, event);
   }
 
   private bind(binding: ProjectBinding): void {
@@ -235,14 +221,7 @@ export class SlidesAgentRuntime {
 
   /** Start a new turn from a user prompt. */
   prompt(input: PromptInput): Promise<RuntimeTurnResult> {
-    const text = typeof input === "string" ? input : input.text;
-    const images = typeof input === "string" ? [] : (input.images ?? []);
-    const message: AgentMessage = {
-      role: "user",
-      content: images.length ? [{ type: "text", text }, ...images] : text,
-      timestamp: Date.now(),
-    };
-    return this.runTurn(() => this.agent.prompt(message));
+    return this.runTurn(() => this.agent.prompt(userPromptMessage(input)));
   }
 
   /** Continue an interrupted turn from the persisted transcript (freshly synced under lease when bound). */
@@ -250,13 +229,15 @@ export class SlidesAgentRuntime {
     return this.runTurn(() => this.agent.continue(), true);
   }
 
-  /** Inject a user message after the current assistant step. */
+  /** Inject a user message after the current assistant step (ignored if idle, aborted or faulted). */
   steer(text: string): void {
+    if (!this.current || this.current.signal.signal.aborted || Boolean(this.current.fault)) return;
     this.agent.steer({ role: "user", content: text, timestamp: Date.now() });
   }
 
   /** Operator stop of the running turn. */
   abort(detail = "the operator stopped the run"): void {
+    this.agent.clearSteeringQueue();
     if (!this.current) return;
     this.current.fault ??= { code: "operator-stop", detail };
     this.current.signal.abort();
@@ -304,16 +285,7 @@ export class SlidesAgentRuntime {
   private async runTurn(start: () => Promise<void>, isResume = false): Promise<RuntimeTurnResult> {
     if (this.disposed) throw new Error("the runtime was disposed");
     if (this.current) throw new Error("a turn is already running");
-    const state: TurnState = {
-      turn: this.turnCounter + 1,
-      step: 0,
-      toolNames: [],
-      prepared: new Set(),
-      invalidArgs: new Map(),
-      deliveries: new Map(),
-      inFlightImageCallIds: new Set(),
-      signal: new AbortController(),
-    };
+    const state = createTurnState(this.turnCounter + 1);
     this.current = state;
     this.budget.reset();
     let caughtFault: RuntimeFault | undefined;
@@ -341,7 +313,11 @@ export class SlidesAgentRuntime {
       if (error instanceof Error && error.message.startsWith("nothing to resume:")) throw error;
       caughtFault = classifyFault(error);
     }
-    await this.runHooks(state, caughtFault);
+    try {
+      await this.runHooks(state, caughtFault);
+    } catch (error) {
+      caughtFault ??= classifyFault(error);
+    }
     return this.endTurn(state, caughtFault);
   }
 
@@ -359,19 +335,36 @@ export class SlidesAgentRuntime {
   }
 
   private endTurn(state: TurnState, caughtFault?: RuntimeFault): RuntimeTurnResult {
-    const writable = this.canWriteBoundProject(state.fault ?? caughtFault);
-    let result = this.computeResult(state, caughtFault);
-    if (writable) {
-      const reason = turnEndReason(result);
-      if (result.fault) this.store.append({ type: "fault", turn: state.turn, ...result.fault });
-      this.store.append({ type: "turn/end", turn: state.turn, reason });
-      this.trace.write([turnRow({ turn: state.turn }, reason)]);
-      if (this.bound) this.syncedDiskSeq = this.store.currentSeq;
+    let result: RuntimeTurnResult;
+    try {
+      const writable = this.canWriteBoundProject(state.fault ?? caughtFault);
       result = this.computeResult(state, caughtFault);
+      if (writable) {
+        const reason = turnEndReason(result);
+        try {
+          if (result.fault) this.store.append({ type: "fault", turn: state.turn, ...result.fault });
+          this.store.append({ type: "turn/end", turn: state.turn, reason });
+          if (this.bound) this.syncedDiskSeq = this.store.currentSeq;
+        } catch (error) {
+          caughtFault ??= classifyFault(error);
+        }
+        try {
+          this.trace.write([turnRow({ turn: state.turn }, reason)]);
+        } catch (error) {
+          caughtFault ??= classifyFault(error);
+        }
+        result = this.computeResult(state, caughtFault);
+      }
+      this.observeGuards({ type: "turn/end", turn: state.turn });
+      result = this.computeResult(state, caughtFault);
+    } catch (error) {
+      caughtFault ??= classifyFault(error);
+      result = this.computeResult(state, caughtFault);
+    } finally {
+      this.agent.clearSteeringQueue();
+      this.lease?.release();
+      this.current = undefined;
     }
-    this.observeGuards({ type: "turn/end", turn: state.turn });
-    this.lease?.release();
-    this.current = undefined;
     this.emit({ type: "turn/end", result });
     return result;
   }

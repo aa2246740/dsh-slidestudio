@@ -1,13 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path, { isAbsolute, join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { get, request } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as setTimeout$1 } from "node:timers/promises";
-import { SLIDES_DIRECTOR_PERSONA, apply as apply$1 } from "@open-slidestudio/dsh-slides-host";
+import { apply as apply$1, resolveUserDshHome } from "@open-slidestudio/dsh-slides-host";
 // ../scripts/lib/observability.mjs
 const PRIVATE_KEYS = /(?:authorization|cookie|token|secret|password|api.?key|prompt|brief|text|content|attachment|email|phone|path|project|session)/i;
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,80}$/;
@@ -255,34 +254,6 @@ async function waitForEditor(origin, timeoutMs = 15e3) {
 	} while (Date.now() < deadline);
 	return false;
 }
-// lib/types/slides-preset.js
-/** The slide preset's director persona: single source in @open-slidestudio/slides-tools. */
-const SLIDES_PERSONA_PREFIX = SLIDES_DIRECTOR_PERSONA;
-function registerSlidesPreset(ctx) {
-	const presets = ctx.get("agentPresets");
-	if (!presets?.register) {
-		logger.log("warn", "agent_preset_unavailable");
-		return;
-	}
-	ctx.effect(() => presets.register({
-		id: "slides",
-		name: "DSH SlideStudio slides",
-		description: "Product PPT tools only. No bash, filesystem, or editor tools.",
-		order: 10,
-		plugins: [{
-			id: "persona",
-			name: "@deepseek-ai/dsh-persona",
-			config: {
-				prefix: SLIDES_PERSONA_PREFIX,
-				complete: true,
-				includeRuntimeContext: false
-			}
-		}, {
-			id: "slides-ask-user",
-			name: "@deepseek-ai/dsh-tool-ask-user"
-		}]
-	}));
-}
 // ../scripts/lib/feature-flags.mjs
 /**
 * Feature flags for SlideStudio.
@@ -424,10 +395,8 @@ const name = "dsh-slidestudio";
 const inject = [
 	"webServer",
 	"connection",
-	"tools",
-	"agents",
-	"attachments",
-	"llm"
+	"llm",
+	"attachments"
 ];
 const EDITOR_PORT = Number(process.env.SLIDES_EDITOR_PORT ?? "56200");
 const SIDECAR_RESTART_COOLDOWN_MS = 2e3;
@@ -618,13 +587,14 @@ function apply(ctx) {
 	const checkoutRoot = fileURLToPath(new URL("../..", import.meta.url));
 	const repoRoot = resolve(existsSync(join(packageRoot, "apps/native-web/src/server.mjs")) ? packageRoot : checkoutRoot);
 	const editorOrigin = `http://127.0.0.1:${EDITOR_PORT}`;
-	const dataRoot = resolveDataDirectory(repoRoot, ctx.get("profileContext")?.home || process.env.DSH_HOME || join(homedir(), ".dsh"), process.env.SLIDESTUDIO_DATA_DIR);
-	registerSlidesPreset(ctx);
+	const home = resolveUserDshHome();
+	const dataRoot = resolveDataDirectory(repoRoot, home, process.env.SLIDESTUDIO_DATA_DIR);
 	applySlidesHostAny(ctx, {
 		workspaceRoot: repoRoot,
 		dataRoot,
 		editorBaseUrl: editorOrigin,
-		personal: true
+		personal: true,
+		dshHome: home
 	});
 	registerSlidesMcp(ctx, {
 		repoRoot,

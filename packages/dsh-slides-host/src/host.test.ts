@@ -20,11 +20,9 @@ import {
   aiReviewPageVersionConflict,
   autoRenderWriteOutcome,
   formatWritePageOutcome,
-  produceToolAllowlist,
   readPageFromProject,
-  sessionProduceCapabilities,
-  sliceToolGuard,
-} from "./tools.js";
+} from "@open-slidestudio/slides-tools";
+import { produceToolAllowlist, sessionProduceCapabilities, sliceToolGuard } from "./produce-tool-policy.js";
 import { acquireProjectLease, readProjectLease } from "./lease.js";
 import { writeSliceRuntime, readSliceRuntimeFile, briefForOpenProject } from "./runtime.js";
 import {

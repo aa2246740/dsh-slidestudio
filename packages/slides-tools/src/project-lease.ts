@@ -279,6 +279,8 @@ export function releaseProjectLease(
     readonly expectedToken?: string | null;
     readonly expectedPid?: number;
     readonly expectedHostname?: string;
+    /** Evaluated atomically under `withProjectLeaseLock`; return false to refuse release. */
+    readonly canRelease?: (holder: ProjectLeaseHolder) => boolean;
   } = {},
 ): boolean {
   if (!fs.existsSync(leasePath(projectRoot))) return false;
@@ -295,6 +297,7 @@ export function releaseProjectLease(
       ) {
         return false;
       }
+      if (opts.canRelease && !opts.canRelease(lease.holder)) return false;
       writeLeaseFile(projectRoot, { version: 1, preempted: lease.preempted });
       return true;
     },

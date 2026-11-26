@@ -1,0 +1,49 @@
+{
+  "id": "theme.layout.select",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "母版/版式列表项",
+  "description": "Layout rail 母版与版式 list: each row selects a layout or the master as the editing surface. A row is a select control; the master is listed first, with its thumbnail, name and 母版 tag.",
+  "kimiUi": {
+    "controlLabel": "母版或版式名称",
+    "location": "左侧「母版与版式」列表",
+    "appearsWhen": "on a layout or master surface"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Entered first with 编辑版式 on page 5 (正文)."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["点击「母版与版式」列表中的一个版式或母版"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "selecting a layout row changes the editor surface only; the PPTD document stays unchanged"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": false,
+    "commandHint": "layoutSelect"
+  },
+  "test": {
+    "id": "EO-LAYOUT-004",
+    "automated": true,
+    "selfTestChecklist": ["a list row selects its layout or the master"]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

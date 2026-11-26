@@ -1,0 +1,52 @@
+{
+  "id": "insert.pagenumber",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "页码",
+  "description": "Insert toolbar on a layout or master surface: 页码 adds a page-number text field ({page}), which each page shows with its own number. The button is hidden on page mode.",
+  "kimiUi": {
+    "controlLabel": "页码",
+    "location": "画布底部插入工具栏",
+    "appearsWhen": "on a layout or master surface"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 4,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Entered first with 编辑版式 on page 5 (正文)."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["在版式编辑时点击插入工具栏「页码」"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "insertPageNumber adds a text element with field pageNumber to the layout"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": true,
+    "commandHint": "insertPageNumber"
+  },
+  "test": {
+    "id": "EO-PAGENUMBER-001",
+    "automated": true,
+    "selfTestChecklist": [
+      "a layout surface shows the 页码 insert",
+      "完成 leaves the layout, and 页码 inserts the page number"
+    ]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

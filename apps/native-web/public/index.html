@@ -8,8 +8,10 @@
     <script src="./theme-boot.js"></script>
     <link rel="stylesheet" href="./tokens.css?v=20260923-warm" />
     <link rel="stylesheet" href="./styles.css?v=20260923-warm" />
+    <link rel="stylesheet" href="./material-notices.css?v=20261025" />
     <link rel="stylesheet" href="./tooltips.css?v=20260923-warm" />
     <script src="./snap-guides.js"></script>
+    <script src="./border-width.js"></script>
     <script src="./shape-paint.js"></script>
   </head>
   <body>
@@ -83,13 +85,14 @@
         <p id="assistant-feedback" role="status" hidden></p>
         <p class="work-target" id="work-target" aria-live="polite" data-i18n="目标：当前页">目标：当前页</p>
         <div class="agent-attachments" id="agent-attachments" data-i18n-aria-label="待发送附件" aria-label="待发送附件" hidden></div>
+        <p id="style-source-notice" class="style-source-notice" role="status" hidden></p>
         <div class="comment-batch-chip" id="work-comment-batch" aria-live="polite" hidden>
           <span id="work-comment-batch-label"></span>
           <div id="work-comment-items" class="comment-attachments" data-i18n-aria-label="待发送批注" aria-label="待发送批注"></div>
         </div>
         <textarea id="work-brief" data-i18n-aria-label="与 AI 协作" aria-label="与 AI 协作" data-i18n-placeholder="聊想法，或描述想修改的内容…" placeholder="聊想法，或描述想修改的内容…"></textarea>
         <div class="composer-tools">
-          <button type="button" id="composer-plus" data-i18n-title="添加 TXT、Markdown、CSV、TSV 或 JSON 附件" title="添加 TXT、Markdown、CSV、TSV 或 JSON 附件" data-i18n-aria-label="添加 TXT、Markdown、CSV、TSV 或 JSON Agent 附件" aria-label="添加 TXT、Markdown、CSV、TSV 或 JSON Agent 附件">+</button>
+          <button type="button" id="composer-plus" data-control="chrome.workspace.assistant.attach.open" data-i18n-title="添加参考附件：图片 PNG / JPG / WebP / GIF / AVIF / SVG（SVG 转换为图片）及图片 ZIP 包、PPTX / POTX、THMX、XLSX、CSV / TSV、PDF、DOCX 或 TXT / MD / JSON；PPTX、POTX、PDF 单个不超过 50MB，其他不超过 20MB" title="添加参考附件：图片 PNG / JPG / WebP / GIF / AVIF / SVG（SVG 转换为图片）及图片 ZIP 包、PPTX / POTX、THMX、XLSX、CSV / TSV、PDF、DOCX 或 TXT / MD / JSON；PPTX、POTX、PDF 单个不超过 50MB，其他不超过 20MB" data-i18n-aria-label="添加参考附件：支持图片、图片 ZIP 包、PPTX、Excel、CSV / TSV、PDF、Word 与文本文件；PPTX、POTX、PDF 单个不超过 50MB，其他不超过 20MB" aria-label="添加参考附件：支持图片、图片 ZIP 包、PPTX、Excel、CSV / TSV、PDF、Word 与文本文件；PPTX、POTX、PDF 单个不超过 50MB，其他不超过 20MB">+</button>
           <select data-control="chrome.workspace.assistant.model" id="assistant-model" data-i18n-aria-label="助手模型" aria-label="助手模型" data-i18n-title="选择下一条消息使用的模型" title="选择下一条消息使用的模型"><option value="">当前模型</option></select>
           <button type="submit" class="composer-send" data-control="chrome.workspace.assistant.send" data-i18n-title="发送" title="发送" data-i18n-aria-label="发送消息" aria-label="发送消息">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
@@ -160,6 +163,7 @@
           <button type="button" class="insert-btn" data-insert="shape" data-control="insert.shape" data-i18n-title="插入形状" title="插入形状" data-i18n-aria-label="插入形状" aria-label="插入形状" aria-haspopup="dialog" aria-controls="shape-palette" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="6" width="14" height="12" rx="3"/></svg><span data-i18n="形状">形状</span></button>
           <button type="button" class="insert-btn" data-insert="image" data-control="insert.image" data-i18n-title="插入图片" title="插入图片" data-i18n-aria-label="插入图片" aria-label="插入图片"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="M4 16l5-5 3 3 2-2 6 6"/></svg><span data-i18n="图片">图片</span></button>
           <button type="button" class="insert-btn" data-insert="table" data-control="insert.table" data-i18n-title="插入表格" title="插入表格" data-i18n-aria-label="插入表格" aria-label="插入表格" aria-haspopup="dialog" aria-controls="table-size" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 10h16M4 15h16M10 5v14M16 5v14"/></svg><span data-i18n="表格">表格</span></button>
+          <button type="button" class="insert-btn" id="btn-insert-pagenumber" data-control="insert.pagenumber" data-i18n-title="插入页码" title="插入页码" data-i18n-aria-label="插入页码" aria-label="插入页码" hidden><span class="insert-glyph">#</span><span data-i18n="页码">页码</span></button>
         </nav>
         <span class="spacer"></span>
         <button type="button" class="icon-btn" id="btn-zoom-out" data-control="chrome.zoom.out" data-i18n-title="缩小" title="缩小">−</button>
@@ -169,7 +173,15 @@
 
       <div class="workspace">
         <aside class="rail" id="rail" data-i18n-aria-label="页面列表" aria-label="页面列表"></aside>
+        <aside class="rail layout-rail" id="layout-rail" data-i18n-aria-label="母版与版式" aria-label="母版与版式" hidden></aside>
         <main class="stage-wrap">
+          <div class="layout-banner" id="layout-banner" role="status" aria-live="polite" hidden>
+            <p class="layout-banner-main">
+              <span id="layout-banner-text"></span>
+              <button type="button" class="layout-exit" id="layout-exit" data-control="theme.layout.exit" data-i18n="完成">完成</button>
+            </p>
+            <small class="layout-banner-note" id="layout-banner-note"></small>
+          </div>
           <div id="comment-mode-hint" class="comment-mode-hint" role="status" aria-live="polite" hidden></div>
           <div class="stage-viewport" id="viewport">
             <div class="slide-card">
@@ -213,6 +225,17 @@
             <div><small data-i18n="对象属性">对象属性</small><strong id="property-title" data-i18n="未选择对象">未选择对象</strong></div>
             <button type="button" class="icon-btn" id="property-toggle" data-i18n-aria-label="收起属性面板" aria-label="收起属性面板" aria-expanded="true">›</button>
           </header>
+          <section class="layout-page-section" id="layout-page-section" data-i18n-aria-label="页面版式" aria-label="页面版式" hidden>
+            <label class="layout-apply-row">
+              <span data-i18n="版式">版式</span>
+              <select id="layout-apply" data-control="theme.layout.apply"></select>
+            </label>
+            <div class="layout-page-actions">
+              <button type="button" id="layout-enter" data-control="theme.layout.enter" data-i18n="编辑版式">编辑版式</button>
+              <button type="button" id="layout-create-first" data-control="theme.layout.create" data-i18n="新建版式" hidden>新建版式</button>
+            </div>
+            <p class="layout-note" id="layout-page-note" hidden></p>
+          </section>
           <p class="property-empty" id="property-empty" data-i18n="选择文字、形状、图片、表格或图表后，在这里调整属性。">选择文字、形状、图片、表格或图表后，在这里调整属性。</p>
           <div class="ctx-bar" id="ctx-bar" hidden></div>
         </aside>
@@ -302,7 +325,7 @@
       <span style="font-family:'Maple Mono'">Aa</span>
     </div>
     <input type="file" id="image-file" accept="image/*" hidden />
-    <input type="file" id="agent-attachment-file" accept=".txt,.md,.csv,.tsv,.json,text/plain,text/markdown,text/csv,application/json" multiple hidden />
+    <input type="file" id="agent-attachment-file" accept=".png,.jpg,.jpeg,.webp,.gif,.avif,.svg,.zip,.pptx,.potx,.thmx,.xlsx,.csv,.tsv,.pdf,.docx,.txt,.md,.json" multiple hidden />
     <div class="app-toast" id="app-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     </div>
     <script type="module" src="./diagnostics-boot.js"></script>

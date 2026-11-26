@@ -147,7 +147,11 @@ export const features = [
       const out = path.join(rec.dir, "editor-comment-batch.log");
       const code = await new Promise((resolve) => {
         const log = fs.openSync(out, "w");
-        const child = spawn(process.execPath, [script], { cwd: REPO, stdio: ["ignore", log, log], env: process.env });
+        const child = spawn(process.execPath, [script], {
+          cwd: REPO,
+          stdio: ["ignore", log, log],
+          env: { ...process.env, SLIDES_DSH_PORT: String(ctx.fake.port) },
+        });
         const timer = setTimeout(() => child.kill("SIGTERM"), 240000);
         child.on("exit", (c) => {
           clearTimeout(timer);

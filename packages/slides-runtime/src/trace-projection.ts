@@ -184,21 +184,28 @@ export function resultRow(stamp: TraceStamp, callId: string, content: unknown, i
   };
 }
 
-function readExistingTraceState(file: string): { maxSeq: number; needsNewline: boolean } {
-  if (!fs.existsSync(file)) return { maxSeq: 0, needsNewline: false };
+function readExistingTraceState(file: string): { maxSeq: number; maxTurn: number; needsNewline: boolean } {
+  if (!fs.existsSync(file)) return { maxSeq: 0, maxTurn: 0, needsNewline: false };
   const text = fs.readFileSync(file, "utf8");
-  if (!text) return { maxSeq: 0, needsNewline: false };
+  if (!text) return { maxSeq: 0, maxTurn: 0, needsNewline: false };
   let maxSeq = 0;
+  let maxTurn = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const seq = (JSON.parse(line) as { seq?: unknown }).seq;
-      if (typeof seq === "number" && Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+      const row = JSON.parse(line) as { seq?: unknown; turn?: unknown };
+      if (typeof row.seq === "number" && Number.isFinite(row.seq) && row.seq > maxSeq) maxSeq = row.seq;
+      if (typeof row.turn === "number" && Number.isFinite(row.turn) && row.turn > maxTurn) maxTurn = row.turn;
     } catch {
       // Ignore a crash-truncated or malformed trailing line.
     }
   }
-  return { maxSeq, needsNewline: !text.endsWith("\n") };
+  return { maxSeq, maxTurn, needsNewline: !text.endsWith("\n") };
+}
+
+/** Read the highest persisted seq and turn number in `_agent/agent-trace.jsonl` (including pre-cutover traces). */
+export function readTraceHighWater(projectRoot: string): { maxSeq: number; maxTurn: number; needsNewline: boolean } {
+  return readExistingTraceState(path.join(projectRoot, AGENT_TRACE_REL));
 }
 
 export type TraceWriteGate = (projectRoot: string, write: () => void) => boolean;

@@ -40,8 +40,9 @@ const BUNDLED_NODE_MODULES = [
   "https",
   "image-size",
   "pptxgenjs",
-  // Pure-JS unzip used by the canonical slide tools; sharp stays an optional, unbundled codec.
+  // Pure-JS unzip & PDF extraction used by canonical slide tools and native-web materials; sharp/@napi-rs/canvas stay unbundled.
   "fflate",
+  "unpdf",
   // Host-agnostic core agent loop dependencies (hoisted once to keep ESM identity and tarball size clean).
   "@earendil-works/pi-ai",
   "@earendil-works/pi-agent-core",

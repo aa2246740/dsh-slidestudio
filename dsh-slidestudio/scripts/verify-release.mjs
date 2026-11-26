@@ -51,6 +51,30 @@ try {
   );
   const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
   await load("lib/dsh-slidestudio.js");
+  for (const stale of [
+    "lib/dsh-personal-slides.js",
+    "lib/types/dsh-personal-slides.js",
+    "lib/types/dsh-personal-slides.d.ts",
+    "lib/types/slides-preset.js",
+    "packages/dsh-slides-host/dist/agent-plane.js",
+    "packages/dsh-slides-host/dist/tools.js",
+    "packages/dsh-slides-host/dist/stream-bridge.js",
+    "packages/dsh-slides-host/dist/session-workspace.js",
+    "node_modules/@open-slidestudio/dsh-slides-host/dist/agent-plane.js",
+    "node_modules/@open-slidestudio/dsh-slides-host/dist/tools.js",
+  ]) {
+    assert.ok(!fs.existsSync(path.join(root, stale)), `Retired module ${stale} must not ship in tarball`);
+  }
+  const serverEntries = fs
+    .readdirSync(path.join(root, "lib"))
+    .filter((entry) => entry.endsWith(".js") && entry !== "client.js");
+  assert.deepEqual(
+    serverEntries,
+    ["dsh-slidestudio.js"],
+    `Unexpected server entries in lib/: ${serverEntries.join(", ")}`,
+  );
+  const entrySource = fs.readFileSync(path.join(root, "lib/dsh-slidestudio.js"), "utf8");
+  assert.ok(!/\bagentPresets\b/.test(entrySource), "Server entry must not reference retired agentPresets");
   const runtimeMod = await load("node_modules/@open-slidestudio/slides-runtime/dist/index.js");
   assert.equal(
     typeof runtimeMod.createSlidesRuntime,

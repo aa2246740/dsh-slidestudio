@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { isRecord } from "./generation-data.js";
 
 function cleanSelection(selection = {}) {
   return {
@@ -98,4 +99,60 @@ export function capabilityViewModel(card, extras = {}) {
       },
     ],
   };
+}
+
+/**
+ * `true` / `false` when this health document states
+ * `capability.vision.modelAcceptsImages`. Missing or non-boolean is unknown
+ * (`null`) and must not become a warning.
+ * @param {unknown} health
+ * @returns {boolean | null}
+ */
+export function healthModelAcceptsImages(health) {
+  if (!isRecord(health)) return null;
+  const capability = isRecord(health.capability) ? health.capability : null;
+  const vision = capability && isRecord(capability.vision) ? capability.vision : null;
+  if (!vision) return null;
+  if (vision.modelAcceptsImages === true) return true;
+  if (vision.modelAcceptsImages === false) return false;
+  return null;
+}
+
+/**
+ * Input modalities for one provider/model in a `/slides/models` payload. A
+ * missing model or list is unknown. An explicit `[]` returns as empty so
+ * callers can refuse to treat "not declared yet" as text-only.
+ * @param {unknown} directory
+ * @param {string} provider
+ * @param {string} model
+ * @returns {readonly string[] | undefined}
+ */
+export function modalitiesFor(directory, provider, model) {
+  if (!Array.isArray(directory) || !provider || !model) return undefined;
+  const group = directory.find(
+    (entry) => isRecord(entry) && entry.providerId === provider && Array.isArray(entry.models),
+  );
+  if (!isRecord(group) || !Array.isArray(group.models)) return undefined;
+  const entry = group.models.find((row) => isRecord(row) && row.id === model);
+  if (!isRecord(entry) || !Array.isArray(entry.inputModalities)) return undefined;
+  /** @type {unknown[]} */
+  const modalities = entry.inputModalities;
+  return modalities.filter((item) => typeof item === "string");
+}
+
+/**
+ * Whether the selected model accepts image input. `true`/`false` are definite.
+ * `null` is unknown and must not warn. An empty modality list stays unknown:
+ * the models route writes `[]` when the live catalog has not declared input yet.
+ * @param {boolean | null | undefined} healthAccepts
+ * @param {readonly string[] | undefined} modalities
+ * @returns {boolean | null}
+ */
+export function resolveImageCapability(healthAccepts, modalities) {
+  if (healthAccepts === true) return true;
+  if (Array.isArray(modalities) && modalities.includes("image")) return true;
+  if (Array.isArray(modalities) && modalities.length === 0) return null;
+  if (Array.isArray(modalities)) return false;
+  if (healthAccepts === false) return false;
+  return null;
 }

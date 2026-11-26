@@ -1,0 +1,52 @@
+{
+  "id": "theme.layout.create",
+  "version": 1,
+  "status": "verified",
+  "surface": "theme.layout",
+  "title": "新建版式",
+  "description": "Creates a layout with its own name. It is offered at the foot of the 母版与版式 rail, and in the page's 版式 section when the deck has no layout yet.",
+  "kimiUi": {
+    "controlLabel": "新建版式",
+    "location": "左侧「母版与版式」列表底部；无版式文稿时在页面「版式」区",
+    "appearsWhen": "on a layout or master surface, or on a page of a deck with no layout"
+  },
+  "preconditions": {
+    "fixtureId": "deck-layouts-fixture",
+    "pageIndex": 6,
+    "selection": {
+      "kind": "none"
+    },
+    "notes": "Committed as test-fixtures/layouts-project, which already has layouts. The no-layout case needs a deck without layouts."
+  },
+  "action": {
+    "type": "click",
+    "steps": ["点击「新建版式」"]
+  },
+  "evidence": {
+    "screenshots": {
+      "before": "shots/before.png",
+      "after": "shots/after.png"
+    },
+    "pptd": {
+      "summary": "layoutCreate adds a layout definition to the PPTD document"
+    }
+  },
+  "expectedNative": {
+    "mustChangeDocument": true,
+    "commandHint": "layoutCreate"
+  },
+  "test": {
+    "id": "EO-LAYOUT-005",
+    "automated": true,
+    "selfTestChecklist": [
+      "a deck without layouts offers 新建版式 in the 版式 section",
+      "a list row selects its layout or the master, and 新建版式 creates one"
+    ]
+  },
+  "oracle": {
+    "source": "manual",
+    "capturedAt": "2026-11-04T00:38:07.000Z",
+    "agent": "m5b-editor-layout-mode"
+  },
+  "updatedAt": "2026-11-04T00:38:07.000Z"
+}

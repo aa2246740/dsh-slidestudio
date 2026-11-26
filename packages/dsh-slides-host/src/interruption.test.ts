@@ -201,4 +201,16 @@ describe("markInterruptedTurn", () => {
     assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), true);
     assert.equal(readProjectLease(root).holder, undefined);
   });
+
+  it("refuses activation release atomically when another live PID holds the hub writer lease", () => {
+    const root = tempRoot();
+    const otherPid = process.pid === 1 ? 2 : 1;
+    assert.equal(
+      acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-live-other", pid: otherPid, ttlMs: 60_000 }).ok,
+      true,
+    );
+    assert.equal(releaseHubWriterLease(root, "s-live-other"), false);
+    assert.equal(readProjectLease(root).active, true);
+    assert.equal(readProjectLease(root).holder?.pid, otherPid);
+  });
 });

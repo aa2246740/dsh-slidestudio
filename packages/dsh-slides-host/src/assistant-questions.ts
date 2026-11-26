@@ -1,94 +1,75 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { UserQuestionError, type AskUserQuestionAnswer, type AskUserQuestionItem, type AskUserQuestionRequest } from "@deepseek-ai/dsh-user-questions";
+import {
+  ASSISTANT_QUESTIONS_REL,
+  validateQuestionAnswer,
+  type AssistantQuestionRow,
+  type QuestionAnswer,
+  type QuestionItem,
+} from "@open-slidestudio/slides-runtime";
 
-export type AssistantQuestion = {
-  id: string; at: string; questions: AskUserQuestionItem[];
-  status: "pending" | "answered" | "cancelled" | "interrupted";
-  answer?: AskUserQuestionAnswer;
-  answeredAt?: string;
+export type AssistantQuestion = AssistantQuestionRow;
+
+/** The live slice of a session runtime's `QuestionBroker` the HTTP bridge needs. */
+export type LiveQuestionBroker = {
+  list(): AssistantQuestionRow[];
+  answer(id: string, value: unknown): void;
+  cancel(id: string): void;
 };
-const FILE = "assistant-questions.v1.json";
 
-/** Native DSH waterfall adapter for the product's single conversation surface.
- * Only JSON presentation data is persisted; live agents/signals never cross HTTP.
+/**
+ * HTTP bridge for the product's single conversation surface. A running session
+ * routes through its `SlidesAgentRuntime` question broker (which persists to
+ * `_agent/assistant-questions.v1.json`); an idle or reloaded session reads the
+ * persisted rows, where a pending row without a live waiter is interrupted.
  */
 export class AssistantQuestions {
-  private pending = new Map<string, { sessionId: string; finish(answer?: AskUserQuestionAnswer, error?: Error, force?: boolean): void }>();
-  constructor(private rootFor: (sessionId: string) => string | undefined) {}
+  constructor(
+    private readonly rootFor: (sessionId: string) => string | undefined,
+    private readonly brokerFor: (sessionId: string) => LiveQuestionBroker | undefined = () => undefined,
+  ) {}
+
   private file(sessionId: string): string {
     const root = this.rootFor(sessionId);
     if (!root) throw new Error("Unknown slide session");
-    return path.join(root, "_agent", FILE);
+    return path.join(root, ASSISTANT_QUESTIONS_REL);
   }
-  list(sessionId: string): AssistantQuestion[] {
+
+  private persisted(sessionId: string): AssistantQuestion[] {
     const file = this.file(sessionId);
     if (!fs.existsSync(file)) return [];
-    const rows = JSON.parse(fs.readFileSync(file, "utf8")) as AssistantQuestion[];
-    return rows.map(row => row.status === "pending" && !this.pending.has(row.id) ? { ...row, status: "interrupted" } : row);
+    const rows = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+    if (!Array.isArray(rows)) return [];
+    return (rows as AssistantQuestion[]).map((row) =>
+      row.status === "pending" ? { ...row, status: "interrupted" } : row,
+    );
   }
-  private write(sessionId: string, rows: AssistantQuestion[]): void {
-    const file = this.file(sessionId);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${crypto.randomUUID()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(rows, null, 2)); fs.renameSync(temp, file);
+
+  list(sessionId: string): AssistantQuestion[] {
+    const broker = this.brokerFor(sessionId);
+    if (broker) {
+      this.file(sessionId);
+      return broker.list();
+    }
+    return this.persisted(sessionId);
   }
-  ask(sessionId: string, request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
-    if (request.signal?.aborted) return Promise.reject(new UserQuestionError("Question aborted", "ASK_ABORTED"));
-    const row: AssistantQuestion = { id: crypto.randomUUID(), at: new Date().toISOString(), questions: structuredClone(request.questions), status: "pending" };
-    return new Promise((resolve, reject) => {
-      const onAbort = () => finish(undefined, new UserQuestionError("Question aborted", "ASK_ABORTED"), true);
-      const finish = (answer?: AskUserQuestionAnswer, error?: Error, force = false) => {
-        if (!this.pending.has(row.id)) return;
-        try {
-          this.write(sessionId, this.list(sessionId).map(item => item.id === row.id ? { ...item, status: answer ? "answered" : "cancelled", ...(answer ? { answer, answeredAt: new Date().toISOString() } : {}) } : item));
-        } catch (failure) {
-          // HTTP must not acknowledge an answer that was not durably saved.
-          // Keep the native tool waiting so the same answer can be retried.
-          if (!force) throw failure;
-          error = failure instanceof Error ? failure : new Error(String(failure));
-        }
-        this.pending.delete(row.id); request.signal?.removeEventListener("abort", onAbort);
-        if (error) reject(error); else if (answer) resolve(answer);
-      };
-      this.pending.set(row.id, { sessionId, finish });
-      try { this.write(sessionId, [...this.list(sessionId), row]); }
-      catch (error) { this.pending.delete(row.id); reject(error); return; }
-      request.signal?.addEventListener("abort", onAbort, { once: true });
-      if (request.signal?.aborted) onAbort();
-    });
-  }
+
+  /** Answer or cancel a question; throws (HTTP 409) when it is gone, settled differently or invalid. */
   settle(sessionId: string, id: string, body: { action?: unknown; answer?: unknown }): void {
-    const row = this.list(sessionId).find(item => item.id === id);
+    const row = this.list(sessionId).find((item) => item.id === id);
     if (!row) throw new Error("这个问题已不存在，请刷新对话。");
     const answer = body.action === "answer" ? validateAnswer(row.questions, body.answer) : undefined;
     if (!answer && body.action !== "cancel") throw new Error("无效的回答操作");
     // A lost HTTP acknowledgement may be retried, but never changed after settlement.
     if (row.status === "answered" && JSON.stringify(row.answer) === JSON.stringify(answer)) return;
     if (row.status === "cancelled" && body.action === "cancel") return;
-    const pending = this.pending.get(id);
-    if (row.status !== "pending" || pending?.sessionId !== sessionId) throw new Error("这个问题已结束，请查看最新对话。");
-    pending.finish(answer, answer ? undefined : new UserQuestionError("The user cancelled this question; do not infer a choice or proceed with dependent changes.", "ASK_CANCELLED"));
-  }
-  dispose(): void {
-    for (const item of [...this.pending.values()]) item.finish(undefined, new UserQuestionError("Question connection closed", "ASK_ABORTED"), true);
+    const broker = this.brokerFor(sessionId);
+    if (row.status !== "pending" || !broker) throw new Error("这个问题已结束，请查看最新对话。");
+    if (answer) broker.answer(id, answer);
+    else broker.cancel(id);
   }
 }
 
-export function validateAnswer(questions: AskUserQuestionItem[], value: unknown): AskUserQuestionAnswer {
-  if (!value || typeof value !== "object" || !("answers" in value) || !Array.isArray(value.answers) || value.answers.length !== questions.length) throw new Error("请回答所有问题后再继续。");
-  const received = value.answers;
-  const seen = new Set<string>();
-  const answers = questions.map(question => {
-    const item = received.find((item: unknown) => item && typeof item === "object" && "id" in item && item.id === question.id) as Record<string, unknown> | undefined;
-    if (!item || seen.has(question.id) || !Array.isArray(item.selected) || item.selected.some(label => typeof label !== "string")) throw new Error("回答与当前问题不匹配。");
-    seen.add(question.id);
-    const selected = item.selected as string[];
-    if (new Set(selected).size !== selected.length || selected.some(label => !question.options?.some(option => option.label === label))) throw new Error("请选择当前问题提供的选项。");
-    const custom = typeof item.custom === "string" ? item.custom.trim() : "";
-    if (custom.length > 8000 || (!selected.length && !custom) || (!question.multiSelect && (selected.length > 1 || (selected.length && custom)))) throw new Error("请提供一个有效回答。");
-    return { id: question.id, selected, ...(custom ? { custom } : {}) };
-  });
-  return { answers };
+export function validateAnswer(questions: readonly QuestionItem[], value: unknown): QuestionAnswer {
+  return validateQuestionAnswer(questions, value);
 }

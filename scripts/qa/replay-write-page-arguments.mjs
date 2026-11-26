@@ -3,13 +3,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Context } from "@deepseek-ai/cordis";
-import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
-import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { loadProject } from "@open-slidestudio/pptd-v2";
 import { createPresentationRun } from "@open-slidestudio/presentation-run";
-import { AgentFaults } from "../../packages/dsh-slides-host/dist/agent-fault.js";
-import { registerSliceTools } from "../../packages/dsh-slides-host/dist/tools.js";
+import { createSlideTools, isSlideToolArgsError } from "@open-slidestudio/slides-tools";
+import { sliceProjectPort } from "../../packages/dsh-slides-host/dist/session-runtime-config.js";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const FIXTURE = path.join(ROOT, "output", "argument-replay");
@@ -54,14 +51,16 @@ function prepareWorkProject() {
 }
 
 function findPage(project, pageId) {
-  return project.pages.find((entry) =>
-    entry.page.id === pageId || path.basename(entry.path, ".page") === pageId);
+  return project.pages.find((entry) => entry.page.id === pageId || path.basename(entry.path, ".page") === pageId);
 }
 
 function pageDigest(projectRoot, project, pageId) {
   const loaded = findPage(project, pageId);
   if (!loaded) return undefined;
-  return crypto.createHash("sha256").update(fs.readFileSync(path.resolve(projectRoot, loaded.path))).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(path.resolve(projectRoot, loaded.path)))
+    .digest("hex");
 }
 
 const payload = readJson(PAYLOAD_FILE);
@@ -74,6 +73,7 @@ const binding = {
   ...readJson(path.join(WORK, "_agent", "slice-session.v1.json")),
   provider,
 };
+const signal = new AbortController().signal;
 const store = {
   bindingFor(sessionId) {
     return sessionId === REPLAY_SESSION ? binding : undefined;
@@ -83,36 +83,58 @@ const store = {
   },
 };
 
-const ctx = new Context();
-new SystemPrompt(ctx, {});
-const tools = new ToolRuntime(ctx, { mode: "native" });
 const presentation = createPresentationRun({ repoRoot: ROOT });
-registerSliceTools(tools, {
-  store,
+// The canonical slide tool the Hub's SlidesAgentRuntime runs, over the Hub store port.
+const writePage = createSlideTools({
   presentation,
-  workspaceRoot: FIXTURE,
   editorBaseUrl: "",
-  faults: new AgentFaults(),
-  provider: { ...provider, ready: true },
-});
+  projects: sliceProjectPort(store, {
+    providerId: provider.providerId,
+    modelId: provider.modelId,
+    inputModalities: [],
+  }),
+}).find((tool) => tool.name === "write_page");
+assert.ok(writePage, "the canonical suite must define write_page");
 
-const signal = new AbortController().signal;
-{
-  const original = await tools.execute({
-    callId: "argument-replay-original",
-    name: "write_page",
-    arguments: payload,
-    agent: { id: REPLAY_SESSION },
+async function execute(callId, args) {
+  const ctx = {
+    callId,
     signal,
-  });
-  assert.equal(original.isError, false, `registered write_page rejected the original argument envelope (${original.error?.code ?? "unknown"})`);
+    caller: { kind: "hub-run", id: `hub-run:${REPLAY_SESSION}` },
+    sessionId: REPLAY_SESSION,
+    projectId: binding.projectRoot,
+    projectRoot: WORK,
+  };
+  try {
+    writePage.validate?.(args);
+    const result = await writePage.execute(args, ctx);
+    return { isError: false, value: result.data };
+  } catch (error) {
+    if (isSlideToolArgsError(error)) return { isError: true, error: { info: { code: "INVALID_ARGS" } } };
+    throw error;
+  }
+}
+
+{
+  // pi-agent-core hands tools the model's declared fields directly; the captured
+  // provider envelope is unwrapped once, exactly as the provider transport does.
+  const original = await execute("argument-replay-original", payload.arguments);
+  assert.equal(
+    original.isError,
+    false,
+    `canonical write_page rejected the original argument envelope (${original.error?.code ?? "unknown"})`,
+  );
   assert.equal(original.value?.outcome, "rejected", "the captured payload must retain its downstream layout failure");
   assert.match(
     String(original.value?.detail ?? ""),
     /text el-03 overlaps el-04[\s\S]*text el-08 overlaps el-10/,
     "the exact original payload must reach the product layout validator",
   );
-  assert.equal(pageDigest(WORK, loadProject(WORK), payload.arguments.id), undefined, "rejected original payload must not paint a page");
+  assert.equal(
+    pageDigest(WORK, loadProject(WORK), payload.arguments.id),
+    undefined,
+    "rejected original payload must not paint a page",
+  );
 
   // Keep the captured fixture exact. This in-memory variant changes only the
   // two reported bounds so the same registered execution path can prove that a
@@ -120,14 +142,12 @@ const signal = new AbortController().signal;
   const corrected = structuredClone(payload);
   corrected.arguments.elements[3].bounds[1] = 140;
   corrected.arguments.elements[7].bounds[3] = 28;
-  const valid = await tools.execute({
-    callId: "argument-replay-corrected",
-    name: "write_page",
-    arguments: corrected,
-    agent: { id: REPLAY_SESSION },
-    signal,
-  });
-  assert.equal(valid.isError, false, `registered write_page rejected the corrected argument envelope (${valid.error?.code ?? "unknown"})`);
+  const valid = await execute("argument-replay-corrected", corrected.arguments);
+  assert.equal(
+    valid.isError,
+    false,
+    `canonical write_page rejected the corrected argument envelope (${valid.error?.code ?? "unknown"})`,
+  );
   assert.ok(
     valid.value?.outcome === "written" || valid.value?.outcome === "skipped-identical",
     `corrected write_page did not persist (outcome=${valid.value?.outcome ?? "missing"}; detail=${valid.value?.detail ?? "none"})`,
@@ -145,13 +165,7 @@ const signal = new AbortController().signal;
   const beforeInvalid = pageDigest(WORK, written, pageId);
   assert.ok(beforeInvalid, "persisted page must have bytes on disk");
 
-  const invalid = await tools.execute({
-    callId: "argument-replay-invalid",
-    name: "write_page",
-    arguments: { arguments: { elements: payload.arguments.elements } },
-    agent: { id: REPLAY_SESSION },
-    signal,
-  });
+  const invalid = await execute("argument-replay-invalid", { elements: payload.arguments.elements });
   assert.equal(invalid.isError, true, "missing id must still fail registered schema validation");
   assert.equal(invalid.error?.info?.code, "INVALID_ARGS", "schema rejection must remain ToolArgsError/INVALID_ARGS");
   const afterInvalid = pageDigest(WORK, loadProject(WORK), pageId);

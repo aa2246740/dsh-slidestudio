@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
+import { readReviewAiGuardFile, removeReviewAiGuard, writeReviewAiGuard } from "./review-ai-guard.mjs";
 
-const REVIEW_AI_LOCK_TTL_MS = 15 * 60 * 1000;
-const REVIEW_AI_LOCK_REL = path.join("_agent", "ai-review-lock.v1.json");
+// The durable guard file lives in review-ai-guard.mjs; these re-exports keep the module's
+// historical import surface for server.mjs and the review fixtures.
+export { readReviewAiGuardFile, removeReviewAiGuard, writeReviewAiGuard };
+
+export const REVIEW_AI_LOCK_TTL_MS = 15 * 60 * 1000;
 
 /**
  * @typedef {{pageId?: string, pagePath?: string, pageSha256?: string, revision?: number, [key: string]: unknown}} ReviewAiPageRecord
@@ -13,6 +16,7 @@ const REVIEW_AI_LOCK_REL = path.join("_agent", "ai-review-lock.v1.json");
  *   pagePath: string,
  *   expiresAt: number,
  *   createdAt: string,
+ *   renewedAt?: number,
  *   commentId?: string,
  *   commentRevision?: number,
  *   scope?: {
@@ -49,56 +53,6 @@ const REVIEW_AI_LOCK_REL = path.join("_agent", "ai-review-lock.v1.json");
 /** @type {Map<string, ReviewAiLock>} */
 export const reviewAiLocks = new Map();
 
-/**
- * @param {string} root
- * @param {ReviewAiLock} lock
- */
-export function writeReviewAiGuard(root, lock) {
-  const file = path.join(root, REVIEW_AI_LOCK_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(
-    temp,
-    `${JSON.stringify(
-      {
-        version: 1,
-        token: lock.token,
-        pagePath: lock.pagePath,
-        commentId: lock.commentId,
-        scope: lock.scope,
-        commentRevision: lock.commentRevision,
-        pageSha256: lock.pageSha256,
-        pageBody: lock.pageBody,
-        ...(Array.isArray(lock.items) && lock.items.length ? { items: lock.items } : {}),
-        ...(Array.isArray(lock.projectPages) && lock.projectPages.length ? { projectPages: lock.projectPages } : {}),
-        createdAt: lock.createdAt,
-        expiresAt: lock.expiresAt,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-  fs.renameSync(temp, file);
-}
-
-/** @param {string} root */
-export function removeReviewAiGuard(root) {
-  fs.rmSync(path.join(root, REVIEW_AI_LOCK_REL), { force: true });
-}
-
-/** @param {string} root */
-export function readReviewAiGuardFile(root) {
-  try {
-    const file = path.join(root, REVIEW_AI_LOCK_REL);
-    if (!fs.existsSync(file)) return undefined;
-    const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && typeof value === "object" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** @param {string} root */
 export function activeReviewAiLock(root) {
   const key = path.resolve(root);
@@ -131,6 +85,9 @@ export function renewReviewAiLock(token, { writeGuard = writeReviewAiGuard } = {
   if (!lock) return undefined;
   const durable = readReviewAiGuardFile(lock.root);
   if (durable && durable.token !== lock.token) return undefined;
+  // The browser did call; a failed guard write below is the server's fault, so it still counts
+  // as proof that the holding tab is alive (see comment-batch-settle.mjs).
+  lock.renewedAt = Date.now();
   const next = { ...lock, expiresAt: Date.now() + REVIEW_AI_LOCK_TTL_MS };
   writeGuard(lock.root, next);
   lock.expiresAt = next.expiresAt;
@@ -188,6 +145,7 @@ export function acquireReviewAiLock(
     snapshotVersionId: undefined,
     createdAt: new Date().toISOString(),
     expiresAt: Date.now() + REVIEW_AI_LOCK_TTL_MS,
+    renewedAt: Date.now(),
   };
   writeReviewAiGuard(key, lock);
   reviewAiLocks.set(key, lock);
@@ -208,4 +166,18 @@ export function releaseReviewAiLock(root, token) {
   reviewAiLocks.delete(key);
   if (durable) removeReviewAiGuard(key);
   return { released: true };
+}
+
+/**
+ * The assistant request id a pre-edit snapshot records. A comment batch is identified by the
+ * server-issued submission id, which its reply message carries as `reviewSubmissionId`, so the
+ * reply gets its 查看修改前 link; a client-supplied id is honoured only for workspace edits.
+ * @param {ReviewAiLock | undefined} lock
+ * @param {unknown} requested the request body's `assistantRequestId`
+ * @returns {string | undefined}
+ */
+export function snapshotAssistantRequestId(lock, requested) {
+  if (!lock) return undefined;
+  if (lock.submissionId) return lock.submissionId;
+  return !lock.commentId && typeof requested === "string" ? requested : undefined;
 }

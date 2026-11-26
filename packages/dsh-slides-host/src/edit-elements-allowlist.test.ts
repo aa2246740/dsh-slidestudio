@@ -3,15 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type ToolRuntime from "@deepseek-ai/dsh-tools";
-import type { ToolDefinition } from "@deepseek-ai/dsh-tools";
-import type { PresentationRun } from "@open-slidestudio/presentation-run";
-import { AgentFaults } from "./agent-fault.js";
-import { patchProduceAssembly } from "./produce-request-header.js";
+import { excludedToolsFor, sessionProduceToolAllowlist } from "./produce-tool-policy.js";
 import { SliceSessionStore } from "./slice-session.js";
-import { registerSliceTools, sessionProduceToolAllowlist } from "./tools.js";
 
-// Moved verbatim from edit-elements.test.ts to keep that file inside the 500-line budget.
 test("ordinary generation keeps edit_elements hidden until an active elements scope exists", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "edit-elements-allowlist-"));
   const store = new SliceSessionStore(workspace);
@@ -32,39 +26,11 @@ test("ordinary generation keeps edit_elements hidden until an active elements sc
   assert.equal(ordinary.has("render_deck"), false);
   assert.equal(ordinary.has("review_deck"), false);
 
-  const definitions: ToolDefinition[] = [];
-  registerSliceTools(
-    {
-      register(definition: ToolDefinition) {
-        definitions.push(definition);
-        return () => undefined;
-      },
-      guard() {
-        return () => undefined;
-      },
-    } as unknown as ToolRuntime,
-    {
-      ...deps,
-      presentation: {
-        execute: async () => {
-          throw new Error("unused");
-        },
-      } as unknown as PresentationRun,
-      workspaceRoot: workspace,
-      editorBaseUrl: "",
-      faults: new AgentFaults(),
-    },
-  );
-  const assemblyTools = definitions.map((definition) => ({
-    name: definition.name,
-    description: definition.description,
-    parameters: definition.parameters,
-  }));
-  const ordinaryHeader = patchProduceAssembly({ sections: [], tools: assemblyTools }, ordinary);
-  assert.equal(
-    ordinaryHeader.tools.some((tool) => tool.name === "edit_elements"),
-    false,
-  );
+  // The runtime never offers what the turn allowlist hides.
+  const ordinaryExcluded = excludedToolsFor(ordinary);
+  assert.equal(ordinaryExcluded.has("edit_elements"), true);
+  assert.equal(ordinaryExcluded.has("web_search"), true);
+  assert.equal(ordinaryExcluded.has("open_in_editor"), true);
 
   fs.mkdirSync(path.join(projectRoot, "_agent"), { recursive: true });
   fs.writeFileSync(
@@ -82,16 +48,9 @@ test("ordinary generation keeps edit_elements hidden until an active elements sc
   assert.equal(scoped.size, ordinary.size - 1);
   assert.equal(scoped.has("edit_elements"), true);
   assert.equal(scoped.has("write_page"), false);
-  const scopedHeader = patchProduceAssembly({ sections: [], tools: assemblyTools }, scoped);
-  assert.equal(scopedHeader.tools.length, ordinaryHeader.tools.length - 1);
-  assert.equal(
-    scopedHeader.tools.some((tool) => tool.name === "edit_elements"),
-    true,
-  );
-  assert.equal(
-    scopedHeader.tools.some((tool) => tool.name === "write_page"),
-    false,
-  );
+  const scopedExcluded = excludedToolsFor(scoped);
+  assert.equal(scopedExcluded.has("edit_elements"), false);
+  assert.equal(scopedExcluded.has("write_page"), true);
 
   fs.writeFileSync(
     path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),

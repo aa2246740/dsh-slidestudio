@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readConversation, recordConversationMessage, discussionOnly, DISCUSSION_TOOLS, discussionInstruction } from "./assistant-conversation.js";
-import { sessionProduceToolAllowlist } from "./tools.js";
+import {
+  readConversation,
+  recordConversationMessage,
+  discussionOnly,
+  DISCUSSION_TOOLS,
+  discussionInstruction,
+} from "./assistant-conversation.js";
+import { sessionProduceToolAllowlist } from "./produce-tool-policy.js";
 import { SliceSessionStore } from "./slice-session.js";
 
 it("keeps two conversation turns after reopening and redacts credentials", () => {
@@ -22,7 +28,9 @@ it("keeps two conversation turns after reopening and redacts credentials", () =>
     assert.equal(readConversation(root).messages.length, 3);
     fs.writeFileSync(path.join(root, "_agent", "assistant-conversation.v1.json"), "invalid");
     assert.throws(() => discussionOnly(root));
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 it("exposes read-only tools for discussion even after a fresh session-store load", () => {
@@ -30,17 +38,34 @@ it("exposes read-only tools for discussion even after a fresh session-store load
   try {
     const store = new SliceSessionStore(workspaceRoot);
     const provider = { providerId: "test", modelId: "test", ready: true };
-    const opened = store.openProject({ dshSessionId: "chat-test", title: "Chat", design: {kind:"self-directed"}, provider });
+    const opened = store.openProject({
+      dshSessionId: "chat-test",
+      title: "Chat",
+      design: { kind: "self-directed" },
+      provider,
+    });
     const root = store.resolveRoot(opened.binding);
     recordConversationMessage(root, "讨论一下", "discuss");
-    const reloaded = new SliceSessionStore(workspaceRoot); reloaded.rebuild();
-    const allowed = sessionProduceToolAllowlist({store:reloaded, provider}, "chat-test");
+    const reloaded = new SliceSessionStore(workspaceRoot);
+    reloaded.rebuild();
+    const allowed = sessionProduceToolAllowlist({ store: reloaded, provider }, "chat-test");
     assert.equal(allowed, DISCUSSION_TOOLS);
-    for (const name of ["write_page", "edit_elements", "compose_deck", "write_todo", "generate_image", "open_project", "export_deck"]) assert.equal(allowed.has(name), false, name);
+    for (const name of [
+      "write_page",
+      "edit_elements",
+      "compose_deck",
+      "write_todo",
+      "generate_image",
+      "open_project",
+      "export_deck",
+    ])
+      assert.equal(allowed.has(name), false, name);
     assert.equal(allowed.has("read_page"), true);
     recordConversationMessage(root, "修改当前页", "edit");
-    assert.equal(sessionProduceToolAllowlist({store:reloaded, provider}, "chat-test").has("write_page"), true);
-  } finally { fs.rmSync(workspaceRoot, {recursive:true,force:true}); }
+    assert.equal(sessionProduceToolAllowlist({ store: reloaded, provider }, "chat-test").has("write_page"), true);
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });
 
 it("discussion instructions preserve user intent and do not claim a write", () => {
@@ -56,5 +81,7 @@ it("returns the same durable review acknowledgement after reopening", () => {
     const message = recordConversationMessage(root, "批注 1：标题红色", "edit", "receipt-1");
     assert.deepEqual(readConversation(root).messages[0], message);
     assert.equal(message.reviewSubmissionId, "receipt-1");
-  } finally { fs.rmSync(root, { recursive:true, force:true }); }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
