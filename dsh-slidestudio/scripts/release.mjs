@@ -2,7 +2,7 @@
  * one installable package, mirroring dsh-personal-entry's release flow. */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -24,6 +24,7 @@ const RUNTIME_PACKAGES = [
   "presentation-run",
   "slides-tools",
   "slides-mcp",
+  "slides-runtime",
   "dsh-slides-host",
 ];
 const BUNDLED_NODE_MODULES = [
@@ -41,6 +42,9 @@ const BUNDLED_NODE_MODULES = [
   "pptxgenjs",
   // Pure-JS unzip used by the canonical slide tools; sharp stays an optional, unbundled codec.
   "fflate",
+  // Host-agnostic core agent loop dependencies (hoisted once to keep ESM identity and tarball size clean).
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-agent-core",
   ...RUNTIME_PACKAGES.map((p) => `@open-slidestudio/${p}`),
 ];
 
@@ -115,12 +119,15 @@ async function main() {
   writeFileSync(join(pkg, "cordis.patch.yml"), "- insert:\n    - id: dsh-slidestudio\n      name: dsh-slidestudio\n");
 
   // Copy the complete production dependency closure, including transitive packages.
-  // Resolve from each parent so differing dependency versions cannot be flattened incorrectly.
+  // Hoist each unique resolved package once into pkg/node_modules (O(V+E) even for
+  // diamond DAGs like @aws-sdk/@smithy), nesting only conflicting versions so
+  // every package resolves its exact dependency without exponential duplication.
   const bundledVersions = {};
-  function bundlePackage(name, source, destination, ancestors = new Set()) {
-    if (ancestors.has(source)) throw new Error(`cyclic bundled dependency: ${name}`);
-    const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
-    const next = new Set([...ancestors, source]);
+  const bundledNames = [];
+  const hoisted = new Map();
+  const rootNodeModules = join(repoRoot, "node_modules");
+
+  function copyPackageFiles(name, source, destination) {
     cpSync(source, destination, {
       recursive: true,
       dereference: true,
@@ -136,30 +143,87 @@ async function main() {
     if (name === "@open-slidestudio/pptd-v2") {
       cpSync(join(source, "src/data"), join(destination, "src/data"), { recursive: true });
     }
+  }
+
+  function bundlePackage(name, source, destination, ancestors = new Set(), ancestorOverrides = new Map()) {
+    const realSource = realpathSync(source);
+    if (ancestors.has(realSource)) throw new Error(`cyclic bundled dependency: ${name}`);
+    const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+    const nextAncestors = new Set([...ancestors, realSource]);
+    copyPackageFiles(name, source, destination);
+
     const require = createRequire(join(source, "package.json"));
-    const children = [];
-    for (const [child, range] of Object.entries(metadata.dependencies ?? {})) {
+    const nestedChildren = [];
+    const childEntries = [];
+    for (const child of Object.keys(metadata.dependencies ?? {})) {
       if (child.startsWith("@deepseek-ai/") || child.startsWith("@open-slidestudio/")) continue;
       const childManifest = require.resolve
         .paths(`${child}/package.json`)
         ?.map((base) => join(base, child, "package.json"))
         .find((file) => existsSync(file));
       if (!childManifest) throw new Error(`missing production dependency: ${child} from ${name}`);
-      bundlePackage(child, dirname(childManifest), join(destination, "node_modules", child), next);
-      children.push(child);
+      childEntries.push([child, dirname(childManifest), realpathSync(dirname(childManifest))]);
     }
-    metadata.bundleDependencies = children;
+
+    // Reserve nested overrides for this level before recursing so grandchildren
+    // know whether an ancestor shadows a hoisted top-level version.
+    const nextOverrides = new Map(ancestorOverrides);
+    const toNested = [];
+    const toHoist = [];
+    for (const [child, childDir, childReal] of childEntries) {
+      const visibleSource = ancestorOverrides.has(child) ? ancestorOverrides.get(child) : hoisted.get(child);
+      if (visibleSource === childReal) continue;
+      const isRootHoisted =
+        childReal === (existsSync(join(rootNodeModules, child)) ? realpathSync(join(rootNodeModules, child)) : null);
+      if (!ancestorOverrides.has(child) && !hoisted.has(child) && isRootHoisted) {
+        hoisted.set(child, childReal);
+        toHoist.push([child, childDir]);
+      } else if (!ancestorOverrides.has(child) && !hoisted.has(child)) {
+        // Non-root copy with no root conflict yet: nest under parent if a root
+        // copy of the same package exists in the repo, otherwise hoist safely.
+        if (existsSync(join(rootNodeModules, child, "package.json"))) {
+          nextOverrides.set(child, childReal);
+          toNested.push([child, childDir]);
+        } else {
+          hoisted.set(child, childReal);
+          toHoist.push([child, childDir]);
+        }
+      } else {
+        nextOverrides.set(child, childReal);
+        toNested.push([child, childDir]);
+      }
+    }
+
+    for (const [child, childDir] of toHoist) {
+      const childVersion = bundlePackage(child, childDir, join(pkg, "node_modules", child), nextAncestors, new Map());
+      bundledVersions[child] = childVersion;
+      bundledNames.push(child);
+    }
+    for (const [child, childDir] of toNested) {
+      bundlePackage(child, childDir, join(destination, "node_modules", child), nextAncestors, nextOverrides);
+      nestedChildren.push(child);
+    }
+
+    metadata.bundleDependencies = nestedChildren;
     delete metadata.devDependencies;
     delete metadata.scripts;
     writeFileSync(join(destination, "package.json"), JSON.stringify(metadata, null, 2) + "\n");
     return metadata.version;
   }
+
   for (const name of BUNDLED_NODE_MODULES) {
     const source = name.startsWith("@open-slidestudio/")
       ? join(repoRoot, "packages", name.split("/")[1])
       : join(repoRoot, "node_modules", name);
     if (!existsSync(source)) throw new Error(`missing dependency: ${name}`);
+    hoisted.set(name, realpathSync(source));
+  }
+  for (const name of BUNDLED_NODE_MODULES) {
+    const source = name.startsWith("@open-slidestudio/")
+      ? join(repoRoot, "packages", name.split("/")[1])
+      : join(repoRoot, "node_modules", name);
     bundledVersions[name] = bundlePackage(name, source, join(pkg, "node_modules", name));
+    bundledNames.push(name);
   }
 
   const published = {
@@ -168,7 +232,7 @@ async function main() {
     publishConfig: { access: "public", registry: "https://registry.npmjs.org/" },
     dependencies: bundledVersions,
     files: PUBLISHED_FILES,
-    bundleDependencies: BUNDLED_NODE_MODULES,
+    bundleDependencies: bundledNames,
     dsh: {
       ...(manifest.dsh ?? {}),
       bundle: { patch: "./cordis.patch.yml" },

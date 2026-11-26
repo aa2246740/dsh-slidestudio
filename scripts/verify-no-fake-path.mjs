@@ -16,6 +16,7 @@ const PRODUCT_GLOBS = [
   "packages/presentation-run/src",
   "packages/slides-tools/src",
   "packages/slides-mcp/src",
+  "packages/slides-runtime/src",
   "scripts/dsh-slides.mjs",
 ];
 
@@ -28,7 +29,9 @@ const FORBIDDEN = [
   { re: /runPiHand/, label: "runPiHand" },
   { re: /createRunPiHandPort/, label: "createRunPiHandPort" },
   { re: /from ["']@open-slidestudio\/agent-harness["']/, label: "agent-harness import" },
-  { re: /@earendil-works\/pi/, label: "pi-coding-agent" },
+  // ADR-0012: the core loop runs on @earendil-works/pi-agent-core + pi-ai; only the
+  // coding-agent product (and its createPiBrain / runPiHand ports) stays forbidden.
+  { re: /@earendil-works\/pi-coding-agent/, label: "pi-coding-agent" },
 ];
 
 /** Retired routes must stay tombstoned with HTTP 410 in the same handler block.
@@ -52,6 +55,31 @@ const RETIRED_ROUTES = [
     re: /url\.pathname\.startsWith\("\/api\/pi\/"\)\s*\)\s*\{\s*return json\(res,\s*410\b/,
   },
 ];
+
+const PRODUCTION_PACKAGES = [
+  "dsh-slides-host",
+  "dsh-slides-bundle",
+  "dsh-slides-client",
+  "presentation-run",
+  "slides-tools",
+  "slides-mcp",
+  "slides-runtime",
+];
+
+/** Production manifests must not depend on the frozen harness or the coding-agent product. */
+function productionManifestHits(root) {
+  const hits = [];
+  for (const pkg of PRODUCTION_PACKAGES) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, "packages", pkg, "package.json"), "utf8"));
+    for (const [dep, label] of [
+      ["@open-slidestudio/agent-harness", "agent-harness"],
+      ["@earendil-works/pi-coding-agent", "pi-coding-agent"],
+    ]) {
+      if (dep in (manifest.dependencies ?? {})) hits.push(`packages/${pkg}/package.json: production dep on ${label}`);
+    }
+  }
+  return hits;
+}
 
 export function collectFakePathHits(root) {
   const hits = [];
@@ -98,19 +126,7 @@ export function collectFakePathHits(root) {
     hits.push("package.json: dsh:profile:init still builds agent-harness");
   }
 
-  for (const pkg of [
-    "dsh-slides-host",
-    "dsh-slides-bundle",
-    "dsh-slides-client",
-    "presentation-run",
-    "slides-tools",
-    "slides-mcp",
-  ]) {
-    const manifest = JSON.parse(fs.readFileSync(path.join(root, "packages", pkg, "package.json"), "utf8"));
-    if ("@open-slidestudio/agent-harness" in (manifest.dependencies ?? {})) {
-      hits.push(`packages/${pkg}/package.json: production dep on agent-harness`);
-    }
-  }
+  hits.push(...productionManifestHits(root));
 
   if (fs.existsSync(path.join(root, "packages/dsh-slides-host/src/hands.ts"))) {
     hits.push("packages/dsh-slides-host/src/hands.ts: HandsPort still present");

@@ -3,7 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const MARKER = "default: return { type: \"text\" }";
+const MARKER = 'default: return { type: "text" }';
 
 const PEERS = [
   ["@deepseek-ai/cordis", ["node_modules/@deepseek-ai/cordis"]],
@@ -13,10 +13,16 @@ const PEERS = [
   ["@deepseek-ai/dsh-settings", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-settings"]],
   ["@deepseek-ai/dsh-timeout", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-timeout"]],
   ["@deepseek-ai/dsh-llm", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm"]],
-  ["@deepseek-ai/dsh-launch-environment", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-launch-environment"]],
+  [
+    "@deepseek-ai/dsh-launch-environment",
+    ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-launch-environment"],
+  ],
   ["@deepseek-ai/dsh-brand", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-brand"]],
   ["@deepseek-ai/dsh-util-values", ["node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-util-values"]],
-  ["@deepseek-ai/schemastery", ["node_modules/@deepseek-ai/schemastery", "node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery"]],
+  [
+    "@deepseek-ai/schemastery",
+    ["node_modules/@deepseek-ai/schemastery", "node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery"],
+  ],
   ["@earendil-works/pi-ai", ["node_modules/@earendil-works/pi-ai"]],
 ];
 
@@ -33,12 +39,16 @@ function linkPeers(root) {
     const src = candidates.map((rel) => path.join(root, rel)).find((p) => fs.existsSync(p));
     if (!src) continue;
     fs.mkdirSync(path.dirname(dest), { recursive: true });
+    let existing = null;
     try {
-      fs.lstatSync(dest);
-      fs.rmSync(dest, { recursive: true, force: true });
+      existing = fs.lstatSync(dest);
     } catch {
       // dest does not exist yet
     }
+    // npm nests a real copy here when the root hoists an incompatible major
+    // (root pi-ai 1.x for slides-runtime, vendor pin ^0.87.1); keep that copy.
+    if (existing && !existing.isSymbolicLink()) continue;
+    if (existing) fs.rmSync(dest, { recursive: true, force: true });
     fs.symlinkSync(src, dest, "dir");
   }
 }
@@ -65,9 +75,7 @@ export function assertDshPiAiReplayPin(root) {
   const resolvedReal = real(resolved);
   const vendorReal = real(vendorLib);
   if (resolvedReal !== vendorReal) {
-    throw new Error(
-      `live dsh-llm-pi-ai is not the vendor pin: resolved ${resolvedReal} vendor ${vendorReal}`,
-    );
+    throw new Error(`live dsh-llm-pi-ai is not the vendor pin: resolved ${resolvedReal} vendor ${vendorReal}`);
   }
   return { resolved: resolvedReal, vendor: vendorReal };
 }

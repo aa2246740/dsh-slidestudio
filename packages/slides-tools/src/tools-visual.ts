@@ -1,10 +1,11 @@
 /** Visual QA and delivery: render/review pages, compose and export the deck. */
 import fs from "node:fs";
 import path from "node:path";
-import { inspectProjectCapabilities, readPageRaster } from "@open-slidestudio/presentation-run";
+import { readPageRaster } from "@open-slidestudio/presentation-run";
 import type { SlideContentBlock, SlideToolContext, SlideToolDefinition, SlideToolResult } from "./contract.js";
 import { shouldAttachPageRaster } from "./page-raster-content.js";
 import {
+  capabilitiesFor,
   isLeaseRefusalData,
   present,
   receiptResult,
@@ -57,7 +58,7 @@ export function pageRasterContent(opts: {
   readonly deliveryToken?: string;
 }): Pick<SlideToolResult, "content" | "onContentDelivered"> {
   const { deps, ctx, pageId } = opts;
-  const visionMode = inspectProjectCapabilities(ctx.projectRoot).vision.mode;
+  const visionMode = capabilitiesFor(deps, ctx).vision.mode;
   const pngBytes = opts.pngBytes ?? readPageRaster(ctx.projectRoot, pageId);
   if (!shouldAttachPageRaster({ visionMode, pngBytes }) || !pngBytes) return {};
   if (ctx.acceptsImageContent === false) throw new Error(RASTER_SINK_MISSING);
@@ -73,6 +74,7 @@ export function pageRasterContent(opts: {
     ...(token
       ? {
           onContentDelivered: async () => {
+            if (ctx.signal?.aborted) return;
             await present(deps, ctx, "_mark_image_emitted", { deliveryToken: token });
           },
         }

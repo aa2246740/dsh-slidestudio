@@ -25,3 +25,18 @@ export {
   serializeProduceRequestHeader,
   patchProduceAssembly,
 } from "./produce-request-header.js";
+export {
+  DSH_ATTACHMENTS_UNAVAILABLE,
+  DshLlmPort,
+  toDshGenerateOptions,
+  type DshAttachmentService,
+  type DshBlockEndPayload,
+  type DshGenerateOptions,
+  type DshGenerateOptionsLike,
+  type DshLlmPortOptions,
+  type DshLlmService,
+  type DshRequestMessage,
+  type DshRequestMessageLike,
+  type DshStreamChunk,
+} from "./dsh-llm-port.js";
+export { DSH_REPLAY_STATE_DIAGNOSTIC, readDshReplayState } from "./dsh-llm-stream.js";

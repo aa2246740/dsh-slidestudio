@@ -105,6 +105,7 @@ For plugin packaging or a real Harness integration, read `INSTALL-DSH.md`.
 - `packages/exporter-native` — offline hybrid PPTX
 - `packages/canvas-session` — session + dead-button gate
 - `packages/slides-tools` — host-agnostic canonical tool contract + project writer lease (no host SDK deps; see `docs/architecture/slides-tools.md`)
+- `packages/slides-runtime` — the single host-neutral core agent loop on `@earendil-works/pi-agent-core@1.6.1` + `pi-ai@1.6.1`: `LlmPort` (`PiAiLlmPort`; `DshLlmPort` lives in `dsh-slides-host`), context budget, guards, session log, single-writer lease (see `docs/architecture/slides-runtime.md`, ADR-0012)
 - `packages/slides-mcp` — host-agnostic MCP server (stdio + loopback HTTP) over the canonical slide tools; external-agent skill in `skills/slidestudio/SKILL.md` (see `docs/architecture/slides-mcp.md`)
 - `packages/agent-harness` — offline generate tools timeline
 - `docs/wayfinder/`, `docs/editor-oracle/`, `docs/specs/` — law

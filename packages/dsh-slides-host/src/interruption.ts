@@ -1,10 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   DEFAULT_WRITER_LEASE_TTL_MS,
   readProjectLease,
   releaseProjectLease as releaseWriterLease,
   renewProjectLease,
+  type ProjectLeaseHolder,
 } from "@open-slidestudio/slides-tools";
 import { AGENT_TRACE_REL, appendAgentTrace, type AgentTraceRow } from "./agent-trace.js";
 import { readAgentError, readRateLimitWait, recordAgentError } from "./agent-fault.js";
@@ -65,6 +67,12 @@ export function releaseHubWriterLease(projectRoot: string, sessionId: string): b
   }
 }
 
+function isCurrentProcessHolder(holder: ProjectLeaseHolder | undefined, ownerId: string): boolean {
+  return Boolean(
+    holder && holder.ownerId === ownerId && holder.pid === process.pid && holder.hostname === os.hostname(),
+  );
+}
+
 function runDeferredReleaseAttempt(
   projectRoot: string,
   sessionId: string,
@@ -76,10 +84,15 @@ function runDeferredReleaseAttempt(
   if (options.canRelease && !options.canRelease()) return false;
   if (attempt > 0) {
     const holder = readProjectLease(projectRoot).holder;
-    if (!holder || holder.ownerId !== ownerId || (holder.token ?? null) !== expectedToken) return false;
+    if (!isCurrentProcessHolder(holder, ownerId) || (holder?.token ?? null) !== expectedToken) return false;
   }
   try {
-    return releaseWriterLease(projectRoot, ownerId, { lockTimeoutMs: 0, expectedToken });
+    return releaseWriterLease(projectRoot, ownerId, {
+      lockTimeoutMs: 0,
+      expectedToken,
+      expectedPid: process.pid,
+      expectedHostname: os.hostname(),
+    });
   } catch (error) {
     const maxAttempts = options.maxAttempts ?? DEFERRED_RELEASE_MAX_ATTEMPTS;
     if (isWriteLockContention(error) && attempt < maxAttempts) {
@@ -102,7 +115,8 @@ function runDeferredReleaseAttempt(
  * `agent/disposed`, HTTP stop): verifies lifetime/eligibility first, snapshots
  * the lease generation token, attempts one zero-wait lease-lock acquire, and
  * retries asynchronously on lock contention with compare-and-delete so neither
- * a stale retry nor an unloaded plugin can delete a lease owned by a later turn.
+ * a stale retry nor an unloaded plugin can delete a lease owned by a later turn
+ * or a successor process with the same ownerId.
  */
 export function releaseHubWriterLeaseNonBlocking(
   projectRoot: string,
@@ -112,11 +126,11 @@ export function releaseHubWriterLeaseNonBlocking(
   if (options.canRelease && !options.canRelease()) return false;
   const ownerId = `hub-run:${sessionId}`;
   const holder = readProjectLease(projectRoot).holder;
-  if (!holder || holder.ownerId !== ownerId) {
+  if (!isCurrentProcessHolder(holder, ownerId)) {
     options.registry?.cancel(sessionId);
     return false;
   }
-  return runDeferredReleaseAttempt(projectRoot, sessionId, ownerId, holder.token ?? null, options, 0);
+  return runDeferredReleaseAttempt(projectRoot, sessionId, ownerId, holder!.token ?? null, options, 0);
 }
 
 /** Resolve a bound Hub session and release its single-writer lease if held. */
@@ -144,7 +158,7 @@ export function renewBoundHubWriterLease(
   if (!binding) return "not-held";
   const root = store.resolveRoot(binding);
   const ownerId = `hub-run:${sessionId}`;
-  if (readProjectLease(root).holder?.ownerId !== ownerId) return "not-held";
+  if (!isCurrentProcessHolder(readProjectLease(root).holder, ownerId)) return "not-held";
   try {
     return renewProjectLease(root, {
       kind: "hub-run",

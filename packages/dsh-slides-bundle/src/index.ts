@@ -10,8 +10,7 @@ export const DSH_PIN = {
   /** Upstream tag dsh-v0.2.0-rc.2 in github.com/deepseek-ai/deepseek-harness (git ls-remote). */
   commit: "639ed015397290b3745d163aafe02ffee4aa3f84",
   /** Registry pin evidence: package-lock `integrity` for the tarball below. */
-  integrity:
-    "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==",
+  integrity: "sha512-EAJ3gPNcVt/uv8X19PMm9NkVhWgT7xXNMk0UKCVm+IQ5rpSQOcsMUa0HWlnYYVybKMsccjcRB21vVVsaXQ6IdA==",
   tarball: "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.0-rc.2.tgz",
 } as const;
 
@@ -84,20 +83,14 @@ export function assertSlidesRowLaw(entries: readonly EntryLike[]): void {
   if (/antigravity|\bagy-/i.test(`${defaultProvider} ${defaultModel}`)) {
     throw new SlidesRowLawError("antigravity", "agent-default-model must not be Antigravity");
   }
-  const providers = (byId.get("llm-pi-ai")?.config?.providers ?? {}) as Record<
-    string,
-    { apiKeyEnv?: string }
-  >;
+  const providers = (byId.get("llm-pi-ai")?.config?.providers ?? {}) as Record<string, { apiKeyEnv?: string }>;
   for (const id of Object.keys(providers)) {
     if (/antigravity|\bagy-/i.test(id)) {
       throw new SlidesRowLawError("antigravity", `llm-pi-ai must not configure ${id}`);
     }
   }
   if (providers["minimax-cn"]?.apiKeyEnv !== "MINIMAX_CN_API_KEY") {
-    throw new SlidesRowLawError(
-      "minimax-cn-route",
-      "llm-pi-ai minimax-cn.apiKeyEnv must be MINIMAX_CN_API_KEY",
-    );
+    throw new SlidesRowLawError("minimax-cn-route", "llm-pi-ai minimax-cn.apiKeyEnv must be MINIMAX_CN_API_KEY");
   }
   const presets = byId.get("agent-preset-registry")?.config ?? {};
   if (presets.default !== "slides") {
@@ -118,6 +111,8 @@ const UNPUBLISHED_WORKSPACE_PACKAGES = [
   "dsh-slides-client",
   "oss-oauth-login",
   "presentation-run",
+  "slides-tools",
+  "slides-runtime",
   "pptd-v2",
   "project-store",
   "exporter-native",
@@ -126,13 +121,9 @@ const UNPUBLISHED_WORKSPACE_PACKAGES = [
 export function writeSlidesProfile(home: string, repoRoot: string): string {
   const dir = path.join(home, "profiles", "slides");
   fs.mkdirSync(dir, { recursive: true });
-  const fileDep = (pkg: string) =>
-    `file:${path.resolve(repoRoot, "packages", pkg)}`;
+  const fileDep = (pkg: string) => `file:${path.resolve(repoRoot, "packages", pkg)}`;
   const unpublishedDeps = Object.fromEntries(
-    UNPUBLISHED_WORKSPACE_PACKAGES.map((pkg) => [
-      `@open-slidestudio/${pkg}`,
-      fileDep(pkg),
-    ]),
+    UNPUBLISHED_WORKSPACE_PACKAGES.map((pkg) => [`@open-slidestudio/${pkg}`, fileDep(pkg)]),
   );
   const manifest = {
     name: "dsh-profile-slides",

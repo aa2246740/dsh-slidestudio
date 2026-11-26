@@ -169,3 +169,25 @@ test("renewProjectLease with renewOnly refuses to re-acquire an already released
   assert.equal(denied.ok, false);
   assert.equal(readProjectLease(root).holder, undefined);
 });
+
+test("cross-process same ownerId takeover after TTL expiry is isolated by expectedPid on release and renewOnly", () => {
+  const root = tempDir("lease-pid");
+  const otherPid = process.pid === 1 ? 2 : 1;
+  const first = acquireProjectLease(root, { ...hub, now: T0, ttlMs: 1_000, pid: otherPid });
+  assert.equal(first.ok && first.outcome, "acquired");
+  const taken = acquireProjectLease(root, { ...hub, now: T0 + 5_000, ttlMs: 60_000, pid: process.pid });
+  assert.equal(taken.ok && taken.outcome, "taken-over-expired");
+  assert.equal(
+    renewProjectLease(root, { ...hub, now: T0 + 6_000, ttlMs: 60_000, pid: otherPid, renewOnly: true }).ok,
+    false,
+    "stale PID cannot renew same ownerId held by another live PID",
+  );
+  assert.equal(
+    releaseProjectLease(root, hub.ownerId, { expectedPid: otherPid }),
+    false,
+    "stale PID must not release another PID's active lease with the same ownerId",
+  );
+  assert.equal(readProjectLease(root, T0 + 6_000).holder?.pid, process.pid);
+  assert.equal(releaseProjectLease(root, hub.ownerId, { expectedPid: process.pid }), true);
+  assert.equal(readProjectLease(root, T0 + 6_000).holder, undefined);
+});

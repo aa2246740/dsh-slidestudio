@@ -12,6 +12,7 @@ const NATIVE = [
   "exporter-native",
   "presentation-run",
   "slides-tools",
+  "slides-runtime",
   "slides-mcp",
   "dsh-slides-host",
 ];

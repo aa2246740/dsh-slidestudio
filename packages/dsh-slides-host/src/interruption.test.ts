@@ -10,6 +10,7 @@ import {
   markInterruptedTurn,
   recoverSessionOnActivation,
   releaseHubWriterLease,
+  releaseHubWriterLeaseNonBlocking,
   HOST_INTERRUPTED_CODE,
 } from "./interruption.js";
 
@@ -175,5 +176,29 @@ describe("markInterruptedTurn", () => {
     assert.equal(acquireProjectLease(root, { kind: "mcp", ownerId: "mcp:external", label: "External" }).ok, true);
     assert.equal(releaseHubWriterLease(root, "s-stale"), false);
     assert.equal(readProjectLease(root).holder?.ownerId, "mcp:external");
+  });
+
+  it("refuses live non-blocking release when a successor PID or another hostname holds the same ownerId", () => {
+    const root = tempRoot();
+    const otherPid = process.pid === 1 ? 2 : 1;
+    assert.equal(
+      acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-takeover", pid: otherPid, ttlMs: 60_000 }).ok,
+      true,
+    );
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), false);
+    assert.equal(readProjectLease(root).holder?.pid, otherPid);
+
+    const leasePath = path.join(root, "_agent", "writer-lease.v1.json");
+    const foreign = JSON.parse(fs.readFileSync(leasePath, "utf8")) as { holder: { pid: number; hostname: string } };
+    foreign.holder.pid = process.pid;
+    foreign.holder.hostname = `${os.hostname()}-other`;
+    fs.writeFileSync(leasePath, JSON.stringify(foreign, null, 2));
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), false);
+    assert.equal(readProjectLease(root).holder?.hostname, `${os.hostname()}-other`);
+
+    foreign.holder.hostname = os.hostname();
+    fs.writeFileSync(leasePath, JSON.stringify(foreign, null, 2));
+    assert.equal(releaseHubWriterLeaseNonBlocking(root, "s-takeover"), true);
+    assert.equal(readProjectLease(root).holder, undefined);
   });
 });

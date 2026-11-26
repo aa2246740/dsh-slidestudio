@@ -1,0 +1,33 @@
+{
+  "name": "@open-slidestudio/slides-runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Host-agnostic core agent loop for DSH SlideStudio built on pi-agent-core: LLM port, context budget, guards, session store and single-writer lease.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 dist/*.test.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.6.1",
+    "@earendil-works/pi-ai": "1.6.1",
+    "@open-slidestudio/pptd-v2": "0.1.0",
+    "@open-slidestudio/presentation-run": "0.1.0",
+    "@open-slidestudio/slides-tools": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

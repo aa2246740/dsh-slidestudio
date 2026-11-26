@@ -80,10 +80,25 @@ export function isLeaseRefusalData(value: unknown): boolean {
   return outcome === "lease-conflict" || outcome === "lease-preempted-by-editor";
 }
 
+function abortedWriteResult() {
+  const detail = "tool execution was aborted or timed out before committing";
+  return {
+    ok: false as const,
+    summary: "tool-aborted",
+    detail,
+    payload: { ok: false, outcome: "tool-aborted", error: "tool-aborted", detail, painted: false },
+  };
+}
+
 function writeAuthorityGate(deps: SlideToolRuntimeDeps, ctx: SlideToolContext): CommandContext["runAuthorizedWrite"] {
-  if (deps.writerLease === false || !ctx.projectRoot) return undefined;
+  if (!ctx.projectRoot) return undefined;
+  if (deps.writerLease === false) {
+    if (!ctx.signal) return undefined;
+    return (commit) => (ctx.signal?.aborted ? abortedWriteResult() : { ok: true as const, value: commit() });
+  }
   return (commit) =>
     withProjectLeaseLock(ctx.projectRoot, () => {
+      if (ctx.signal?.aborted) return abortedWriteResult();
       const refusal = leaseRefusal(deps, ctx);
       if (refusal) {
         return {
@@ -99,14 +114,16 @@ function writeAuthorityGate(deps: SlideToolRuntimeDeps, ctx: SlideToolContext): 
 
 /** Run a synchronous post-commit side effect only while holding both locks and the writer lease. */
 export function runAuthorizedSideEffect(deps: SlideToolRuntimeDeps, ctx: SlideToolContext, write: () => void): void {
-  if (!ctx.projectRoot) return;
+  if (!ctx.projectRoot || ctx.signal?.aborted) return;
   if (deps.writerLease === false) {
-    withProjectWriteLock(ctx.projectRoot, write);
+    withProjectWriteLock(ctx.projectRoot, () => {
+      if (!ctx.signal?.aborted) write();
+    });
     return;
   }
   withProjectWriteLock(ctx.projectRoot, () =>
     withProjectLeaseLock(ctx.projectRoot, () => {
-      if (leaseRefusal(deps, ctx)) return;
+      if (ctx.signal?.aborted || leaseRefusal(deps, ctx)) return;
       write();
     }),
   );
@@ -250,6 +267,12 @@ export function withRuntimeGates(
     validate,
     async execute(args, ctx) {
       validate(args);
+      if (ctx.signal?.aborted) {
+        return {
+          isError: true,
+          data: toJsonRecord(abortedWriteResult().payload),
+        };
+      }
       if (!definition.readOnly && definition.requiresProject !== false) {
         const refusal = leaseRefusal(deps, ctx);
         if (refusal) return refusal;

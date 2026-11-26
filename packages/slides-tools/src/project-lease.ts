@@ -200,7 +200,10 @@ function decide(
   if (blocked) return { result: blocked };
   const preempted = lease.preempted.filter((row) => row.ownerId !== request.ownerId);
   const current = lease.holder;
-  if (current?.ownerId === request.ownerId) {
+  const effectivePid = request.pid ?? process.pid;
+  const currentActive = leaseHolderActive(current, now);
+  const sameProcess = current?.hostname === os.hostname() && current?.pid === effectivePid;
+  if (current?.ownerId === request.ownerId && sameProcess) {
     const next = holderFor(request, now, current);
     return { result: { ok: true, outcome: "renewed", lease: next }, next: { version: 1, holder: next, preempted } };
   }
@@ -214,7 +217,7 @@ function decide(
       },
     };
   }
-  if (!leaseHolderActive(current, now)) {
+  if (!currentActive) {
     const next = holderFor(request, now);
     const outcome = current ? "taken-over-expired" : "acquired";
     return { result: { ok: true, outcome, lease: next }, next: { version: 1, holder: next, preempted } };
@@ -267,11 +270,16 @@ export function renewProjectLease(projectRoot: string, request: LeaseRequest): L
   return acquireProjectLease(projectRoot, request);
 }
 
-/** Release the lease if `ownerId` (and optional `expectedToken`) holds it. Returns whether a lease was released. */
+/** Release the lease if `ownerId` (and optional token/process guards) holds it. Returns whether a lease was released. */
 export function releaseProjectLease(
   projectRoot: string,
   ownerId: string,
-  opts: { readonly lockTimeoutMs?: number; readonly expectedToken?: string | null } = {},
+  opts: {
+    readonly lockTimeoutMs?: number;
+    readonly expectedToken?: string | null;
+    readonly expectedPid?: number;
+    readonly expectedHostname?: string;
+  } = {},
 ): boolean {
   if (!fs.existsSync(leasePath(projectRoot))) return false;
   const lockOpts = opts.lockTimeoutMs !== undefined ? { timeoutMs: opts.lockTimeoutMs } : {};
@@ -281,6 +289,12 @@ export function releaseProjectLease(
       const lease = readLeaseFile(projectRoot);
       if (lease.holder?.ownerId !== ownerId) return false;
       if (opts.expectedToken !== undefined && (lease.holder.token ?? null) !== opts.expectedToken) return false;
+      if (
+        opts.expectedPid !== undefined &&
+        (lease.holder.pid !== opts.expectedPid || lease.holder.hostname !== (opts.expectedHostname ?? os.hostname()))
+      ) {
+        return false;
+      }
       writeLeaseFile(projectRoot, { version: 1, preempted: lease.preempted });
       return true;
     },
