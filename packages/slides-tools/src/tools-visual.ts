@@ -4,7 +4,15 @@ import path from "node:path";
 import { inspectProjectCapabilities, readPageRaster } from "@open-slidestudio/presentation-run";
 import type { SlideContentBlock, SlideToolContext, SlideToolDefinition, SlideToolResult } from "./contract.js";
 import { shouldAttachPageRaster } from "./page-raster-content.js";
-import { present, receiptResult, result, sessionKeyOf, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import {
+  isLeaseRefusalData,
+  present,
+  receiptResult,
+  result,
+  sessionKeyOf,
+  slideTool,
+  type SlideToolRuntimeDeps,
+} from "./tool-kit.js";
 import { reviewPageGate, type ExclusiveSessionGate } from "./write-page-serial.js";
 import { SlideToolArgsError } from "./contract.js";
 
@@ -83,6 +91,7 @@ export function renderPageTool(deps: SlideToolRuntimeDeps): SlideToolDefinition 
     async execute(args, ctx) {
       return runExclusivePageStep(reviewPageGate, sessionKeyOf(ctx), "render_page", async () => {
         const receipt = await present(deps, ctx, "render_page", args);
+        if (!receipt.ok && isLeaseRefusalData(receipt.payload)) return receiptResult(receipt);
         const pageId = String(args.pageId ?? "").trim();
         const pngBytes =
           rasterBytesFromPayload(ctx.projectRoot, receipt.payload.src) ?? readPageRaster(ctx.projectRoot, pageId);
@@ -120,6 +129,7 @@ export function reviewPageTool(deps: SlideToolRuntimeDeps): SlideToolDefinition 
       return runExclusivePageStep(reviewPageGate, sessionKeyOf(ctx), "review_page", async () => {
         const pageId = String(args.pageId ?? "").trim();
         const receipt = await present(deps, ctx, "review_page", args);
+        if (!receipt.ok && isLeaseRefusalData(receipt.payload)) return receiptResult(receipt);
         const raster = pageRasterContent({ deps, ctx, pageId });
         const data = { ok: receipt.ok, summary: receipt.summary, detail: receipt.detail, payload: receipt.payload };
         return { ...result(data), ...raster };

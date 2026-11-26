@@ -4,7 +4,15 @@ import { readActiveReviewGuard, reviewWriteTargetForPage } from "@open-slidestud
 import { SlideToolArgsError, type SlideToolContext, type SlideToolDefinition } from "./contract.js";
 import { canonicalWritePageIssues } from "@open-slidestudio/pptd-v2";
 import { readPageFromProject } from "./read-page.js";
-import { present, result, sessionKeyOf, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import {
+  isLeaseRefusalData,
+  present,
+  result,
+  runAuthorizedSideEffect,
+  sessionKeyOf,
+  slideTool,
+  type SlideToolRuntimeDeps,
+} from "./tool-kit.js";
 import { executeWritePageOnce, replayOrRun } from "./write-page-execute.js";
 import { formatWritePageOutcome } from "./write-page-outcome-format.js";
 import { withoutLayoutCopies } from "./write-page-layout.js";
@@ -26,12 +34,15 @@ export function readPageTool(deps: SlideToolRuntimeDeps): SlideToolDefinition {
 }
 
 function serialReplay(
+  deps: SlideToolRuntimeDeps,
   ctx: SlideToolContext,
   name: string,
   args: Record<string, unknown>,
   run: () => Promise<unknown>,
 ): Promise<Record<string, unknown>> {
-  return writePageSerial.enqueue(sessionKeyOf(ctx), () => replayOrRun(ctx.projectRoot, name, args, ctx.callId, run));
+  return writePageSerial.enqueue(sessionKeyOf(ctx), () =>
+    replayOrRun(ctx.projectRoot, name, args, ctx.callId, run, (write) => runAuthorizedSideEffect(deps, ctx, write)),
+  );
 }
 
 async function backgroundEdit(deps: SlideToolRuntimeDeps, ctx: SlideToolContext, args: Record<string, unknown>) {
@@ -84,7 +95,7 @@ export function editPageBackgroundTool(deps: SlideToolRuntimeDeps): SlideToolDef
     readOnly: false,
     render: (data) => formatWritePageOutcome(data),
     async execute(args, ctx) {
-      return result(await serialReplay(ctx, "edit_page_background", args, () => backgroundEdit(deps, ctx, args)));
+      return result(await serialReplay(deps, ctx, "edit_page_background", args, () => backgroundEdit(deps, ctx, args)));
     },
   });
 }
@@ -108,7 +119,12 @@ function pageListTool(
     readOnly: false,
     async execute(args, ctx) {
       const clean = { pageIds: Array.isArray(args.pageIds) ? args.pageIds.map(String) : [] };
-      return result(await serialReplay(ctx, name, clean, () => present(deps, ctx, name, clean)));
+      return result(
+        await serialReplay(deps, ctx, name, clean, async () => {
+          const receipt = await present(deps, ctx, name, clean);
+          return !receipt.ok && isLeaseRefusalData(receipt.payload) ? receipt.payload : receipt;
+        }),
+      );
     },
   });
 }
@@ -155,8 +171,9 @@ export function updateDeckTool(deps: SlideToolRuntimeDeps): SlideToolDefinition 
         (entry) => `字体 ${JSON.stringify(entry.from)} 改成 ${JSON.stringify(entry.to)}`,
       );
       return result(
-        await serialReplay(ctx, "update_deck", clean, async () => {
+        await serialReplay(deps, ctx, "update_deck", clean, async () => {
           const receipt = await present(deps, ctx, "update_deck", clean);
+          if (!receipt.ok && isLeaseRefusalData(receipt.payload)) return receipt.payload;
           if (!receipt.ok || !fontNotes.length || !receipt.payload || typeof receipt.payload !== "object") {
             return receipt;
           }

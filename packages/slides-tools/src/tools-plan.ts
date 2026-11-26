@@ -4,7 +4,7 @@ import type { SlideToolDefinition, SlideToolResult } from "./contract.js";
 import { PLAN_DESIGN_PARAMETERS } from "./design-aspects-parameter.js";
 import { rejectKindThemePack } from "./kind-theme-gate.js";
 import { WRITE_TODO_DATA_PARAMETERS, writeTodoItemsParameter } from "./plan-material-params.js";
-import { present, result, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import { isLeaseRefusalData, present, result, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
 
 export const SLIDE_PLAN_ITEMS_PARAMETER = {
   type: "array",
@@ -31,6 +31,7 @@ export const SLIDE_PLAN_ITEMS_PARAMETER = {
 
 function planOutcome(receipt: CommandReceipt): SlideToolResult {
   if (!receipt.ok) {
+    if (isLeaseRefusalData(receipt.payload)) return result(receipt.payload);
     return result({
       ...receipt.payload,
       outcome: "rejected",

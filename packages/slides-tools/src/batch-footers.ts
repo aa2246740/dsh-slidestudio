@@ -28,10 +28,11 @@ import {
   reviewWriteTargets,
   stableSha256,
 } from "@open-slidestudio/presentation-run";
+import { withProjectLeaseLock } from "./project-lease.js";
 import { commandHash, lookupToolReceipt, recordToolReceipt } from "./receipts.js";
 import { writePageSerial } from "./write-page-serial.js";
 import type { SlideToolDefinition } from "./contract.js";
-import { result, sessionKeyOf, slideTool, toJsonRecord, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import { leaseRefusal, result, sessionKeyOf, slideTool, toJsonRecord, type SlideToolRuntimeDeps } from "./tool-kit.js";
 
 const FOOTER_ID_RE = /^footer(?:[_-]|$)/i;
 const EXPLICIT_PAGE_NUMBER_TEXT_RE =
@@ -365,12 +366,18 @@ export function batchRemoveFootersTool(deps: SlideToolRuntimeDeps): SlideToolDef
             ? result({ outcome: "conflict", toolCallId, detail: "toolCallId reused with different arguments" })
             : { data: toJsonRecord(prior.outcome) };
         }
-        const outcome = batchRemoveFooters(projectRoot, clean, {
-          commandId: toolCallId,
-          contextEpochId: deps.presentation.epochFor(sessionId),
-        });
-        recordToolReceipt(projectRoot, { toolCallId, commandHash: hash, outcome });
-        return result(outcome);
+        return withProjectWriteLock(projectRoot, () =>
+          withProjectLeaseLock(projectRoot, () => {
+            const refusal = leaseRefusal(deps, ctx);
+            if (refusal) return refusal;
+            const outcome = batchRemoveFooters(projectRoot, clean, {
+              commandId: toolCallId,
+              contextEpochId: deps.presentation.epochFor(sessionId),
+            });
+            recordToolReceipt(projectRoot, { toolCallId, commandHash: hash, outcome });
+            return result(outcome);
+          }),
+        );
       });
     },
   });

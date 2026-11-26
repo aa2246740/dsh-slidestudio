@@ -3,6 +3,8 @@ export type {
   PresentationCommand,
   CommandContext,
   CommandReceipt,
+  WriteAuthorityRefusal,
+  WriteAuthorityRunner,
   RunInspection,
   DesignDirective,
   ExecutionBlocker,

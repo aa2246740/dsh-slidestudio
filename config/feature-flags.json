@@ -11,6 +11,12 @@
       "since": "0.2.4",
       "description": "Kill switch for the optional image-generate path; when false the editor never offers image generation even if a backend is configured.",
       "owner": "native-web"
+    },
+    "mcp_register": {
+      "default": false,
+      "since": "0.2.9",
+      "description": "Register the bundled slides-mcp server with the DSH 0.2.2-rc.5+ MCP manager (mcpManager.register) so DSH agents can call the SlideStudio tools over MCP. Hosts without mcpManager (rc.2) skip it with a warning.",
+      "owner": "dsh-slidestudio"
     }
   }
 }

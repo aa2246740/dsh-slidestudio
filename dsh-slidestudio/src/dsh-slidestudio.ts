@@ -11,6 +11,7 @@ import type { ChildProcess } from "node:child_process";
 import { apply as applySlidesHost } from "@open-slidestudio/dsh-slides-host";
 import { logger } from "./logger.js";
 import { registerSlidesPreset } from "./slides-preset.js";
+import { registerSlidesMcp, type McpRegisterContext } from "./mcp-register.js";
 
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
 const applySlidesHostAny = applySlidesHost as unknown as (ctx: Context, config: {
@@ -284,6 +285,9 @@ export function apply(ctx: Context) {
     editorBaseUrl: editorOrigin,
     personal: true,
   });
+  // Optional (flag `mcp_register`): contribute slides-mcp to the DSH 0.2.2-rc.5
+  // MCP manager; rc.2 hosts without mcpManager skip it with a warning.
+  registerSlidesMcp(ctx as unknown as McpRegisterContext, { repoRoot, dataRoot, editorOrigin });
 
   const supervisor = createEditorSupervisor({
     repoRoot,

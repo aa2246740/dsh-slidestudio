@@ -84,6 +84,8 @@ import { assertSkillDeck } from "./deck-page-count.js";
 import type { PageCountRequirement } from "./page-count-requirement.js";
 import { missingOperatingFactsReason } from "./report-facts.js";
 import { inspectProjectCapabilities } from "../capabilities.js";
+import type { WriteAuthorityRunner } from "../types.js";
+import { runWithWriteAuthority } from "../write-authority.js";
 import { packColorSourceIds } from "./pack-color-context.js";
 import { effectiveCatalogPackId } from "./design-authority.js";
 import { adoptedSourceIdsForState, refuseIfKindThemePack } from "./adopted-source-guard.js";
@@ -157,7 +159,29 @@ export type AgentToolState = {
   userExplicitPack?: boolean;
   /** Run ledger active: compose must not fall back to role+bullets IR. */
   strictLedger?: boolean;
+  /** Optional host write-authority gate for async disk writes (raster/media). */
+  runAuthorizedWrite?: WriteAuthorityRunner;
 };
+
+function commitAuthorizedAsset<T>(
+  state: AgentToolState,
+  name: string,
+  commit: () => T,
+): { readonly ok: true; readonly value: T } | { readonly ok: false; readonly execution: ToolExecution } {
+  if (!state.projectRoot) return { ok: true, value: commit() };
+  const gated = runWithWriteAuthority(state.projectRoot, state.runAuthorizedWrite, commit);
+  if (gated.ok) return gated;
+  return {
+    ok: false,
+    execution: {
+      name,
+      ok: false,
+      summary: gated.summary,
+      detail: gated.detail,
+      payload: gated.payload,
+    },
+  };
+}
 
 function writtenPages(state: AgentToolState): SkillPageInput[] {
   if (!state.writtenPages) state.writtenPages = [];
@@ -1560,7 +1584,9 @@ export async function executeGenerateToolAsync(
     try {
       const image = await state.image.generate(prompt, aspect);
       const ext = image.mime === "image/jpeg" ? "jpg" : "png";
-      const saved = saveMediaFile(state.projectRoot, id, image.bytes, ext);
+      const committed = commitAuthorizedAsset(state, name, () => saveMediaFile(state.projectRoot!, id, image.bytes, ext));
+      if (!committed.ok) return committed.execution;
+      const saved = committed.value;
       return {
         name,
         ok: true,
@@ -1642,7 +1668,9 @@ export async function executeGenerateToolAsync(
       note: string;
     };
     const ext = found.mime === "image/jpeg" ? "jpg" : found.mime === "image/webp" ? "webp" : "png";
-    const saved = saveMediaFile(state.projectRoot, id, found.bytes, ext);
+    const committed = commitAuthorizedAsset(state, name, () => saveMediaFile(state.projectRoot!, id, found.bytes, ext));
+    if (!committed.ok) return committed.execution;
+    const saved = committed.value;
     return {
       name,
       ok: true,
@@ -1665,67 +1693,69 @@ export async function executeGenerateToolAsync(
       },
     };
   }
-  if (name === "render_page") {
-    const pages = writtenPages(state);
-    if (!pages.length) {
-      return {
-        name,
-        ok: false,
-        summary: "need pages",
-        detail: "write_page first",
-        payload: { error: "need pages" },
-      };
-    }
-    let index = typeof args.pageIndex === "number" ? Math.floor(args.pageIndex) : -1;
-    const pageId = String(args.pageId ?? "").trim();
-    if (index < 0 && pageId) {
-      index = pages.findIndex((p) => p.id === pageId);
-    }
-    if (index < 0) index = pages.length - 1;
-    if (index < 0 || index >= pages.length) {
-      return {
-        name,
-        ok: false,
-        summary: "bad page",
-        detail: "render_page pageId / pageIndex not found",
-        payload: { error: "page not found" },
-      };
-    }
-    const port = state.raster ?? createPageRasterPort();
-    const shot = await port.render({
-      projectRoot: state.projectRoot ?? "",
-      pageIndex: index,
-    });
-    let src: string | undefined;
-    let dataUrl: string | undefined;
-    if (shot.kind === "native-slide" && shot.bytes && state.projectRoot) {
-      const saved = savePageRaster(state.projectRoot, pages[index]!.id, shot.bytes);
-      src = saved.src;
-      dataUrl = rasterToDataUrl(shot.bytes);
-    }
-    state.lastRaster = { ...shot, pageId: pages[index]!.id, src };
+  if (name === "render_page") return renderPageToolAsync(name, args, state);
+  return executeGenerateTool(name, args, state);
+}
+
+async function renderPageToolAsync(
+  name: string,
+  args: Record<string, unknown>,
+  state: AgentToolState,
+): Promise<ToolExecution> {
+  const pages = writtenPages(state);
+  if (!pages.length) {
     return {
       name,
-      ok: shot.kind === "native-slide",
-      summary:
-        shot.kind === "native-slide"
-          ? `${pages[index]!.id} · native #slide`
-          : "did not see the slide",
-      detail: [shot.note, src ? `src: ${src}` : "", `page: ${pages[index]!.id}`]
-        .filter(Boolean)
-        .join("\n"),
-      payload: {
-        pageId: pages[index]!.id,
-        pageIndex: index,
-        src,
-        width: shot.width,
-        height: shot.height,
-        kind: shot.kind,
-        note: shot.note,
-        dataUrl,
-        layout: shot.layout,
-      },
+      ok: false,
+      summary: "need pages",
+      detail: "write_page first",
+      payload: { error: "need pages" },
     };
   }
-  return executeGenerateTool(name, args, state);
+  let index = typeof args.pageIndex === "number" ? Math.floor(args.pageIndex) : -1;
+  const pageId = String(args.pageId ?? "").trim();
+  if (index < 0 && pageId) index = pages.findIndex((p) => p.id === pageId);
+  if (index < 0) index = pages.length - 1;
+  if (index < 0 || index >= pages.length) {
+    return {
+      name,
+      ok: false,
+      summary: "bad page",
+      detail: "render_page pageId / pageIndex not found",
+      payload: { error: "page not found" },
+    };
+  }
+  const port = state.raster ?? createPageRasterPort();
+  const shot = await port.render({
+    projectRoot: state.projectRoot ?? "",
+    pageIndex: index,
+  });
+  let src: string | undefined;
+  let dataUrl: string | undefined;
+  if (shot.kind === "native-slide" && shot.bytes && state.projectRoot) {
+    const committed = commitAuthorizedAsset(state, name, () =>
+      savePageRaster(state.projectRoot!, pages[index]!.id, shot.bytes!),
+    );
+    if (!committed.ok) return committed.execution;
+    src = committed.value.src;
+    dataUrl = rasterToDataUrl(shot.bytes);
+  }
+  state.lastRaster = { ...shot, pageId: pages[index]!.id, src };
+  return {
+    name,
+    ok: shot.kind === "native-slide",
+    summary: shot.kind === "native-slide" ? `${pages[index]!.id} · native #slide` : "did not see the slide",
+    detail: [shot.note, src ? `src: ${src}` : "", `page: ${pages[index]!.id}`].filter(Boolean).join("\n"),
+    payload: {
+      pageId: pages[index]!.id,
+      pageIndex: index,
+      src,
+      width: shot.width,
+      height: shot.height,
+      kind: shot.kind,
+      note: shot.note,
+      dataUrl,
+      layout: shot.layout,
+    },
+  };
 }

@@ -1,8 +1,9 @@
 # Canonical slide tools (`@open-slidestudio/slides-tools`)
 
 `packages/slides-tools` is the single, host-agnostic definition of every DSH
-SlideStudio product tool. The DSH Hub run consumes it now; the MCP server
-(Phase 2C-2) and the core agent loop (Phase 3A) consume the same definitions.
+SlideStudio product tool. The DSH Hub run and the MCP server
+([`slides-mcp`](slides-mcp.md)) consume it; the core agent loop (Phase 3A) will
+consume the same definitions.
 The package has **no host SDK dependency**: a unit test fails on any
 `@deepseek-ai/*` reference in `src/**` or `package.json`.
 

@@ -3,7 +3,7 @@
  * edit_elements and edit_page_background: plan membership, stale-hash and
  * identity decisions, the domain write, then the deterministic auto-render.
  */
-import { loadProject } from "@open-slidestudio/pptd-v2";
+import { loadProject, withProjectWriteLock } from "@open-slidestudio/pptd-v2";
 import {
   applySkippedWritePageProvenance,
   currentPageRevision,
@@ -19,12 +19,20 @@ import type { SlideToolContext } from "./contract.js";
 import { rejectKindThemePack } from "./kind-theme-gate.js";
 import type { WritePageDecision, WritePageOutcome } from "./outcome.js";
 import { structuralEditScope } from "./produce-edit-scope.js";
+import { withProjectLeaseLock } from "./project-lease.js";
 import { aiReviewPageVersionConflict, readPageFromProject } from "./read-page.js";
 import { commandHash, lookupToolReceipt, recordToolReceipt } from "./receipts.js";
 import { droppedFieldsHint, editTurnPageBaseline, savedPageSha256 } from "./saved-page.js";
 import { yamlExistsForPage } from "./page-files.js";
 import { normalizeScopedTemplateFonts } from "./template-font-write-scope.js";
-import { present, sessionKeyOf, toJsonRecord, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import {
+  isLeaseRefusalData,
+  leaseRefusal,
+  present,
+  sessionKeyOf,
+  toJsonRecord,
+  type SlideToolRuntimeDeps,
+} from "./tool-kit.js";
 import { missingDeclaredExhibitWarnings } from "./write-page-feedback.js";
 import { decideWritePage, readWritePageDisk, type WritePageDiskView } from "./write-page.js";
 
@@ -35,6 +43,7 @@ export async function replayOrRun(
   args: Record<string, unknown>,
   toolCallId: string,
   run: () => Promise<unknown>,
+  guardReceiptWrite?: (write: () => void) => void,
 ): Promise<Record<string, unknown>> {
   const hash = commandHash(name, args);
   const prior = lookupToolReceipt(projectRoot, toolCallId);
@@ -45,7 +54,11 @@ export async function replayOrRun(
     return toJsonRecord(prior.outcome);
   }
   const outcome = await run();
-  recordToolReceipt(projectRoot, { toolCallId, commandHash: hash, outcome });
+  if (!isLeaseRefusalData(outcome)) {
+    const commit = () => recordToolReceipt(projectRoot, { toolCallId, commandHash: hash, outcome });
+    if (guardReceiptWrite) guardReceiptWrite(commit);
+    else commit();
+  }
   return toJsonRecord(outcome);
 }
 
@@ -148,15 +161,24 @@ async function skippedOutcome(
       : missingDeclaredExhibitWarnings(projectRoot, skipped.pageId, page as unknown as SkillPageInput);
   // A NEW declaration on an unchanged page is still checked and recorded
   // against the CURRENT revision; the page YAML and revision stay untouched.
-  const hint = pageBody
-    ? applySkippedWritePageProvenance(
-        projectRoot,
-        { commandId: ctx.callId, contextEpochId: deps.presentation.epochFor(sessionKeyOf(ctx)) },
-        { pageId: skipped.pageId, revision: skipped.revision, pageSha256: skipped.pageSha256 },
-        pageBody,
-        clean,
-      )
-    : undefined;
+  const provenanceCommit = withProjectWriteLock(projectRoot, () =>
+    withProjectLeaseLock(projectRoot, () => {
+      const refusal = leaseRefusal(deps, ctx);
+      if (refusal) return { ok: false as const, refusal };
+      const hint = pageBody
+        ? applySkippedWritePageProvenance(
+            projectRoot,
+            { commandId: ctx.callId, contextEpochId: deps.presentation.epochFor(sessionKeyOf(ctx)) },
+            { pageId: skipped.pageId, revision: skipped.revision, pageSha256: skipped.pageSha256 },
+            pageBody,
+            clean,
+          )
+        : undefined;
+      return { ok: true as const, hint };
+    }),
+  );
+  if (!provenanceCommit.ok) return provenanceCommit.refusal.data as unknown as WritePageOutcome;
+  const hint = provenanceCommit.hint;
   const outcome = { ...skipped, ...(warnings.length ? { warnings } : {}), ...(hint ? { hint } : {}) };
   return autoRenderWriteOutcome(outcome, skipped.pageId, (target) =>
     present(deps, ctx, "render_page", { pageId: target }),
@@ -188,6 +210,7 @@ async function performWrite(
   const editBaseline = editTurnPageBaseline(projectRoot, pageId);
   const receipt = await present(deps, ctx, "write_page", clean);
   if (!receipt.ok) {
+    if (isLeaseRefusalData(receipt.payload)) return receipt.payload as unknown as WritePageOutcome;
     return {
       outcome: "rejected",
       error: String(receipt.payload.error ?? "rejected"),

@@ -7,6 +7,7 @@ import { listReferences } from "./list-references.js";
 import { inspectProjectCapabilities } from "./capabilities.js";
 import { assertChartEvidence } from "./chart-gate.js";
 import { exportEditablePptx, readVerifiedDelivery } from "./export-deck.js";
+import { authorityRefusalReceipt, runContextAuthorized } from "./write-authority.js";
 import { listSourceReceipts, recordSourceReceipt, requireConsultAdoptBeforeWrite } from "./receipts.js";
 import type {
   CommandContext,
@@ -200,6 +201,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           },
         },
         context.projectRoot,
+        context.runAuthorizedWrite ? { runAuthorizedWrite: context.runAuthorizedWrite } : undefined,
       ),
     );
     return {
@@ -365,22 +367,28 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           if (!committed.ok) return { ...committed, name };
           planFeedback = forwardPlanFeedback(committed.payload);
         }
-        const saved = commitAdoptedDesignSources(
-          context.projectRoot,
-          adopted,
-          context.toolCallId,
-          designAspects,
-          userColors,
-        );
-        if (saved.error) return fail(name, saved.error);
-        // One atomic write: requirements and the effective style authority change together.
-        const decided = plannedAuthority.authority
-          ? designAuthorityDecision(plannedAuthority.authority, plannedAuthority.existing)
-          : undefined;
-        persistPlanningAuthority(context.projectRoot, reportRequirements, {
-          mode: plannedAuthority.declared ? "set" : "keep",
-          ...(decided ? { decision: decided } : {}),
+        const planSave = runContextAuthorized(context, () => {
+          const saved = commitAdoptedDesignSources(
+            context.projectRoot,
+            adopted,
+            context.toolCallId,
+            designAspects,
+            userColors,
+          );
+          if (saved.error) return { ok: false as const, error: saved.error };
+          // One atomic write: requirements and the effective style authority change together.
+          const decided = plannedAuthority.authority
+            ? designAuthorityDecision(plannedAuthority.authority, plannedAuthority.existing)
+            : undefined;
+          persistPlanningAuthority(context.projectRoot, reportRequirements, {
+            mode: plannedAuthority.declared ? "set" : "keep",
+            ...(decided ? { decision: decided } : {}),
+          });
+          return { ok: true as const, saved, decided };
         });
+        if (!planSave.ok) return authorityRefusalReceipt(name, planSave);
+        if (!planSave.value.ok) return fail(name, planSave.value.error);
+        const { saved, decided } = planSave.value;
         return ok(
           name,
           "design plan adopted",
@@ -435,20 +443,22 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           const blocked = requireConsultAdoptBeforeWrite(context.projectRoot);
           if (blocked) return fail(name, blocked);
           const receipt = await invokeDomain(name, args, context);
-          if (receipt.ok) {
+          if (receipt.ok && pageSources.size > 0) {
             const pageId = String(receipt.payload.pageId ?? args.id ?? "");
             // "executed" must name a source this page actually used — a blanket
             // mark of every adopted row would credit sources the page never drew.
-            for (const row of listSourceReceipts(context.projectRoot).filter(
-              (item) => item.state === "adopted" && pageSources.has(item.sourceId),
-            )) {
-              recordSourceReceipt(context.projectRoot, {
-                sourceId: row.sourceId,
-                state: "executed",
-                toolCallId: context.toolCallId,
-                pageId,
-              });
-            }
+            runContextAuthorized(context, () => {
+              for (const row of listSourceReceipts(context.projectRoot).filter(
+                (item) => item.state === "adopted" && pageSources.has(item.sourceId),
+              )) {
+                recordSourceReceipt(context.projectRoot, {
+                  sourceId: row.sourceId,
+                  state: "executed",
+                  toolCallId: context.toolCallId,
+                  pageId,
+                });
+              }
+            });
           }
           return receipt;
         };
@@ -482,6 +492,7 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
           toolCallId: context.toolCallId,
           contextEpochId: epochFor(context.sessionId),
           sessionId: context.sessionId,
+          runAuthorizedWrite: context.runAuthorizedWrite,
         });
         return {
           ok: exported.ok,

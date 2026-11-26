@@ -12,6 +12,9 @@ for (const bundle of bundles) {
       '../../scripts/lib/observability.mjs': fileURLToPath(
         new URL('../scripts/lib/observability.mjs', import.meta.url),
       ),
+      '../../scripts/lib/feature-flags.mjs': fileURLToPath(
+        new URL('../scripts/lib/feature-flags.mjs', import.meta.url),
+      ),
     }
   }
 }

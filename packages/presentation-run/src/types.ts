@@ -23,12 +23,28 @@ export type RunHandle = {
   readonly projectRoot: string;
 };
 
+export type WriteAuthorityRefusal = {
+  readonly ok: false;
+  readonly summary: string;
+  readonly detail: string;
+  readonly payload: Record<string, unknown>;
+};
+
+export type WriteAuthorityRunner = <T>(
+  commit: () => T,
+) => { readonly ok: true; readonly value: T } | WriteAuthorityRefusal;
+
 export type CommandContext = {
   readonly runId: RunId;
   readonly sessionId: string;
   readonly toolCallId: string;
   readonly projectRoot: string;
   readonly abortSignal: AbortSignal;
+  /**
+   * Optional host-supplied synchronous write-authority gate run INSIDE
+   * `withProjectWriteLock(projectRoot)` around mutating commits.
+   */
+  readonly runAuthorizedWrite?: WriteAuthorityRunner;
 };
 
 export type PresentationCommand = {

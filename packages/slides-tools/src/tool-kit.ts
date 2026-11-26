@@ -2,9 +2,11 @@
  * Shared plumbing for canonical slide tools: runtime ports, the presentation
  * command bridge, argument validation, and the project writer-lease gate.
  */
+import { withProjectWriteLock } from "@open-slidestudio/pptd-v2";
 import {
   inspectProjectCapabilities,
   type CapabilitySnapshot,
+  type CommandContext,
   type CommandReceipt,
   type PresentationRun,
 } from "@open-slidestudio/presentation-run";
@@ -16,7 +18,7 @@ import {
   type SlideToolRender,
   type SlideToolResult,
 } from "./contract.js";
-import { acquireProjectLease } from "./project-lease.js";
+import { acquireProjectLease, withProjectLeaseLock } from "./project-lease.js";
 import { localizePlanArgIssues } from "./design-aspects-parameter.js";
 import { closeSchemaRoot, compileParameterSpec } from "./schema-dsl.js";
 
@@ -30,13 +32,21 @@ export type OpenedSlideProject = {
   readonly displayRoot: string;
   readonly design:
     { readonly kind: "self-directed" } | { readonly kind: "explicit-style"; readonly designSystemId: string };
+  /** True when the port ran `input.initialize` atomically before publishing the project dir. */
+  readonly initialized?: boolean;
+  /** Returned when `input.initialize` refused creation before publishing. */
+  readonly refusal?: SlideToolResult;
 };
 
 /** Host port that creates or reopens the project bound to the caller. */
 export type SlideProjectPort = {
   /** Return an already-bound project root without mutating disk, when one exists. */
   peekExisting?(ctx: SlideToolContext): string | undefined;
-  open(input: { readonly ctx: SlideToolContext; readonly title: string }): OpenedSlideProject;
+  open(input: {
+    readonly ctx: SlideToolContext;
+    readonly title: string;
+    readonly initialize?: (targetRoot: string, design: OpenedSlideProject["design"]) => SlideToolResult | undefined;
+  }): OpenedSlideProject;
   /** Roll back a freshly created project directory and binding when post-open setup fails. */
   rollbackCreated?(projectRoot: string, ctx: SlideToolContext): void;
 };
@@ -64,6 +74,44 @@ export function capabilitiesFor(deps: SlideToolRuntimeDeps, ctx: SlideToolContex
   return deps.capabilities ? deps.capabilities(ctx) : inspectProjectCapabilities(ctx.projectRoot);
 }
 
+export function isLeaseRefusalData(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const outcome = (value as { outcome?: unknown }).outcome;
+  return outcome === "lease-conflict" || outcome === "lease-preempted-by-editor";
+}
+
+function writeAuthorityGate(deps: SlideToolRuntimeDeps, ctx: SlideToolContext): CommandContext["runAuthorizedWrite"] {
+  if (deps.writerLease === false || !ctx.projectRoot) return undefined;
+  return (commit) =>
+    withProjectLeaseLock(ctx.projectRoot, () => {
+      const refusal = leaseRefusal(deps, ctx);
+      if (refusal) {
+        return {
+          ok: false as const,
+          summary: String(refusal.data.outcome ?? "lease-conflict"),
+          detail: String(refusal.data.detail ?? "writer lease refused"),
+          payload: refusal.data,
+        };
+      }
+      return { ok: true as const, value: commit() };
+    });
+}
+
+/** Run a synchronous post-commit side effect only while holding both locks and the writer lease. */
+export function runAuthorizedSideEffect(deps: SlideToolRuntimeDeps, ctx: SlideToolContext, write: () => void): void {
+  if (!ctx.projectRoot) return;
+  if (deps.writerLease === false) {
+    withProjectWriteLock(ctx.projectRoot, write);
+    return;
+  }
+  withProjectWriteLock(ctx.projectRoot, () =>
+    withProjectLeaseLock(ctx.projectRoot, () => {
+      if (leaseRefusal(deps, ctx)) return;
+      write();
+    }),
+  );
+}
+
 /** Run one presentation-run domain command for the calling project. */
 export function present(
   deps: SlideToolRuntimeDeps,
@@ -72,6 +120,7 @@ export function present(
   args: Record<string, unknown>,
 ): Promise<CommandReceipt> {
   const sessionId = sessionKeyOf(ctx);
+  const runAuthorizedWrite = writeAuthorityGate(deps, ctx);
   return deps.presentation.execute(
     { name, args },
     {
@@ -80,6 +129,7 @@ export function present(
       toolCallId: ctx.callId,
       projectRoot: ctx.projectRoot,
       abortSignal: ctx.signal ?? new AbortController().signal,
+      ...(runAuthorizedWrite ? { runAuthorizedWrite } : {}),
     },
   );
 }
@@ -90,10 +140,18 @@ export function toJsonRecord(value: unknown): Record<string, unknown> {
 }
 
 export function result(value: unknown, content?: readonly SlideContentBlock[]): SlideToolResult {
-  return { data: toJsonRecord(value), ...(content?.length ? { content } : {}) };
+  const data = toJsonRecord(value);
+  return {
+    ...(isLeaseRefusalData(data) ? { isError: true } : {}),
+    data,
+    ...(content?.length ? { content } : {}),
+  };
 }
 
 export function receiptResult(receipt: CommandReceipt): SlideToolResult {
+  if (!receipt.ok && isLeaseRefusalData(receipt.payload)) {
+    return { isError: true, data: toJsonRecord(receipt.payload) };
+  }
   return result(receipt);
 }
 

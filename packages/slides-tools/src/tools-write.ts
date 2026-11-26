@@ -13,7 +13,16 @@ import { SlideToolArgsError, type SlideToolContext, type SlideToolDefinition } f
 import { prepareElementEdit } from "./edit-elements.js";
 import { readPageFromProject } from "./read-page.js";
 import { expandComponentArgs, recordComponentUses, writtenPageTarget } from "./template-components.js";
-import { result, sessionKeyOf, slideTool, validateArgs, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import {
+  isLeaseRefusalData,
+  leaseRefusal,
+  result,
+  runAuthorizedSideEffect,
+  sessionKeyOf,
+  slideTool,
+  validateArgs,
+  type SlideToolRuntimeDeps,
+} from "./tool-kit.js";
 import { executeWritePageOnce, replayOrRun } from "./write-page-execute.js";
 import { withNormalizedPageResult } from "./write-page-feedback.js";
 import { dropOwnLayoutCopyIds, withoutLayoutCopies } from "./write-page-layout.js";
@@ -72,15 +81,23 @@ async function runWritePage(deps: SlideToolRuntimeDeps, ctx: SlideToolContext, a
   assertCanonicalPage(clean, normalized);
   const schema = writePageProviderJsonSchema() as Record<string, unknown>;
   return writePageSerial.enqueue(sessionKeyOf(ctx), async () => {
+    const refusal = leaseRefusal(deps, ctx);
+    if (refusal) return refusal;
     const baseline = readPageFromProject(ctx.projectRoot, String(clean.id));
     normalizeNumericPageText(textSource, baseline);
     dropOwnLayoutCopyIds(ctx.projectRoot, textSource);
     validateArgs(deps, { ...schema, additionalProperties: false }, textSource);
-    const outcome = await replayOrRun(ctx.projectRoot, "write_page", textSource, ctx.callId, () =>
-      executeWritePageOnce(deps, ctx, structuredClone(textSource)),
+    const outcome = await replayOrRun(
+      ctx.projectRoot,
+      "write_page",
+      textSource,
+      ctx.callId,
+      () => executeWritePageOnce(deps, ctx, structuredClone(textSource)),
+      (write) => runAuthorizedSideEffect(deps, ctx, write),
     );
+    if (isLeaseRefusalData(outcome)) return result(outcome);
     const written = writtenPageTarget(outcome);
-    if (written) recordComponentUses(scope, components.uses, written);
+    if (written) runAuthorizedSideEffect(deps, ctx, () => recordComponentUses(scope, components.uses, written));
     return result(withNormalizedPageResult(outcome, normalized));
   });
 }
@@ -112,21 +129,28 @@ export function writePageTool(deps: SlideToolRuntimeDeps): SlideToolDefinition {
 
 async function runEditElements(deps: SlideToolRuntimeDeps, ctx: SlideToolContext, args: Record<string, unknown>) {
   const clean = structuredClone(args);
-  const outcome = await replayOrRun(ctx.projectRoot, "edit_elements", clean, ctx.callId, async () => {
-    const prepared = prepareElementEdit(ctx.projectRoot, clean as unknown as CanonicalEditElementsArgs);
-    if (!prepared.ok) return prepared.outcome;
-    const merged = structuredClone(prepared.page) as unknown as Record<string, unknown>;
-    const issues = canonicalWritePageIssues(merged);
-    if (issues.length) {
-      return {
-        outcome: "rejected",
-        error: "ELEMENT_EDIT_CANONICAL_PAGE_INVALID",
-        detail: issues.join("; "),
-        painted: false,
-      };
-    }
-    return executeWritePageOnce(deps, ctx, merged);
-  });
+  const outcome = await replayOrRun(
+    ctx.projectRoot,
+    "edit_elements",
+    clean,
+    ctx.callId,
+    async () => {
+      const prepared = prepareElementEdit(ctx.projectRoot, clean as unknown as CanonicalEditElementsArgs);
+      if (!prepared.ok) return prepared.outcome;
+      const merged = structuredClone(prepared.page) as unknown as Record<string, unknown>;
+      const issues = canonicalWritePageIssues(merged);
+      if (issues.length) {
+        return {
+          outcome: "rejected",
+          error: "ELEMENT_EDIT_CANONICAL_PAGE_INVALID",
+          detail: issues.join("; "),
+          painted: false,
+        };
+      }
+      return executeWritePageOnce(deps, ctx, merged);
+    },
+    (write) => runAuthorizedSideEffect(deps, ctx, write),
+  );
   return result(outcome);
 }
 

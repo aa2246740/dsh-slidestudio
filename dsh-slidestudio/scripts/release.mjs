@@ -23,6 +23,7 @@ const RUNTIME_PACKAGES = [
   "project-store",
   "presentation-run",
   "slides-tools",
+  "slides-mcp",
   "dsh-slides-host",
 ];
 const BUNDLED_NODE_MODULES = [

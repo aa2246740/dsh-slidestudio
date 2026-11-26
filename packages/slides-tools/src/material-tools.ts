@@ -311,8 +311,7 @@ function recordMaterialNotesTool(deps: SlideToolRuntimeDeps): SlideToolDefinitio
     },
     async execute(args, ctx) {
       if (!materialAcceptsImageInput(ctx.projectRoot)) return visionRefusal("record_material_notes");
-      const receipt = await present(deps, ctx, "record_material_notes", args);
-      return result({ ok: receipt.ok, summary: receipt.summary, detail: receipt.detail, payload: receipt.payload });
+      return receiptResult(await present(deps, ctx, "record_material_notes", args));
     },
   });
 }

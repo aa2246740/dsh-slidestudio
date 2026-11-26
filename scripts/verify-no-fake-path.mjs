@@ -15,6 +15,7 @@ const PRODUCT_GLOBS = [
   "packages/dsh-slides-bundle/cordis.patch.yml",
   "packages/presentation-run/src",
   "packages/slides-tools/src",
+  "packages/slides-mcp/src",
   "scripts/dsh-slides.mjs",
 ];
 
@@ -97,7 +98,14 @@ export function collectFakePathHits(root) {
     hits.push("package.json: dsh:profile:init still builds agent-harness");
   }
 
-  for (const pkg of ["dsh-slides-host", "dsh-slides-bundle", "dsh-slides-client", "presentation-run", "slides-tools"]) {
+  for (const pkg of [
+    "dsh-slides-host",
+    "dsh-slides-bundle",
+    "dsh-slides-client",
+    "presentation-run",
+    "slides-tools",
+    "slides-mcp",
+  ]) {
     const manifest = JSON.parse(fs.readFileSync(path.join(root, "packages", pkg, "package.json"), "utf8"));
     if ("@open-slidestudio/agent-harness" in (manifest.dependencies ?? {})) {
       hits.push(`packages/${pkg}/package.json: production dep on agent-harness`);

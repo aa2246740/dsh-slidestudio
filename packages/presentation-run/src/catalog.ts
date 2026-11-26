@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifyOpenKimiPack, resolveOpenKimiPresetDesignSourceId } from "./domain/openkimi-source-pack.js";
 import { resolveOpenKimiVisualRoot, verifyOpenKimiVisualPack } from "./domain/openkimi-visual-pack.js";
 
@@ -38,13 +39,18 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function resolveRepoRoot(start = process.cwd()): string {
   const envRoot = process.env.OPEN_SLIDESTUDIO_ROOT?.trim();
   const candidates = envRoot ? [envRoot] : [];
-  let dir = path.resolve(start);
-  for (let i = 0; i < 12; i += 1) {
-    candidates.push(dir);
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
+  const addAncestors = (origin: string) => {
+    let dir = path.resolve(origin);
+    for (let i = 0; i < 12; i += 1) {
+      candidates.push(dir);
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  };
+  addAncestors(start);
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  if (path.resolve(start) !== path.resolve(moduleDir)) addAncestors(moduleDir);
   const marker = path.join("packages", "agent-harness", "reference", "openkimi-source-manifest.v1.json");
   for (const candidate of candidates) {
     if (fs.existsSync(path.join(candidate, marker))) return path.resolve(candidate);

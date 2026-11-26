@@ -8,6 +8,7 @@ import { waitForEditor } from "./sidecar-ready.js";
 import { apply as applySlidesHost } from "@open-slidestudio/dsh-slides-host";
 import { logger } from "./logger.js";
 import { registerSlidesPreset } from "./slides-preset.js";
+import { registerSlidesMcp } from "./mcp-register.js";
 /** Cross-package Context shape; cordis is shared at runtime, types differ. */
 const applySlidesHostAny = applySlidesHost;
 export const name = "dsh-slidestudio";
@@ -249,6 +250,9 @@ export function apply(ctx) {
         editorBaseUrl: editorOrigin,
         personal: true,
     });
+    // Optional (flag `mcp_register`): contribute slides-mcp to the DSH 0.2.2-rc.5
+    // MCP manager; rc.2 hosts without mcpManager skip it with a warning.
+    registerSlidesMcp(ctx, { repoRoot, dataRoot, editorOrigin });
     const supervisor = createEditorSupervisor({
         repoRoot,
         dataRoot,

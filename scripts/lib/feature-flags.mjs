@@ -16,6 +16,7 @@ export function flagEnvName(name) {
 const SAFE_FLAG_DEFAULTS = {
   project_retention_days: { default: 0 },
   image_generate: { default: true },
+  mcp_register: { default: false },
 };
 
 function flagDefinitions(root) {

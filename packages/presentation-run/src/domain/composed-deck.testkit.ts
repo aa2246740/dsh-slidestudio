@@ -19,7 +19,7 @@ import {
   stableSha256,
   type DeckComposedFact,
 } from "./run-ledger.js";
-import { recordRaster } from "./run-ledger-raster.js";
+import { recordImagePrepared, recordRaster } from "./run-ledger-raster.js";
 
 export const COMPOSED_DECK_CONTEXT = {
   commandId: "composed-deck-fixture",
@@ -135,6 +135,28 @@ export function renderFixturePage(root: string, pageId: string): void {
     layoutIssues: [],
     chromeSha256: chrome,
   });
+}
+
+/** Synthetic render + prepared-image receipt, returning the deliveryToken for `_mark_image_emitted` tests. */
+export function prepareFixturePageImage(
+  root: string,
+  pageId: string,
+  context: { readonly commandId: string; readonly contextEpochId: string },
+): string {
+  const revision = currentPageRevision(root, pageId);
+  if (!revision) throw new Error(`page ${pageId} has no committed revision`);
+  const chrome = chromeOf(root, pageId);
+  const recorded = recordRaster(root, revision, {
+    bytes: Buffer.from(`offline raster ${pageId} ${revision.pageSha256} ${chrome}`),
+    src: `_agent/rasters/${pageId}.png`,
+    width: 960,
+    height: 540,
+    layoutStatus: "pass",
+    layoutIssues: [],
+    chromeSha256: chrome,
+  });
+  recordImagePrepared(root, context, recorded.fact, recorded.deliveryToken);
+  return recorded.deliveryToken;
 }
 
 export type ComposedDeck = Readonly<{

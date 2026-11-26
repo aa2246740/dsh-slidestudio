@@ -10,7 +10,15 @@ import { expandComponentArgs, recordComponentUses } from "./template-components.
 import { normalizeWritePageElement, unwrapToolValue } from "./write-page.js";
 import { writePageSerial } from "./write-page-serial.js";
 import type { SlideToolDefinition } from "./contract.js";
-import { present, result, sessionKeyOf, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
+import {
+  isLeaseRefusalData,
+  present,
+  result,
+  runAuthorizedSideEffect,
+  sessionKeyOf,
+  slideTool,
+  type SlideToolRuntimeDeps,
+} from "./tool-kit.js";
 
 type Json = Record<string, unknown>;
 
@@ -30,6 +38,7 @@ function layoutArgs(args: Json): Json {
 /** The model-facing outcome: the domain's written, skipped-identical or rejected result. */
 function layoutOutcome(receipt: CommandReceipt, fontNotes: string[]): Json {
   if (!receipt.ok) {
+    if (isLeaseRefusalData(receipt.payload)) return receipt.payload;
     return {
       outcome: "rejected",
       error: String(receipt.payload.error ?? "rejected"),
@@ -69,10 +78,12 @@ export function writeLayoutTool(deps: SlideToolRuntimeDeps): SlideToolDefinition
           // Only a layout revision can be matched against the delivered layouts; a master write
           // carries none, so its uses stay unbound facts.
           const revision = receipt.payload.scope === "layout" ? receipt.payload.revision : undefined;
-          recordComponentUses(scope, components.uses, {
-            layoutId: String(clean.id),
-            ...(typeof revision === "number" ? { revision } : {}),
-          });
+          runAuthorizedSideEffect(deps, ctx, () =>
+            recordComponentUses(scope, components.uses, {
+              layoutId: String(clean.id),
+              ...(typeof revision === "number" ? { revision } : {}),
+            }),
+          );
         }
         return result(layoutOutcome(receipt, fontNotes));
       });

@@ -9,6 +9,7 @@ export * from "./project-lease.js";
 export {
   capabilitiesFor,
   defineSlideTool,
+  leaseRefusal,
   present,
   result,
   sessionKeyOf,

@@ -1,0 +1,38 @@
+{
+  "name": "@open-slidestudio/slides-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Host-agnostic MCP server (stdio and loopback HTTP) exposing the canonical DSH SlideStudio slide tools.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "slides-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 dist/*.test.js"
+  },
+  "dependencies": {
+    "@open-slidestudio/pptd-v2": "0.1.0",
+    "@open-slidestudio/presentation-run": "0.1.0",
+    "@open-slidestudio/slides-tools": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

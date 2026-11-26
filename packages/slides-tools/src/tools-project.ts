@@ -1,5 +1,6 @@
 /** Project binding, capability and reference-catalog tools. */
 import type { SlideToolDefinition } from "./contract.js";
+import { withProjectLeaseLock } from "./project-lease.js";
 import { briefForOpenProject, writeSliceRuntime } from "./runtime.js";
 import {
   capabilitiesFor,
@@ -8,6 +9,7 @@ import {
   receiptResult,
   result,
   slideTool,
+  type OpenedSlideProject,
   type SlideToolRuntimeDeps,
 } from "./tool-kit.js";
 
@@ -30,24 +32,31 @@ export function openProjectTool(deps: SlideToolRuntimeDeps): SlideToolDefinition
         const refusal = leaseRefusal(deps, { ...ctx, projectRoot: existingRoot });
         if (refusal) return refusal;
       }
-      const opened = deps.projects.open({ ctx, title });
-      try {
-        if (!existingRoot || existingRoot !== opened.projectRoot) {
-          const refusal = leaseRefusal(deps, { ...ctx, projectRoot: opened.projectRoot });
+      const initialize = (targetRoot: string, design: OpenedSlideProject["design"]) =>
+        withProjectLeaseLock(targetRoot, () => {
+          const denied = leaseRefusal(deps, { ...ctx, projectRoot: targetRoot });
+          if (denied) return denied;
+          writeSliceRuntime(targetRoot, {
+            brief: briefForOpenProject(targetRoot, title),
+            design,
+            editorBaseUrl: deps.editorBaseUrl,
+            strictExecution: true,
+          });
+          return undefined;
+        });
+      const opened = deps.projects.open({ ctx, title, initialize });
+      if (opened.refusal) return opened.refusal;
+      if (!opened.initialized) {
+        try {
+          const refusal = initialize(opened.projectRoot, opened.design);
           if (refusal) {
             if (opened.created) deps.projects.rollbackCreated?.(opened.projectRoot, ctx);
             return refusal;
           }
+        } catch (error) {
+          if (opened.created) deps.projects.rollbackCreated?.(opened.projectRoot, ctx);
+          throw error;
         }
-        writeSliceRuntime(opened.projectRoot, {
-          brief: briefForOpenProject(opened.projectRoot, title),
-          design: opened.design,
-          editorBaseUrl: deps.editorBaseUrl,
-          strictExecution: true,
-        });
-      } catch (error) {
-        if (opened.created) deps.projects.rollbackCreated?.(opened.projectRoot, ctx);
-        throw error;
       }
       return result({
         outcome: opened.created ? "created" : "reopened",
