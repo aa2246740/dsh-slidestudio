@@ -27,6 +27,7 @@
     "@open-slidestudio/exporter-native": "0.1.0",
     "@open-slidestudio/pptd-v2": "0.1.0",
     "@open-slidestudio/presentation-run": "0.1.0",
+    "@open-slidestudio/slides-tools": "0.1.0",
     "yaml": "^2.9.0"
   },
   "peerDependencies": {

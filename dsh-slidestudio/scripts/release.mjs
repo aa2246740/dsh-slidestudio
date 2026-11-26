@@ -22,6 +22,7 @@ const RUNTIME_PACKAGES = [
   "exporter-native",
   "project-store",
   "presentation-run",
+  "slides-tools",
   "dsh-slides-host",
 ];
 const BUNDLED_NODE_MODULES = [
@@ -37,11 +38,13 @@ const BUNDLED_NODE_MODULES = [
   "https",
   "image-size",
   "pptxgenjs",
+  // Pure-JS unzip used by the canonical slide tools; sharp stays an optional, unbundled codec.
+  "fflate",
   ...RUNTIME_PACKAGES.map((p) => `@open-slidestudio/${p}`),
 ];
 
-const cleanRuntimeFile = src => !src.split(/[\\/]/).some(part =>
-  [".git", "node_modules", ".versions", "_agent", ".DS_Store"].includes(part));
+const cleanRuntimeFile = (src) =>
+  !src.split(/[\\/]/).some((part) => [".git", "node_modules", ".versions", "_agent", ".DS_Store"].includes(part));
 
 export const PUBLISHED_FILES = [
   "lib",
@@ -67,130 +70,135 @@ export function copyPackagedConfig(destinationRoot) {
 }
 
 async function main() {
-// The official local installer records the archive path as a file dependency.
-// Keep earlier archives: deleting them can break its next add/remove operation.
-// Only this run's temporary stage is removed below.
-mkdirSync(output, { recursive: true });
-const stage = mkdtempSync(join(output, "stage-"));
-const pkg = join(stage, "package");
-mkdirSync(pkg, { recursive: true });
+  // The official local installer records the archive path as a file dependency.
+  // Keep earlier archives: deleting them can break its next add/remove operation.
+  // Only this run's temporary stage is removed below.
+  mkdirSync(output, { recursive: true });
+  const stage = mkdtempSync(join(output, "stage-"));
+  const pkg = join(stage, "package");
+  mkdirSync(pkg, { recursive: true });
 
-const copy = (rel, { filter } = {}) => {
-  const from = join(repoRoot, rel);
-  if (!existsSync(from)) throw new Error(`missing runtime input: ${rel}`);
-  cpSync(from, join(pkg, rel), { recursive: true, filter: src => cleanRuntimeFile(src) && (!filter || filter(src)) });
-};
+  const copy = (rel, { filter } = {}) => {
+    const from = join(repoRoot, rel);
+    if (!existsSync(from)) throw new Error(`missing runtime input: ${rel}`);
+    cpSync(from, join(pkg, rel), {
+      recursive: true,
+      filter: (src) => cleanRuntimeFile(src) && (!filter || filter(src)),
+    });
+  };
 
-copy("apps/native-web/src", {
-  filter: (src) => !src.endsWith(".test.mjs"),
-});
-copy("apps/native-web/public");
-for (const name of RUNTIME_PACKAGES) {
-  copy(`packages/${name}/package.json`);
-  copy(`packages/${name}/dist`);
-}
-copy("packages/exporter-native/assets");
-copy("packages/pptd-v2/src/data");
-copy("packages/agent-harness/reference/openkimi-source-manifest.v1.json");
-copy("packages/agent-harness/reference/openkimi-visual-manifest.v1.json");
-copy("vendor/open-kimi-ppt/skill-1.2.0");
-copy("vendor/open-kimi-ppt/git-pre-wipe");
-// Use the separately managed pinned browser runtime; never copy a browser into the plugin.
-copy("scripts/lib");
-copyPackagedConfig(pkg);
-copy("LICENSE");
-copy("fixtures/okp-yu7-ppt");
-for (const rel of ["lib", "locale", "README.md"]) {
-  const from = join(pluginDir, rel);
-  if (existsSync(from)) cpSync(from, join(pkg, rel), { recursive: true });
-}
-
-writeFileSync(
-  join(pkg, "cordis.patch.yml"),
-  "- insert:\n    - id: dsh-slidestudio\n      name: dsh-slidestudio\n",
-);
-
-// Copy the complete production dependency closure, including transitive packages.
-// Resolve from each parent so differing dependency versions cannot be flattened incorrectly.
-const bundledVersions = {};
-function bundlePackage(name, source, destination, ancestors = new Set()) {
-  if (ancestors.has(source)) throw new Error(`cyclic bundled dependency: ${name}`);
-  const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
-  const next = new Set([...ancestors, source]);
-  cpSync(source, destination, {
-    recursive: true,
-    dereference: true,
-    filter: s => {
-      const rel = s.slice(source.length);
-      return !rel.split(/[\\/]/).some(part => ["node_modules", ".git", "test", "tests", "src"].includes(part))
-        && !s.endsWith(".tsbuildinfo");
-    },
+  copy("apps/native-web/src", {
+    filter: (src) => !src.endsWith(".test.mjs"),
   });
-  // The geometry interpreter reads this runtime XML beside its compiled code.
-  if (name === "@open-slidestudio/pptd-v2") {
-    cpSync(join(source, "src/data"), join(destination, "src/data"), { recursive: true });
+  copy("apps/native-web/public");
+  for (const name of RUNTIME_PACKAGES) {
+    copy(`packages/${name}/package.json`);
+    copy(`packages/${name}/dist`);
   }
-  const require = createRequire(join(source, "package.json"));
-  const children = [];
-  for (const [child, range] of Object.entries(metadata.dependencies ?? {})) {
-    if (child.startsWith("@deepseek-ai/") || child.startsWith("@open-slidestudio/")) continue;
-    const childManifest = require.resolve.paths(`${child}/package.json`)
-      ?.map(base => join(base, child, "package.json"))
-      .find(file => existsSync(file));
-    if (!childManifest) throw new Error(`missing production dependency: ${child} from ${name}`);
-    bundlePackage(child, dirname(childManifest), join(destination, "node_modules", child), next);
-    children.push(child);
+  copy("packages/exporter-native/assets");
+  copy("packages/pptd-v2/src/data");
+  copy("packages/agent-harness/reference/openkimi-source-manifest.v1.json");
+  copy("packages/agent-harness/reference/openkimi-visual-manifest.v1.json");
+  copy("vendor/open-kimi-ppt/skill-1.2.0");
+  copy("vendor/open-kimi-ppt/git-pre-wipe");
+  // Use the separately managed pinned browser runtime; never copy a browser into the plugin.
+  copy("scripts/lib");
+  copyPackagedConfig(pkg);
+  copy("LICENSE");
+  copy("fixtures/okp-yu7-ppt");
+  for (const rel of ["lib", "locale", "README.md"]) {
+    const from = join(pluginDir, rel);
+    if (existsSync(from)) cpSync(from, join(pkg, rel), { recursive: true });
   }
-  metadata.bundleDependencies = children;
-  delete metadata.devDependencies;
-  delete metadata.scripts;
-  writeFileSync(join(destination, "package.json"), JSON.stringify(metadata, null, 2) + "\n");
-  return metadata.version;
-}
-for (const name of BUNDLED_NODE_MODULES) {
-  const source = name.startsWith("@open-slidestudio/")
-    ? join(repoRoot, "packages", name.split("/")[1])
-    : join(repoRoot, "node_modules", name);
-  if (!existsSync(source)) throw new Error(`missing dependency: ${name}`);
-  bundledVersions[name] = bundlePackage(name, source, join(pkg, "node_modules", name));
+
+  writeFileSync(join(pkg, "cordis.patch.yml"), "- insert:\n    - id: dsh-slidestudio\n      name: dsh-slidestudio\n");
+
+  // Copy the complete production dependency closure, including transitive packages.
+  // Resolve from each parent so differing dependency versions cannot be flattened incorrectly.
+  const bundledVersions = {};
+  function bundlePackage(name, source, destination, ancestors = new Set()) {
+    if (ancestors.has(source)) throw new Error(`cyclic bundled dependency: ${name}`);
+    const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+    const next = new Set([...ancestors, source]);
+    cpSync(source, destination, {
+      recursive: true,
+      dereference: true,
+      filter: (s) => {
+        const rel = s.slice(source.length);
+        return (
+          !rel.split(/[\\/]/).some((part) => ["node_modules", ".git", "test", "tests", "src"].includes(part)) &&
+          !s.endsWith(".tsbuildinfo")
+        );
+      },
+    });
+    // The geometry interpreter reads this runtime XML beside its compiled code.
+    if (name === "@open-slidestudio/pptd-v2") {
+      cpSync(join(source, "src/data"), join(destination, "src/data"), { recursive: true });
+    }
+    const require = createRequire(join(source, "package.json"));
+    const children = [];
+    for (const [child, range] of Object.entries(metadata.dependencies ?? {})) {
+      if (child.startsWith("@deepseek-ai/") || child.startsWith("@open-slidestudio/")) continue;
+      const childManifest = require.resolve
+        .paths(`${child}/package.json`)
+        ?.map((base) => join(base, child, "package.json"))
+        .find((file) => existsSync(file));
+      if (!childManifest) throw new Error(`missing production dependency: ${child} from ${name}`);
+      bundlePackage(child, dirname(childManifest), join(destination, "node_modules", child), next);
+      children.push(child);
+    }
+    metadata.bundleDependencies = children;
+    delete metadata.devDependencies;
+    delete metadata.scripts;
+    writeFileSync(join(destination, "package.json"), JSON.stringify(metadata, null, 2) + "\n");
+    return metadata.version;
+  }
+  for (const name of BUNDLED_NODE_MODULES) {
+    const source = name.startsWith("@open-slidestudio/")
+      ? join(repoRoot, "packages", name.split("/")[1])
+      : join(repoRoot, "node_modules", name);
+    if (!existsSync(source)) throw new Error(`missing dependency: ${name}`);
+    bundledVersions[name] = bundlePackage(name, source, join(pkg, "node_modules", name));
+  }
+
+  const published = {
+    ...manifest,
+    private: false,
+    publishConfig: { access: "public", registry: "https://registry.npmjs.org/" },
+    dependencies: bundledVersions,
+    files: PUBLISHED_FILES,
+    bundleDependencies: BUNDLED_NODE_MODULES,
+    dsh: {
+      ...(manifest.dsh ?? {}),
+      bundle: { patch: "./cordis.patch.yml" },
+    },
+  };
+  delete published.scripts;
+  delete published.devDependencies;
+  await writeFileSync(join(pkg, "package.json"), JSON.stringify(published, null, 2) + "\n");
+
+  mkdirSync(output, { recursive: true });
+  const packed = JSON.parse(
+    execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", output], {
+      cwd: pkg,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    }),
+  )[0];
+  const bytes = readFileSync(join(output, packed.filename));
+  writeFileSync(
+    join(output, "SHA256SUMS"),
+    `${createHash("sha256").update(bytes).digest("hex")}  ${packed.filename}\n`,
+  );
+  rmSync(stage, { recursive: true, force: true });
+  const verification = JSON.parse(
+    execFileSync(process.execPath, [join(pluginDir, "scripts/verify-release.mjs"), join(output, packed.filename)], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+  );
+  console.log(JSON.stringify({ file: join(output, packed.filename), version, verification }, null, 2));
 }
 
-const published = {
-  ...manifest,
-  private: false,
-  publishConfig: { access: "public", registry: "https://registry.npmjs.org/" },
-  dependencies: bundledVersions,
-  files: PUBLISHED_FILES,
-  bundleDependencies: BUNDLED_NODE_MODULES,
-  dsh: {
-    ...(manifest.dsh ?? {}),
-    bundle: { patch: "./cordis.patch.yml" },
-  },
-};
-delete published.scripts;
-delete published.devDependencies;
-await writeFileSync(join(pkg, "package.json"), JSON.stringify(published, null, 2) + "\n");
-
-mkdirSync(output, { recursive: true });
-const packed = JSON.parse(
-  execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", output], {
-    cwd: pkg,
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-  }),
-)[0];
-const bytes = readFileSync(join(output, packed.filename));
-writeFileSync(
-  join(output, "SHA256SUMS"),
-  `${createHash("sha256").update(bytes).digest("hex")}  ${packed.filename}\n`,
-);
-rmSync(stage, { recursive: true, force: true });
-const verification = JSON.parse(execFileSync(process.execPath, [
-  join(pluginDir, "scripts/verify-release.mjs"), join(output, packed.filename),
-], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
-console.log(JSON.stringify({ file: join(output, packed.filename), version, verification }, null, 2));
-}
-
-const invokedDirectly = process.argv[1]
-  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (invokedDirectly) await main();

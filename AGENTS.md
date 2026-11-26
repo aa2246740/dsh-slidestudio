@@ -104,6 +104,7 @@ For plugin packaging or a real Harness integration, read `INSTALL-DSH.md`.
 - `packages/project-store` — versions on PPTD dirs
 - `packages/exporter-native` — offline hybrid PPTX
 - `packages/canvas-session` — session + dead-button gate
+- `packages/slides-tools` — host-agnostic canonical tool contract + project writer lease (no host SDK deps; see `docs/architecture/slides-tools.md`)
 - `packages/agent-harness` — offline generate tools timeline
 - `docs/wayfinder/`, `docs/editor-oracle/`, `docs/specs/` — law
 - `vendor/open-kimi-ppt/` — pinned skill note

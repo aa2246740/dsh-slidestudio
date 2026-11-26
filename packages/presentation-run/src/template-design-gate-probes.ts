@@ -13,6 +13,15 @@ function gateSource(here: string, rel: string): string {
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
 }
 
+/**
+ * The canonical write/director sources moved from the DSH host into the
+ * host-neutral slide tool package; probe that copy, then the host copy.
+ */
+function slideToolSourcePath(here: string, file: string): string {
+  const canonical = path.resolve(here, "../../slides-tools/dist", file);
+  return fs.existsSync(canonical) ? canonical : path.resolve(here, "../../dsh-slides-host/dist", file);
+}
+
 export function probeTemplateDesignSourceFiles(here: string, failed: string[]): void {
   const themePack = [gateSource(here, "domain/theme-pack.js"), gateSource(here, "domain/theme-pack-color.js")].join(
     "\n",
@@ -45,7 +54,7 @@ export function probeTemplateDesignSourceFiles(here: string, failed: string[]): 
     failed.push("compose-layout-vision-none");
   }
 
-  const hostWritePath = path.resolve(here, "../../dsh-slides-host/dist/write-page.js");
+  const hostWritePath = slideToolSourcePath(here, "write-page.js");
   if (fs.existsSync(hostWritePath)) {
     // write-page takes its context from the shared helper; the helper holds the theme-pack call.
     const hostWrite = fs.readFileSync(hostWritePath, "utf8");
@@ -87,7 +96,7 @@ export function probeTemplateDesignSourceFiles(here: string, failed: string[]): 
 }
 
 function probeDirectorTemplateFit(here: string, failed: string[]): void {
-  const directorPath = path.resolve(here, "../../dsh-slides-host/dist/director-brief.js");
+  const directorPath = slideToolSourcePath(here, "director-brief.js");
   if (!fs.existsSync(directorPath)) return;
   const director = fs.readFileSync(directorPath, "utf8");
   if (

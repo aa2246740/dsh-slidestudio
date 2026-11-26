@@ -19,6 +19,7 @@ export { writeSliceRuntime, readSliceRuntimeFile } from "./runtime.js";
 export { acquireProjectLease, releaseProjectLease } from "./lease.js";
 export { SliceSessionStore, slugTitle, deckTitleFromBrief, displayDeckTitle } from "./slice-session.js";
 export { commandHash } from "./receipts.js";
+export { SLIDES_DIRECTOR_PERSONA } from "@open-slidestudio/slides-tools";
 export {
   NATIVE_WEB_FORBID_SENTENCE,
   serializeProduceRequestHeader,

@@ -17,10 +17,9 @@ import {
 import { createEmptyProject, saveProject, loadProject, type TextElement } from "@open-slidestudio/pptd-v2";
 import { AgentFaults } from "./agent-fault.js";
 import { SliceSessionStore } from "./slice-session.js";
-import { registerSliceTools, sessionProduceToolAllowlist } from "./tools.js";
+import { registerSliceTools } from "./tools.js";
 import { writeSliceRuntime } from "./runtime.js";
 import { directorBrief } from "./director-brief.js";
-import { patchProduceAssembly } from "./produce-request-header.js";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -39,7 +38,11 @@ test("edit_elements publishes the canonical seven-branch subset schema", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "edit-elements-schema-"));
   registerSliceTools(runtime, {
     store: new SliceSessionStore(workspace),
-    presentation: { execute: async () => { throw new Error("unused"); } } as unknown as PresentationRun,
+    presentation: {
+      execute: async () => {
+        throw new Error("unused");
+      },
+    } as unknown as PresentationRun,
     workspaceRoot: workspace,
     editorBaseUrl: "",
     faults: new AgentFaults(),
@@ -71,86 +74,6 @@ function textElement(elementId: string, text: string, y: number) {
     content: { text, fontSize: 28, color: "#223344" },
   };
 }
-
-test("ordinary generation keeps edit_elements hidden until an active elements scope exists", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "edit-elements-allowlist-"));
-  const store = new SliceSessionStore(workspace);
-  const sessionId = "edit-elements-allowlist";
-  const opened = store.openProject({
-    dshSessionId: sessionId,
-    title: "Allowlist",
-    design: { kind: "self-directed" },
-    provider: { providerId: "test", modelId: "test" },
-  });
-  const projectRoot = store.resolveRoot(opened.binding);
-  const deps = {
-    store,
-    provider: { providerId: "test", modelId: "test", ready: true },
-  };
-  const ordinary = sessionProduceToolAllowlist(deps, sessionId);
-  assert.equal(ordinary.has("edit_elements"), false);
-  assert.equal(ordinary.has("render_deck"), false);
-  assert.equal(ordinary.has("review_deck"), false);
-
-  const definitions: ToolDefinition[] = [];
-  registerSliceTools({
-    register(definition: ToolDefinition) {
-      definitions.push(definition);
-      return () => undefined;
-    },
-    guard() {
-      return () => undefined;
-    },
-  } as unknown as ToolRuntime, {
-    ...deps,
-    presentation: { execute: async () => { throw new Error("unused"); } } as unknown as PresentationRun,
-    workspaceRoot: workspace,
-    editorBaseUrl: "",
-    faults: new AgentFaults(),
-  });
-  const assemblyTools = definitions.map((definition) => ({
-    name: definition.name,
-    description: definition.description,
-    parameters: definition.parameters,
-  }));
-  const ordinaryHeader = patchProduceAssembly({ sections: [], tools: assemblyTools }, ordinary);
-  assert.equal(ordinaryHeader.tools.some((tool) => tool.name === "edit_elements"), false);
-
-  fs.mkdirSync(path.join(projectRoot, "_agent"), { recursive: true });
-  fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-    pagePath: "pages/page-1.page",
-    scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
-    expiresAt: Date.now() + 60_000,
-  }));
-  const scoped = sessionProduceToolAllowlist(deps, sessionId);
-  assert.equal(scoped.size, ordinary.size);
-  assert.equal(scoped.has("edit_elements"), true);
-  assert.equal(scoped.has("write_page"), false);
-  const scopedHeader = patchProduceAssembly({ sections: [], tools: assemblyTools }, scoped);
-  assert.equal(scopedHeader.tools.length, ordinaryHeader.tools.length);
-  assert.equal(scopedHeader.tools.some((tool) => tool.name === "edit_elements"), true);
-  assert.equal(scopedHeader.tools.some((tool) => tool.name === "write_page"), false);
-
-  fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-    pagePath: "pages/page-1.page",
-    scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
-    expiresAt: Date.now() - 1,
-  }));
-  assert.equal(sessionProduceToolAllowlist(deps, sessionId).has("edit_elements"), false);
-
-  for (const kind of ["page", "deck"]) {
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: "pages/page-1.page",
-      scope: { kind, pageId: "page-1", elementIds: [] },
-      expiresAt: Date.now() + 60_000,
-    }));
-    const wholePage = sessionProduceToolAllowlist(deps, sessionId);
-    assert.equal(wholePage.size, ordinary.size + 1);
-    assert.equal(wholePage.has("edit_page_background"), true);
-    assert.equal(wholePage.has("edit_elements"), false);
-    assert.equal(wholePage.has("write_page"), true);
-  }
-});
 
 test("edit_elements merges a target through canonical write_page and preserves the page", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "edit-elements-runtime-"));
@@ -245,14 +168,17 @@ test("edit_elements merges a target through canonical write_page and preserves t
     assert.match(pageSha256, /^[a-f0-9]{64}$/, JSON.stringify(read.value));
     delete baseline.pageSha256;
     delete baseline.id;
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      token: "edit-elements-token",
-      pagePath: "pages/page-1.page",
-      scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
-      pageSha256,
-      pageBody: baseline,
-      expiresAt: Date.now() + 60_000,
-    }));
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        token: "edit-elements-token",
+        pagePath: "pages/page-1.page",
+        scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
+        pageSha256,
+        pageBody: baseline,
+        expiresAt: Date.now() + 60_000,
+      }),
+    );
 
     const beforeDirectWholePage = fs.readFileSync(path.join(projectRoot, "pages", "page-1.page"), "utf8");
     const directWholePage = await ctx.tools.execute({
@@ -281,16 +207,20 @@ test("edit_elements merges a target through canonical write_page and preserves t
     assert.match(currentPageSha256, /^[a-f0-9]{64}$/);
     const changedProject = loadProject(projectRoot);
     const changedPage = changedProject.pages[0]!.page;
-    assert.deepEqual(changedPage.elements.map((element) => element.elementId), ["title", "body", "footer"]);
+    assert.deepEqual(
+      changedPage.elements.map((element) => element.elementId),
+      ["title", "body", "footer"],
+    );
     assert.equal((changedPage.elements[0] as TextElement).content.text, "After");
     assert.equal((changedPage.elements[1] as TextElement).content.text, "Untouched");
     assert.deepEqual(changedPage.background, { type: "solid", color: "#F7F3EA" });
     assert.equal(changedPage.notes, "Preserve this page note.");
     assert.deepEqual(changedPage.animations, [{ elementId: "title", effect: "fade-in" }]);
     assert.equal(writeArgs.length, 2);
-    assert.deepEqual((writeArgs[1]!.elements as Array<{ elementId: string }>).map((element) => element.elementId), [
-      "title", "body", "footer",
-    ]);
+    assert.deepEqual(
+      (writeArgs[1]!.elements as Array<{ elementId: string }>).map((element) => element.elementId),
+      ["title", "body", "footer"],
+    );
 
     const replayed = await ctx.tools.execute(call);
     assert.equal(replayed.isError, false);
@@ -337,11 +267,14 @@ test("edit_elements merges a target through canonical write_page and preserves t
       assert.equal(writeArgs.length, 2);
     }
 
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: "pages/page-1.page",
-      scope: { kind: "elements", pageId: "page-1", elementIds: ["deleted"] },
-      expiresAt: Date.now() + 60_000,
-    }));
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        pagePath: "pages/page-1.page",
+        scope: { kind: "elements", pageId: "page-1", elementIds: ["deleted"] },
+        expiresAt: Date.now() + 60_000,
+      }),
+    );
     const deleted = await ctx.tools.execute({
       callId: ToolCallId("edit-elements-deleted"),
       name: "edit_elements",
@@ -357,11 +290,14 @@ test("edit_elements merges a target through canonical write_page and preserves t
     else assert.match(JSON.stringify(deleted.value), /ELEMENT_EDIT_TARGET_MISSING/);
     assert.equal(fs.readFileSync(pageFile, "utf8"), beforeInvalid);
 
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      pagePath: "pages/page-1.page",
-      scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
-      expiresAt: Date.now() - 1,
-    }));
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        pagePath: "pages/page-1.page",
+        scope: { kind: "elements", pageId: "page-1", elementIds: ["title"] },
+        expiresAt: Date.now() - 1,
+      }),
+    );
     const expired = await ctx.tools.execute({
       callId: ToolCallId("edit-elements-expired"),
       name: "edit_elements",
@@ -398,10 +334,9 @@ test("edit_elements merges a target through canonical write_page and preserves t
     const definition = definitionRuntime.find((candidate) => candidate.name === "edit_elements");
     assert.ok(definition);
     await assert.rejects(
-      definition.execute(
-        { arguments: { ...call.arguments, undeclaredEnvelopeKey: true } },
-        { signal: call.signal } as never,
-      ),
+      definition.execute({ arguments: { ...call.arguments, undeclaredEnvelopeKey: true } }, {
+        signal: call.signal,
+      } as never),
       /provider wire envelope/,
     );
   } finally {
@@ -410,27 +345,73 @@ test("edit_elements merges a target through canonical write_page and preserves t
   }
 });
 
-
 test("batch element tool accepts both same-page targets and a second page without broadening scope", async () => {
   const { prepareElementEdit } = await import("./edit-elements.js");
   const { stableSha256 } = await import("@open-slidestudio/presentation-run");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "batch-elements-"));
   const project = createEmptyProject(root, { title: "Batch" });
-  project.pages = ["p1", "p2"].map(id => ({ path: `pages/${id}.page`, page: { pageType: "content", elements: [textElement("title", "Title", 70), textElement("body", "Body", 170), textElement("footer", "Untouched", 410)] } }));
-  project.presentation.pages = project.pages.map(page => page.path);
+  project.pages = ["p1", "p2"].map((id) => ({
+    path: `pages/${id}.page`,
+    page: {
+      pageType: "content",
+      elements: [
+        textElement("title", "Title", 70),
+        textElement("body", "Body", 170),
+        textElement("footer", "Untouched", 410),
+      ],
+    },
+  }));
+  project.presentation.pages = project.pages.map((page) => page.path);
   saveProject(project);
   const items = [
-    { pagePath: "pages/p1.page", scope: { kind: "elements", pageId: "p1", elementIds: ["title"] }, pageBody: project.pages[0]!.page },
-    { pagePath: "pages/p1.page", scope: { kind: "elements", pageId: "p1", elementIds: ["body"] }, pageBody: project.pages[0]!.page },
-    { pagePath: "pages/p2.page", scope: { kind: "elements", pageId: "p2", elementIds: ["title"] }, pageBody: project.pages[1]!.page },
+    {
+      pagePath: "pages/p1.page",
+      scope: { kind: "elements", pageId: "p1", elementIds: ["title"] },
+      pageBody: project.pages[0]!.page,
+    },
+    {
+      pagePath: "pages/p1.page",
+      scope: { kind: "elements", pageId: "p1", elementIds: ["body"] },
+      pageBody: project.pages[0]!.page,
+    },
+    {
+      pagePath: "pages/p2.page",
+      scope: { kind: "elements", pageId: "p2", elementIds: ["title"] },
+      pageBody: project.pages[1]!.page,
+    },
   ];
   fs.mkdirSync(path.join(root, "_agent"), { recursive: true });
-  fs.writeFileSync(path.join(root, "_agent", "ai-review-lock.v1.json"), JSON.stringify({ ...items[0], items, expiresAt: Date.now() + 60_000 }));
+  fs.writeFileSync(
+    path.join(root, "_agent", "ai-review-lock.v1.json"),
+    JSON.stringify({ ...items[0], items, expiresAt: Date.now() + 60_000 }),
+  );
   const expectedPageSha256 = stableSha256({ ...project.pages[0]!.page, id: "p1" });
-  const accepted = prepareElementEdit(root, { pageId: "p1", expectedPageSha256, elements: [textElement("title", "New title", 70), textElement("body", "New body", 170)] });
+  const accepted = prepareElementEdit(root, {
+    pageId: "p1",
+    expectedPageSha256,
+    elements: [textElement("title", "New title", 70), textElement("body", "New body", 170)],
+  });
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
   if (accepted.ok) assert.deepEqual(accepted.page.elements[2], project.pages[0]!.page.elements[2]);
-  assert.equal(prepareElementEdit(root, { pageId: "p1", expectedPageSha256, elements: [textElement("title", "Only first", 70)] }).ok, false);
-  assert.equal(prepareElementEdit(root, { pageId: "p1", expectedPageSha256, elements: [textElement("title", "New", 70), textElement("footer", "Wrong", 410)] }).ok, false);
-  assert.equal(prepareElementEdit(root, { pageId: "p2", expectedPageSha256: stableSha256({ ...project.pages[1]!.page, id: "p2" }), elements: [textElement("title", "Page two", 70)] }).ok, true);
+  assert.equal(
+    prepareElementEdit(root, { pageId: "p1", expectedPageSha256, elements: [textElement("title", "Only first", 70)] })
+      .ok,
+    false,
+  );
+  assert.equal(
+    prepareElementEdit(root, {
+      pageId: "p1",
+      expectedPageSha256,
+      elements: [textElement("title", "New", 70), textElement("footer", "Wrong", 410)],
+    }).ok,
+    false,
+  );
+  assert.equal(
+    prepareElementEdit(root, {
+      pageId: "p2",
+      expectedPageSha256: stableSha256({ ...project.pages[1]!.page, id: "p2" }),
+      elements: [textElement("title", "Page two", 70)],
+    }).ok,
+    true,
+  );
 });

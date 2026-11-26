@@ -3,9 +3,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { acquireProjectLease, readProjectLease } from "@open-slidestudio/slides-tools";
 import { appendAgentTrace, type AgentTraceRow } from "./agent-trace.js";
 import { readAgentError, recordAgentError, writeRateLimitWait } from "./agent-fault.js";
-import { markInterruptedTurn, HOST_INTERRUPTED_CODE } from "./interruption.js";
+import {
+  markInterruptedTurn,
+  recoverSessionOnActivation,
+  releaseHubWriterLease,
+  HOST_INTERRUPTED_CODE,
+} from "./interruption.js";
 
 function tempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "slides-interruption-"));
@@ -14,7 +20,8 @@ function tempRoot(): string {
 function readTrace(root: string): AgentTraceRow[] {
   const file = path.join(root, "_agent", "agent-trace.jsonl");
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8")
+  return fs
+    .readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as AgentTraceRow);
@@ -157,5 +164,16 @@ describe("markInterruptedTurn", () => {
     const root = tempRoot();
     assert.equal(markInterruptedTurn(root), false);
     assert.equal(readAgentError(root), undefined);
+  });
+
+  it("releases a session's hub writer lease during activation recovery without disturbing another owner", () => {
+    const root = tempRoot();
+    assert.equal(acquireProjectLease(root, { kind: "hub-run", ownerId: "hub-run:s-stale", label: "Hub run" }).ok, true);
+    assert.equal(recoverSessionOnActivation(root, "s-stale"), false);
+    assert.equal(readProjectLease(root).active, false);
+
+    assert.equal(acquireProjectLease(root, { kind: "mcp", ownerId: "mcp:external", label: "External" }).ok, true);
+    assert.equal(releaseHubWriterLease(root, "s-stale"), false);
+    assert.equal(readProjectLease(root).holder?.ownerId, "mcp:external");
   });
 });

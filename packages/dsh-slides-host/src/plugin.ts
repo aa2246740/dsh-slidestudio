@@ -57,7 +57,10 @@ import {
 import { appendAgentTrace, traceRowsFromSessionEvent } from "./agent-trace.js";
 import { publishSessionLive, closeSessionLive } from "./session-live.js";
 import { AgentStreamBridge } from "./stream-bridge.js";
-import { markInterruptedTurn } from "./interruption.js";
+import {
+  createHubWriterLeaseController,
+  recoverSessionsOnActivation,
+} from "./interruption.js";
 import {
   AgentFaults,
   friendlyProviderCause,
@@ -156,6 +159,8 @@ export type SlidesHostConfig = {
   dataRoot?: string;
   editorBaseUrl?: string;
   personal?: boolean;
+  operatorStopTimeoutMs?: number;
+  writerLeaseHeartbeatMs?: number;
 };
 
 
@@ -622,18 +627,22 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
       binding ? store.resolveRoot(binding) : undefined,
     );
   });
+  const leases = createHubWriterLeaseController(store, busy);
   ctx.on("agent/status", ({ agent, status }) => {
     if (status === "idle") busy.delete(agent.id);
-    else busy.add(agent.id);
+    else {
+      busy.add(agent.id);
+      leases.cancelPendingRelease(agent.id);
+    }
     if (status !== "idle") return;
     const binding = store.bindingFor(agent.id);
     if (!binding) return;
+    const root = store.resolveRoot(binding);
+    leases.releaseNonBlocking(agent.id, root);
     legacyHider.onSettled(agent.id);
     const snap = store.inspect(agent.id);
-    faults.settle(agent.id, store.resolveRoot(binding), snap.phase.kind);
-    if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) {
-      rateLimits.onTurnSuccess(agent.id);
-    }
+    faults.settle(agent.id, root, snap.phase.kind);
+    if (snap.phase.kind !== "paused" && !rateLimits.isWaiting(agent.id)) rateLimits.onTurnSuccess(agent.id);
   });
   // Match DSH SessionHistoryController's sanctioned cross-Agent listener.
   // Product binding filtering is mandatory: never infer ownership from busy state.
@@ -644,10 +653,12 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     streamBridge.handleFrame(sessionId, frame);
   }, { global: true });
   ctx.on("agent/disposed", ({ agent }) => {
+    busy.delete(agent.session.id);
     streamBridge.disposeSession(agent.session.id);
     legacyHider.onSettled(agent.session.id);
+    leases.releaseNonBlocking(agent.session.id);
   }, { global: true });
-  ctx.effect(() => () => { streamBridge.dispose(); closeSessionLive(); });
+  ctx.effect(() => () => { leases.dispose(); streamBridge.dispose(); closeSessionLive(); });
   ctx.on("session/event", (session, event) => {
     const ev = event as {
       type?: string;
@@ -723,6 +734,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     },
     markBusy(sessionId) {
       busy.add(sessionId);
+      leases.cancelPendingRelease(sessionId);
     },
     cancelRateLimitWait(sessionId) {
       rateLimits.onUserTurn(sessionId);
@@ -735,31 +747,16 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     async operatorStop(sessionId) {
       rateLimits.operatorStop(sessionId);
       const agent = runtime.getAgent(sessionId);
+      const timeoutMs = config.operatorStopTimeoutMs ?? OPERATOR_STOP_IDLE_TIMEOUT_MS;
       try {
-        if (agent) {
-          agent.cancel({ kind: "user" });
-          // Bound the idle wait: an abort signal a hung tool call never honors
-          // (or a wake that re-arms the driver) would otherwise keep whenIdle
-          // pending forever — /slides/sessions/:id/stop never answers, `busy`
-          // never clears, and the editor is stuck on "正在中止" while the
-          // state polls keep rewriting the run files. Stop reporting must not
-          // depend on the kernel's abort actually landing.
-          const timeout = new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, OPERATOR_STOP_IDLE_TIMEOUT_MS);
-            timer.unref?.();
-          });
-          await Promise.race([agent.whenIdle(), timeout]);
-        }
+        await leases.stopAndRelease(agent, sessionId, timeoutMs, config.writerLeaseHeartbeatMs);
       } finally {
         busy.delete(sessionId);
         const binding = store.bindingFor(sessionId);
         if (binding) {
           const root = store.resolveRoot(binding);
           clearRateLimitWait(root);
-          recordAgentError(root, {
-            code: "operator-stop",
-            detail: "operator stopped the turn",
-          });
+          recordAgentError(root, { code: "operator-stop", detail: "operator stopped the turn" });
         }
       }
     },
@@ -1001,17 +998,11 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     rateLimits.restore(sessionId, fault, readRateLimitWait(root));
   }
   // A Host restart kills every live agent before turn/end can land; without a
-  // durable marker the projections keep reading an active turn forever. Mark
-  // unclosed turns interrupted once, at activation, while nothing can be busy.
-  for (const [sessionId, binding] of store.rebuild()) {
-    try {
-      if (markInterruptedTurn(store.resolveRoot(binding))) {
-        console.warn(`[slides] marked interrupted generation turn for session ${sessionId}`);
-      }
-    } catch {
-      /* best-effort: a corrupt trace must not block plugin activation */
-    }
-  }
+  // durable marker the projections keep reading an active turn forever. Skip
+  // sessions still running across a hot reload so their writer lease stays held.
+  recoverSessionsOnActivation(store, ctx.agents.list(), busy, (sessionId) => {
+    console.warn(`[slides] marked interrupted generation turn for session ${sessionId}`);
+  });
 
   ctx.effect(() => {
     const handlers: Array<() => void> = [];

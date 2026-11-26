@@ -14,6 +14,7 @@ const PRODUCT_GLOBS = [
   "packages/dsh-slides-client/lib/client.js",
   "packages/dsh-slides-bundle/cordis.patch.yml",
   "packages/presentation-run/src",
+  "packages/slides-tools/src",
   "scripts/dsh-slides.mjs",
 ];
 
@@ -34,19 +35,19 @@ const FORBIDDEN = [
  *  resurrected 2xx handler — or a 410 somewhere unrelated — cannot satisfy it. */
 const RETIRED_ROUTES = [
   {
-    label: 'POST /api/generate is not 410',
+    label: "POST /api/generate is not 410",
     re: /url\.pathname === "\/api\/generate"\s*\)\s*\{\s*return json\(res,\s*410\b/,
   },
   {
-    label: 'POST /api/refine is not 410',
+    label: "POST /api/refine is not 410",
     re: /url\.pathname === "\/api\/refine"\s*\)\s*\{\s*return json\(res,\s*410\b/,
   },
   {
-    label: 'GET /api/generate-status is not 410',
+    label: "GET /api/generate-status is not 410",
     re: /url\.pathname === "\/api\/generate-status"\s*\)\s*\{\s*return json\(res,\s*410\b/,
   },
   {
-    label: '/api/pi/* prefix is not 410',
+    label: "/api/pi/* prefix is not 410",
     re: /url\.pathname\.startsWith\("\/api\/pi\/"\)\s*\)\s*\{\s*return json\(res,\s*410\b/,
   },
 ];
@@ -96,10 +97,8 @@ export function collectFakePathHits(root) {
     hits.push("package.json: dsh:profile:init still builds agent-harness");
   }
 
-  for (const pkg of ["dsh-slides-host", "dsh-slides-bundle", "dsh-slides-client", "presentation-run"]) {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(root, "packages", pkg, "package.json"), "utf8"),
-    );
+  for (const pkg of ["dsh-slides-host", "dsh-slides-bundle", "dsh-slides-client", "presentation-run", "slides-tools"]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, "packages", pkg, "package.json"), "utf8"));
     if ("@open-slidestudio/agent-harness" in (manifest.dependencies ?? {})) {
       hits.push(`packages/${pkg}/package.json: production dep on agent-harness`);
     }
@@ -126,9 +125,7 @@ export function collectFakePathHits(root) {
   return hits;
 }
 
-const isMain =
-  process.argv[1] &&
-  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (isMain) {
   const hits = collectFakePathHits(ROOT);

@@ -8,6 +8,7 @@
  */
 import { canonicalHeader, type EpochHeader } from "@deepseek-ai/dsh-session";
 import type { LlmCallConfig, ToolSchema } from "@deepseek-ai/dsh-llm";
+import { WEB_SEARCH_DESCRIPTION } from "@open-slidestudio/slides-tools";
 
 export const NATIVE_WEB_FORBID_SENTENCE =
   "Do not call web_search or web_fetch — those DSH tools are not available on this route.";
@@ -23,14 +24,24 @@ export const CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES = [
   "reorder_pages",
   "update_deck",
   "review_page",
+  "view_material",
+  "record_material_notes",
   PRODUCE_SEARCH_IMAGE_NAME,
   PRODUCE_GENERATE_IMAGE_NAME,
 ] as const;
 
 const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(CAPABILITY_FILTERED_PRODUCE_TOOL_NAMES);
 
-export const PRODUCE_WEB_SEARCH_DESCRIPTION =
-  "Search the web for current information. Provide 1–4 queries in the required queries array. Use a one-item array for a single search. Returns facts and source URLs. First-class produce tool via xAI when inspect_capabilities.research.configured. Assistant prose is not a search.";
+/** Page, layout and plan writes that a turn's allowlist can withhold (review, element, editor and layout locks). */
+const ALLOWLIST_GATED_PRODUCE_TOOLS = new Set<string>([
+  "write_page",
+  "write_layout",
+  "write_todo",
+  "batch_remove_footers",
+]);
+
+/** Single source: the canonical web_search tool description. */
+export const PRODUCE_WEB_SEARCH_DESCRIPTION = WEB_SEARCH_DESCRIPTION;
 
 /** Official dsh-tool-web / grok-4.6 shape: `queries[]`, not a lone `query` string. */
 export const PRODUCE_WEB_SEARCH_SCHEMA: ToolSchema = {
@@ -94,7 +105,7 @@ export function isProduceToolAllowed(toolName: string, allowed?: ReadonlySet<str
   if (toolName === PRODUCE_WEB_SEARCH_NAME) return false;
   if (!allowed) return true;
   return (
-    (toolName !== "write_page" || allowed.has("write_page")) &&
+    (!ALLOWLIST_GATED_PRODUCE_TOOLS.has(toolName) || allowed.has(toolName)) &&
     (!CAPABILITY_FILTERED_PRODUCE_TOOLS.has(toolName) || allowed.has(toolName))
   );
 }

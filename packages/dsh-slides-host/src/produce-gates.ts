@@ -58,6 +58,10 @@ function loadedPptdV2Dir(): string {
   return path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/pptd-v2")));
 }
 
+function loadedSlidesToolsDir(): string {
+  return path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/slides-tools")));
+}
+
 function loadedExporterNativeDir(): string {
   return path.dirname(fileURLToPath(import.meta.resolve("@open-slidestudio/exporter-native")));
 }
@@ -65,6 +69,7 @@ function loadedExporterNativeDir(): string {
 const LOADED_GATE_PACKAGE_DIRS: ReadonlyArray<readonly [string, () => string]> = [
   ["packages/presentation-run/dist/", loadedPresentationRunDir],
   ["packages/dsh-slides-host/dist/", loadedHostDir],
+  ["packages/slides-tools/dist/", loadedSlidesToolsDir],
   ["packages/pptd-v2/dist/", loadedPptdV2Dir],
   ["packages/exporter-native/dist/", loadedExporterNativeDir],
 ];

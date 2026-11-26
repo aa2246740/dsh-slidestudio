@@ -1,6 +1,7 @@
 import type { ToolDefinition, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import { DISCUSSION_TOOLS } from "./assistant-conversation.js";
 import { isProduceToolAllowed } from "./produce-request-header.js";
+import { toolRefusalMessage } from "@open-slidestudio/slides-tools";
 
 /** rc.2 的 register 类型只有一个参数；rc.5 用第二参数 when 做步级可见性。 */
 type SliceToolActivation = {
@@ -29,27 +30,9 @@ export function registerToolWithWhen(
   return runtime.register(definition, { when });
 }
 
+/** Refusal wording is shared with every host through the canonical allowlist module. */
 export function sliceToolGuard(allowed: ReadonlySet<string>) {
-  // A bare "forbidden" leaves the model dead-ended: it retries the same tool or
-  // gives up and reports a fake system block. Naming the allowed write
-  // surfaces lets it self-correct in the same step.
-  const WRITE_SURFACES = [
-    "write_page",
-    "edit_elements",
-    "edit_page_background",
-    "delete_pages",
-    "reorder_pages",
-    "write_todo",
-    "update_deck",
-  ];
-  return (exec: { name: string }): string | undefined => {
-    if (exec.name.startsWith("_")) return undefined;
-    if (allowed.has(exec.name)) return undefined;
-    const alternatives = WRITE_SURFACES.filter((name) => allowed.has(name));
-    return `slides preset forbids ${exec.name}${
-      alternatives.length ? `; the write tools available this turn: ${alternatives.join(", ")}` : ""
-    }`;
-  };
+  return (exec: { name: string }): string | undefined => toolRefusalMessage(exec.name, allowed);
 }
 
 /**

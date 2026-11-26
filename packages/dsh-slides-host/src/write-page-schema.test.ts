@@ -56,7 +56,11 @@ function toolDefinition(name: string): ToolDefinition {
   return definition;
 }
 
-test("write_page publishes the seven-branch canonical schema to the model", () => {
+function isComponentBranch(branch: { properties?: Record<string, unknown> }): boolean {
+  return (branch.properties?.elementType as { const?: string } | undefined)?.const === "component";
+}
+
+test("write_page publishes the seven canonical element branches and the component branch to the model", () => {
   const definition = toolDefinition("write_page");
   const root = definition.parameters as {
     required?: string[];
@@ -76,8 +80,11 @@ test("write_page publishes the seven-branch canonical schema to the model", () =
   const elements = root.properties?.elements as {
     items?: { oneOf?: Array<{ properties?: Record<string, unknown> }> };
   };
-  assert.equal(elements.items?.oneOf?.length, 7);
-  const branches = elements.items!.oneOf!;
+  const allBranches = elements.items!.oneOf!;
+  assert.equal(allBranches.filter(isComponentBranch).length, 1, "one template-component branch, expanded by the Host");
+  assert.equal(allBranches.length, 8);
+  const branches = allBranches.filter((branch) => !isComponentBranch(branch));
+  assert.equal(branches.length, 7);
   for (const branch of branches) {
     const bounds = branch.properties?.bounds as { minItems?: number; maxItems?: number };
     assert.equal(bounds.minItems, 4);
@@ -157,7 +164,10 @@ test("write_page rejects b7 nested styles and non-four-value bounds before proje
 });
 
 test("planning and page review publish canonical item schemas", () => {
-  for (const [name, field] of [["commit_design", "slidePlan"], ["write_todo", "items"]] as const) {
+  for (const [name, field] of [
+    ["commit_design", "slidePlan"],
+    ["write_todo", "items"],
+  ] as const) {
     const definition = toolDefinition(name);
     assert.equal(definition.parameters.additionalProperties, false);
     const properties = (definition.parameters.properties ?? {}) as Record<string, JsonSchemaNode>;
@@ -372,49 +382,101 @@ test("canonical write_page persists text and native element metadata through Too
     const line = page.elements.find((element) => element.elementId === "connector") as LineElement;
     assert.deepEqual(line.arrow, [null, "stealth"]);
     assert.deepEqual(line.connects, ["bg", "title"]);
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      token: "background-edit", pagePath: "pages/page-1.page", expiresAt: Date.now() + 60_000,
-      scope: {kind: "page", pageId: "page-1", backgroundColorOverride: true},
-    }));
-    const backgroundArgs = {pageId: "page-1", expectedPageSha256: pageSha256, background: {type: "solid", color: "#172E49"}};
-    const backgroundEdit = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-edit-1"), arguments: backgroundArgs,
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        token: "background-edit",
+        pagePath: "pages/page-1.page",
+        expiresAt: Date.now() + 60_000,
+        scope: { kind: "page", pageId: "page-1", backgroundColorOverride: true },
+      }),
+    );
+    const backgroundArgs = {
+      pageId: "page-1",
+      expectedPageSha256: pageSha256,
+      background: { type: "solid", color: "#172E49" },
+    };
+    const backgroundEdit = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-edit-1"),
+      arguments: backgroundArgs,
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     if (backgroundEdit.isError) assert.fail(backgroundEdit.error.message);
     assert.equal((backgroundEdit.value as Record<string, unknown>).outcome, "written");
-    assert.deepEqual(loadProject(projectRoot).pages[0]!.page, {...page, background: backgroundArgs.background}, "only background changes, including numeric text and all metadata");
+    assert.deepEqual(
+      loadProject(projectRoot).pages[0]!.page,
+      { ...page, background: backgroundArgs.background },
+      "only background changes, including numeric text and all metadata",
+    );
     const afterBackground = fs.readFileSync(path.join(projectRoot, "pages/page-1.page"), "utf8");
-    const stale = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-stale"), arguments: backgroundArgs,
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    const stale = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-stale"),
+      arguments: backgroundArgs,
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     if (stale.isError) assert.fail(stale.error.message);
     assert.equal((stale.value as Record<string, unknown>).error, "PAGE_EDIT_STALE_PAGE");
     assert.equal(fs.readFileSync(path.join(projectRoot, "pages/page-1.page"), "utf8"), afterBackground);
-    const outside = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-outside"), arguments: {...backgroundArgs, pageId: "other"},
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    const outside = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-outside"),
+      arguments: { ...backgroundArgs, pageId: "other" },
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     if (outside.isError) assert.fail(outside.error.message);
     assert.equal((outside.value as Record<string, unknown>).error, "PAGE_EDIT_SCOPE_REQUIRED");
-    const extra = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-extra"), arguments: {...backgroundArgs, elements: []},
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    const extra = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-extra"),
+      arguments: { ...backgroundArgs, elements: [] },
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     assert.equal(extra.isError, true);
 
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      token: "background-cased", pagePath: "pages/page-1.page", expiresAt: Date.now() + 60_000,
-      scope: {kind: "page", pageId: "Page-1", backgroundColorOverride: true},
-    }));
-    const cased = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-cased"), arguments: backgroundArgs,
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        token: "background-cased",
+        pagePath: "pages/page-1.page",
+        expiresAt: Date.now() + 60_000,
+        scope: { kind: "page", pageId: "Page-1", backgroundColorOverride: true },
+      }),
+    );
+    const cased = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-cased"),
+      arguments: backgroundArgs,
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     if (cased.isError) assert.fail(cased.error.message);
     // A differently-cased lock pageId authorizes; only the stale hash rejects.
     assert.equal((cased.value as Record<string, unknown>).error, "PAGE_EDIT_STALE_PAGE");
 
-    fs.writeFileSync(path.join(projectRoot, "_agent", "ai-review-lock.v1.json"), JSON.stringify({
-      token: "background-elements", pagePath: "pages/page-1.page", expiresAt: Date.now() + 60_000,
-      scope: {kind: "elements", pageId: "Page-1", elementIds: ["title"]},
-    }));
-    const elementsOnly = await ctx.tools.execute({name: "edit_page_background", callId: ToolCallId("background-elements"), arguments: backgroundArgs,
-      agent: {id: sessionId} as never, signal: new AbortController().signal});
+    fs.writeFileSync(
+      path.join(projectRoot, "_agent", "ai-review-lock.v1.json"),
+      JSON.stringify({
+        token: "background-elements",
+        pagePath: "pages/page-1.page",
+        expiresAt: Date.now() + 60_000,
+        scope: { kind: "elements", pageId: "Page-1", elementIds: ["title"] },
+      }),
+    );
+    const elementsOnly = await ctx.tools.execute({
+      name: "edit_page_background",
+      callId: ToolCallId("background-elements"),
+      arguments: backgroundArgs,
+      agent: { id: sessionId } as never,
+      signal: new AbortController().signal,
+    });
     assert.equal(elementsOnly.isError, true);
     assert.match(elementsOnly.error.message, /forbids edit_page_background/);
-
   } finally {
     await toolsFiber.dispose();
     await promptFiber.dispose();
@@ -428,12 +490,9 @@ test("planning rejects wrapper objects and incomplete items before project acces
     { items: [{ pageId: "cover", title: "Cover", layoutFamily: "cover" }] },
     [{ pageId: "cover", title: "Cover" }],
   ]) {
-    await assert.rejects(
-      definition.execute({ slidePlan }, exec),
-      (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "INVALID_ARGS");
-        return true;
-      },
-    );
+    await assert.rejects(definition.execute({ slidePlan }, exec), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "INVALID_ARGS");
+      return true;
+    });
   }
 });
