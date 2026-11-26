@@ -137,7 +137,7 @@ function createObservability({ app, version = "development", sink = (line) => co
 // lib/types/logger.js
 const logger = createObservability({
 	app: "slidestudio-plugin",
-	version: "0.2.9"
+	version: "0.3.0"
 });
 // lib/types/editor-sidecar.js
 const HOP_HEADERS = /* @__PURE__ */ new Set([

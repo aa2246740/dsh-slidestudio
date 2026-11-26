@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-11-27
+
+- DSH 0.2.2-rc.5 compatibility and 4-service thin shell: `dsh-slidestudio` and `@open-slidestudio/dsh-slides-host` inject only `webServer`, `connection`, `llm`, and `attachments`, removing host agent, tool-registry, preset, workspace, and session-journal dependencies.
+- Host-agnostic SlideStudio Core architecture:
+  - `@open-slidestudio/slides-tools`: canonical 32-tool slide contract, material readers, layout writing, batch footer removal, and atomic dual-file project writer lease (`writer-lease.v1.json` + `runtime-turn.lease.v1.json`) with PID/hostname guard.
+  - `@open-slidestudio/slides-runtime`: standalone `@earendil-works/pi-agent-core@1.6.1` + `@earendil-works/pi-ai@1.6.1` agent loop, `DshLlmPort` streaming adapter, context budget, session log (`runtime-session.v1.jsonl`), and 2-lane priority session transitions (user commands preempt automatic rate-limit resume).
+  - `@open-slidestudio/slides-mcp`: standalone stdio and loopback HTTP MCP server over the canonical slide tools, plus optional DSH rc.5 `mcpManager.register` integration behind feature flag `mcp_register` and reusable external skill (`skills/slidestudio/SKILL.md`).
+- Editor, PPTD v2, and exporter upgrades: full Layout Mode (`#layout-rail`, `#layout-banner`, master/layout editing, page-number insertion), attachment chips and material scoping, upgraded PPTD v2 XML lint, and verified hybrid native PPTX export (`validateExportReport`).
+- Pure-JS release packaging: DAG-hoisted dependency bundling with zero `sharp` / `@napi-rs/canvas` native addons and `verify:no-intranet` public-boundary enforcement.
+
 ## 0.2.9 — 2026-11-03
 
 - The published plugin includes `config/feature-flags.json`. If that file is missing, the editor uses the safe flag defaults instead of crashing on startup.

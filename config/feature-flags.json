@@ -14,7 +14,7 @@
     },
     "mcp_register": {
       "default": false,
-      "since": "0.2.9",
+      "since": "0.3.0",
       "description": "Register the bundled slides-mcp server with the DSH 0.2.2-rc.5+ MCP manager (mcpManager.register) so DSH agents can call the SlideStudio tools over MCP. Hosts without mcpManager (rc.2) skip it with a warning.",
       "owner": "dsh-slidestudio"
     }
