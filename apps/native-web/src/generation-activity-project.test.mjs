@@ -113,6 +113,137 @@ describe("project-bound generation activity", () => {
     );
   });
 
+  it("projects repeated-invalid-args as paused and omits rateLimitWait", async () => {
+    const root = path.join(scratch, "repeated-invalid-args");
+    pptd.createEmptyProject(root, { title: "Repeated invalid args" });
+    writeSliceRuntime(root, {
+      brief: "A deck tripped on repeated invalid args",
+      design: { kind: "self-directed" },
+      editorBaseUrl: "http://127.0.0.1:1",
+      strictExecution: true,
+    });
+    initializeRunLedger(root);
+    fs.writeFileSync(
+      path.join(root, "_agent", "presentation-run.v1.json"),
+      JSON.stringify({ sessionId: "repeated-invalid-args" }),
+    );
+    fs.writeFileSync(
+      path.join(root, "_agent", "dsh-agent-error.json"),
+      JSON.stringify({
+        code: "repeated-invalid-args",
+        detail: "Repeated invalid arguments on edit_elements",
+      }),
+    );
+    fs.writeFileSync(
+      path.join(root, "_agent", "dsh-rate-limit-wait.json"),
+      JSON.stringify({
+        attempt: 1,
+        waitMs: 30_000,
+        nextRetryAt: 1795651230000,
+        code: "provider-rate-limit",
+      }),
+    );
+    const activity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } },
+      request(root, "repeated-invalid-args"),
+      root,
+    );
+    assert.equal(activity.phase, "paused");
+    assert.equal(activity.error?.code, "repeated-invalid-args");
+    assert.equal("rateLimitWait" in activity, false);
+    assert.ok(
+      activity.stages.some(
+        (/** @type {{ status?: string, detail?: string }} */ stage) =>
+          stage.status === "needs-attention" && /已暂停/.test(stage.detail ?? ""),
+      ),
+      JSON.stringify(activity.stages),
+    );
+  });
+
+  it("includes rateLimitWait for paused provider-rate-limit faults and omits it when invalid or absent", async () => {
+    const setupRateLimitProject = (/** @type {string} */ name, /** @type {unknown} */ waitPayload) => {
+      const root = path.join(scratch, name);
+      pptd.createEmptyProject(root, { title: name });
+      writeSliceRuntime(root, {
+        brief: "A rate-limited deck",
+        design: { kind: "self-directed" },
+        editorBaseUrl: "http://127.0.0.1:1",
+        strictExecution: true,
+      });
+      initializeRunLedger(root);
+      fs.writeFileSync(path.join(root, "_agent", "presentation-run.v1.json"), JSON.stringify({ sessionId: name }));
+      fs.writeFileSync(
+        path.join(root, "_agent", "dsh-agent-error.json"),
+        JSON.stringify({
+          code: "provider-rate-limit",
+          detail: "429 Too Many Requests",
+        }),
+      );
+      if (waitPayload !== undefined) {
+        fs.writeFileSync(path.join(root, "_agent", "dsh-rate-limit-wait.json"), JSON.stringify(waitPayload));
+      }
+      return root;
+    };
+
+    const validRoot = setupRateLimitProject("rate-limit-valid", {
+      attempt: 0,
+      waitMs: 15_000,
+      nextRetryAt: 1795651215000,
+      code: "provider-rate-limit",
+      ignoredExtra: "nope",
+    });
+    const validActivity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } },
+      request(validRoot, "rate-limit-valid"),
+      validRoot,
+    );
+    assert.equal(validActivity.phase, "paused");
+    assert.equal(validActivity.error?.code, "provider-rate-limit");
+    assert.deepEqual(validActivity.rateLimitWait, {
+      attempt: 0,
+      waitMs: 15_000,
+      nextRetryAt: 1795651215000,
+      code: "provider-rate-limit",
+    });
+
+    const missingWaitRoot = setupRateLimitProject("rate-limit-missing-wait", undefined);
+    const missingWaitActivity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } },
+      request(missingWaitRoot, "rate-limit-missing-wait"),
+      missingWaitRoot,
+    );
+    assert.equal(missingWaitActivity.phase, "paused");
+    assert.equal("rateLimitWait" in missingWaitActivity, false);
+
+    const malformedWaitRoot = setupRateLimitProject("rate-limit-malformed-wait", {
+      attempt: "0",
+      waitMs: 15_000,
+      nextRetryAt: 1795651215000,
+      code: "provider-rate-limit",
+    });
+    const malformedWaitActivity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } },
+      request(malformedWaitRoot, "rate-limit-malformed-wait"),
+      malformedWaitRoot,
+    );
+    assert.equal(malformedWaitActivity.phase, "paused");
+    assert.equal("rateLimitWait" in malformedWaitActivity, false);
+
+    const nonStringCodeRoot = setupRateLimitProject("rate-limit-nonstring-code", {
+      attempt: 1,
+      waitMs: 30_000,
+      nextRetryAt: 1795651230000,
+      code: 429,
+    });
+    const nonStringCodeActivity = await generationActivityForRequest(
+      { pptd, store: { listVersions: () => [] } },
+      request(nonStringCodeRoot, "rate-limit-nonstring-code"),
+      nonStringCodeRoot,
+    );
+    assert.equal(nonStringCodeActivity.phase, "paused");
+    assert.equal("rateLimitWait" in nonStringCodeActivity, false);
+  });
+
   it("keeps two interleaved project polls bound to their own sessions", async () => {
     const first = await generationActivityForRequest({}, request(firstRoot, "session-first"), secondRoot, readActivity);
     const second = await generationActivityForRequest(

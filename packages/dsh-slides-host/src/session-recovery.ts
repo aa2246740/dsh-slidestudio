@@ -143,7 +143,11 @@ export class SessionRecovery {
 
   /** Settle a finished turn: route its fault, then reconcile the durable fault record. */
   onTurnEnd(sessionId: string, result: RuntimeTurnResult): void {
-    const fault = result.fault;
+    const fault =
+      result.fault ??
+      (result.status === "max-tokens"
+        ? { code: "turn-max-tokens", detail: "Turn reached the output limit" }
+        : undefined);
     if (fault && fault.code !== "operator-stop") this.onFault(sessionId, fault);
     const root = this.rootOf(sessionId);
     if (!root) return;

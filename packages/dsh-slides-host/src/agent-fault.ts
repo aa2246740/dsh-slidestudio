@@ -109,6 +109,7 @@ const PAUSE_CODES = new Set([
   "provider-unavailable",
   "operator-stop",
   "host-interrupted",
+  "turn-max-tokens",
   "tool-invalid-args-loop",
   "repeated-invalid-args",
   "repeated-business-rejection",
@@ -178,50 +179,53 @@ function classifySerializationFault(detail: string): SliceError | undefined {
   };
 }
 
+type ErrorRecord = { readonly code: string; readonly detail: string };
+
+const NON_RATE_LIMIT_PROVIDER_ERROR =
+  /\b(?:400|401|403|404|422|500|502|503|504)\b|invalid api key|unauthorized|forbidden|bad request|invalid_request|invalid_argument|context[_\s-]?length|maximum context|not found|not supported|unavailable/i;
+
+const isAuthError = (rec: ErrorRecord): boolean =>
+  ["AUTH", "401", "403"].includes(rec.code) ||
+  /unauthorized|forbidden|invalid api key|鉴权|\b401\b|\b403\b/i.test(rec.detail);
+
+const isRateLimitError = (rec: ErrorRecord): boolean =>
+  rec.code === "RATE_LIMIT" || rec.code === "429" || /(?:\b429\b|rate[\s_-]?limit|too many requests)/i.test(rec.detail);
+
+const isQuotaError = (rec: ErrorRecord): boolean =>
+  rec.code === "QUOTA" || /quota|RESOURCE_EXHAUSTED/i.test(rec.detail);
+
+const isUnavailableError = (rec: ErrorRecord): boolean =>
+  ["SERVER", "UNAVAILABLE", "500", "502", "503", "504"].includes(rec.code) ||
+  /\b(?:500|502|503|504)\b|unavailable/i.test(rec.detail);
+
+const isGenericProviderError = (rec: ErrorRecord): boolean =>
+  rec.code === "PI_AI_ERROR" &&
+  /Provider returned error/i.test(rec.detail) &&
+  !NON_RATE_LIMIT_PROVIDER_ERROR.test(rec.detail);
+
+function providerFaultCode(rec: ErrorRecord): string | undefined {
+  if (isMinimaxTokenPlanExhausted(rec.detail) || rec.code === "2056") return "provider-token-plan";
+  if (isAuthError(rec)) return "provider-auth";
+  if (isRateLimitError(rec)) return "provider-rate-limit";
+  if (isQuotaError(rec)) return "provider-quota";
+  if (isUnavailableError(rec)) return "provider-unavailable";
+  if (isGenericProviderError(rec)) return "provider-rate-limit";
+  return undefined;
+}
+
 export function classifyAgentError(error: unknown): SliceError {
-  const rec = asErrorRecord(error);
-  const detail = scrubRegisteredSecrets(redactText(rec.detail)).slice(0, 800);
+  const raw = asErrorRecord(error);
+  const detail = scrubRegisteredSecrets(redactText(raw.detail)).slice(0, 800);
   const serialization = classifySerializationFault(detail);
   if (serialization) return serialization;
-  if (isMinimaxTokenPlanExhausted(detail) || rec.code === "2056") {
-    return { code: "provider-token-plan", detail };
-  }
-  if (
-    rec.code === "PI_AI_ERROR" &&
-    /Provider returned error/i.test(detail) &&
-    !/401|403|invalid api key/i.test(detail)
-  ) {
-    return { code: "provider-rate-limit", detail };
-  }
-  if (rec.code === "QUOTA" || /quota|RESOURCE_EXHAUSTED/i.test(detail)) {
-    return { code: "provider-quota", detail };
-  }
-  if (
-    rec.code === "AUTH" ||
-    rec.code === "401" ||
-    rec.code === "403" ||
-    /unauthorized|forbidden|invalid api key|鉴权|401\b|403\b/i.test(detail)
-  ) {
-    return { code: "provider-auth", detail };
-  }
-  if (
-    rec.code === "RATE_LIMIT" ||
-    rec.code === "429" ||
-    /(?:\b429\b|rate[\s_-]?limit)/i.test(detail)
-  ) {
-    return { code: "provider-rate-limit", detail };
-  }
-  if (rec.code === "SERVER" || /UNAVAILABLE|"code":\s*503/.test(detail)) {
-    return { code: "provider-unavailable", detail };
-  }
-  return { code: rec.code || "agent-error", detail };
+  const rec = { code: raw.code, detail };
+  return { code: providerFaultCode(rec) ?? (rec.code || "agent-error"), detail };
 }
 
 function asErrorRecord(error: unknown): { code: string; detail: string } {
   if (error instanceof Error) {
     const code = "code" in error && typeof error.code === "string" ? error.code : "";
-    const numeric =
-      "code" in error && typeof error.code === "number" ? String(error.code) : "";
+    const numeric = "code" in error && typeof error.code === "number" ? String(error.code) : "";
     return { code: code || numeric, detail: error.message };
   }
   if (error && typeof error === "object") {
@@ -232,12 +236,7 @@ function asErrorRecord(error: unknown): { code: string; detail: string } {
         : typeof rec.message === "string"
           ? rec.message
           : JSON.stringify(error);
-    const code =
-      typeof rec.code === "string"
-        ? rec.code
-        : typeof rec.code === "number"
-          ? String(rec.code)
-          : "";
+    const code = typeof rec.code === "string" ? rec.code : typeof rec.code === "number" ? String(rec.code) : "";
     return { code, detail };
   }
   return { code: "", detail: String(error) };
@@ -277,10 +276,7 @@ function parseRetryAfterFromText(text: string, now: number): number | undefined 
   return undefined;
 }
 
-function headerValue(
-  headers: Record<string, unknown> | undefined,
-  name: string,
-): string | undefined {
+function headerValue(headers: Record<string, unknown> | undefined, name: string): string | undefined {
   if (!headers) return undefined;
   const direct = headers[name];
   if (typeof direct === "string") return direct;
@@ -320,9 +316,7 @@ export function parseRetryAfterMs(source: unknown, now = Date.now()): number | u
   if (typeof rec.retry_after_seconds === "number") {
     return capWaitMs(rec.retry_after_seconds * 1000);
   }
-  const blob = [rec.detail, rec.message]
-    .filter((value) => typeof value === "string")
-    .join("\n");
+  const blob = [rec.detail, rec.message].filter((value) => typeof value === "string").join("\n");
   if (blob) {
     const fromText = parseRetryAfterFromText(blob, now);
     if (fromText != null) return fromText;
@@ -372,11 +366,7 @@ export class AgentFaults {
     }
   }
 
-  settle(
-    sessionId: string,
-    projectRoot: string,
-    phaseKind: string,
-  ): void {
+  settle(sessionId: string, projectRoot: string, phaseKind: string): void {
     // pending is in-memory; a fault recorded before a process restart only
     // survives on disk. Fall back so settle can still reconcile it.
     const pending = this.pending.get(sessionId);
@@ -414,14 +404,15 @@ export class AgentFaults {
   }
 }
 
-
 /** Infrastructure hints must not treat digits inside trace ids as HTTP status codes. */
 export function friendlyProviderCause(detail: string): string {
   const d = detail.slice(0, 200);
   if (/auth|unauthoriz|\b(?:401|403)\b|invalid.*(key|token)|凭据|认证/i.test(d)) return "（模型服务认证失效或未配置）";
-  if (/timeout|timed out|abort|ECONNREFUSED|ECONNRESET|ENOTFOUND|network|fetch failed/i.test(d)) return "（模型服务暂时不可达）";
+  if (/timeout|timed out|abort|ECONNREFUSED|ECONNRESET|ENOTFOUND|network|fetch failed/i.test(d))
+    return "（模型服务暂时不可达）";
   if (/rate.?limit|\b429\b|quota/i.test(d)) return "（模型服务限流，请稍后重试）";
-  if (/not in the current provider roster|no credential|UNKNOWN_MODEL|NO_ADAPTER/i.test(d)) return "（该模型未配置或不可用，请更换模型）";
+  if (/not in the current provider roster|no credential|UNKNOWN_MODEL|NO_ADAPTER/i.test(d))
+    return "（该模型未配置或不可用，请更换模型）";
   if (/invalid_argument|invalid request|Bad Request|\b400\b/i.test(d)) return "（模型服务拒绝了本次请求）";
   return "";
 }

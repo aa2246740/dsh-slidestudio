@@ -41,7 +41,7 @@ import {
   generationResumeCandidate,
   generationResumeInstruction,
   generationStateCanResume,
-  generationTerminalPresentation,
+  generationTerminalCardModel,
   humanizeGenerationFault,
   processStatusLabel,
   projectGenerationProcess,
@@ -221,6 +221,9 @@ let shiftPointerClaimId = "";
 // drag; it must not collapse the selection onto the pressed element.
 let dragClickClaimId = "";
 let generationPollTimer = 0;
+let generationPollSeq = 0;
+let generationWaitTimer = 0;
+let generationWaitTargetAt = 0;
 let generationActivity = null;
 let generationLiveSource = null;
 let generationLiveSession = "";
@@ -234,9 +237,6 @@ let aiReviewLiveLabel = "";
 let activeCommentReviewControl = null;
 let activeWorkspaceReviewControl = null;
 let aiReviewBaselineTurn = null;
-let generationPanelExpanded = false;
-let generationPanelUserToggled = false;
-let generationEventsUserToggled = false;
 let generationPreviousPhase = "";
 let generationEventFollowing = true;
 let generationEventScrollBound = false;
@@ -248,10 +248,20 @@ function rememberProcessChoice(key, open) {
   try { sessionStorage.setItem(`slides-chat-process:${generationProcessContext}`, JSON.stringify([...generationProcessChoices])); } catch { /* optional UI state */ }
 }
 let generationResumePending = false;
+let generationResumeDispatching = false;
+let generationResumeEpoch = 0;
 let generationResumeVerifiedSessionId = "";
 let generationResumeEligibilityRequest = 0;
 let generationResumeUncertainSessionId = "";
+let generationResumeUncertainAt = 0;
+let generationResumeUncertainBaseline = "";
+const GENERATION_ROSTER_TTL_MS = 30_000;
 let generationRoster = null;
+let generationRosterLoadedAt = 0;
+let generationRosterAttemptedAt = 0;
+let generationRosterSignature = "";
+let assistantModelUserOverride = false;
+let assistantModelSessionId = "";
 let generationStopPending = false;
 let lastGenerationState = null;
 /** @type {import("./editor-attachments.js").AgentAttachment[]} */
@@ -3371,9 +3381,10 @@ function renderChrome() {
     if (commentLayer) commentLayer.hidden = true;
   }
   for (const btnEl of document.querySelectorAll("[data-control]")) {
-    // Composer and question-card controls manage their own disabled state
-    // (pending sends, unanswered questions); the session gate must not stomp it.
-    if (btnEl.closest("#work-form, .assistant-question-card")) continue;
+    // Composer, question-card, and status-card controls manage their own disabled
+    // state (pending sends, unanswered questions, recovery actions); the session
+    // gate must not stomp it even on a 0-page empty canvas.
+    if (btnEl.closest("#work-form, .assistant-question-card, .generation-status-card")) continue;
     const id = btnEl.getAttribute("data-control");
     if (!id) continue;
     // The assistant is useful before the first slide exists. Its visibility
@@ -7490,10 +7501,6 @@ function setAiReviewTurnActive(active) {
   } else if (!aiReviewTurnActive) {
     aiReviewBaselineTurn = null;
   }
-  if (aiReviewTurnActive) {
-    generationPanelExpanded = true;
-    generationPanelUserToggled = false;
-  }
   paintEditorGeneration(generationActivity);
   if ($("work-brief")) $("work-brief").disabled = false;
   const sendButton = document.querySelector("#work-form .composer-send");
@@ -7529,6 +7536,7 @@ function mountThinkLabel(host, text, shimmer) {
     root.className = "think";
     const sizer = document.createElement("span");
     sizer.className = "think-sizer";
+    sizer.setAttribute("aria-hidden", "true");
     const current = document.createElement("span");
     current.className = "think-text";
     current.dataset.readerStatusCopy = "current";
@@ -7625,6 +7633,225 @@ function createGenerationTechnicalDetails() {
   return details;
 }
 
+function focusAssistantModelPicker() {
+  const select = /** @type {HTMLSelectElement | null} */ ($("assistant-model"));
+  if (!select) return;
+  select.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  select.focus();
+}
+
+/** @param {any} rateLimitWait */
+function formatWaitCountdownText(rateLimitWait, now = Date.now()) {
+  const nextRetryAt = Number(rateLimitWait?.nextRetryAt);
+  const remainingMs = Number.isFinite(nextRetryAt)
+    ? Math.max(0, nextRetryAt - now)
+    : Math.max(0, Number(rateLimitWait?.waitMs) || 0);
+  const seconds = Math.ceil(remainingMs / 1000);
+  return seconds > 0 ? t("{n} 秒后自动重试", { n: seconds }) : t("正在重试…");
+}
+
+function clearGenerationWaitTimer() {
+  if (!generationWaitTimer) return;
+  clearInterval(generationWaitTimer);
+  generationWaitTimer = 0;
+  generationWaitTargetAt = 0;
+}
+
+/** @param {any} rateLimitWait */
+function syncGenerationWaitCountdown(rateLimitWait) {
+  const nextRetryAt = Number(rateLimitWait?.nextRetryAt);
+  if (!Number.isFinite(nextRetryAt) || nextRetryAt <= Date.now()) {
+    clearGenerationWaitTimer();
+    return;
+  }
+  if (generationWaitTimer && generationWaitTargetAt === nextRetryAt) return;
+  clearGenerationWaitTimer();
+  generationWaitTargetAt = nextRetryAt;
+  generationWaitTimer = window.setInterval(() => {
+    const countdown = document.querySelector('[data-process-key="turn-end"] [data-status-countdown]');
+    const now = Date.now();
+    if (countdown) setNodeText(countdown, formatWaitCountdownText({ nextRetryAt }, now));
+    if (now >= nextRetryAt) {
+      clearGenerationWaitTimer();
+      void pollGenerationActivity();
+    }
+  }, 1000);
+}
+
+function setOptionalSlot(node, value) {
+  if (!node) return;
+  const next = String(value || "").trim();
+  node.hidden = !next;
+  setNodeText(node, next);
+}
+
+function createGenerationStatusNode() {
+  const fragment = document.createDocumentFragment();
+  const pill = document.createElement("p");
+  pill.className = "generation-turn-end";
+  pill.dataset.processTitle = "";
+  pill.dataset.statusPill = "";
+  pill.hidden = true;
+
+  const card = document.createElement("article");
+  card.className = "generation-status-card";
+  card.setAttribute("role", "status");
+  card.setAttribute("aria-live", "polite");
+  card.hidden = true;
+
+  const head = document.createElement("header");
+  head.className = "generation-status-head";
+  const badge = document.createElement("span");
+  badge.className = "generation-status-badge";
+  badge.dataset.statusBadge = "";
+  const title = document.createElement("strong");
+  title.className = "generation-status-title";
+  title.dataset.statusTitle = "";
+  const countdown = document.createElement("span");
+  countdown.className = "generation-status-countdown";
+  countdown.dataset.statusCountdown = "";
+  countdown.hidden = true;
+  head.append(badge, title, countdown);
+
+  const detail = document.createElement("p");
+  detail.className = "generation-turn-end-detail";
+  detail.dataset.processDetail = "";
+  detail.hidden = true;
+
+  const hint = document.createElement("p");
+  hint.className = "generation-status-hint";
+  hint.dataset.statusHint = "";
+  hint.hidden = true;
+
+  const technical = document.createElement("details");
+  technical.className = "generation-status-technical";
+  technical.dataset.statusTechnical = "";
+  technical.hidden = true;
+  const summary = document.createElement("summary");
+  summary.textContent = t("查看技术详情");
+  const raw = document.createElement("pre");
+  raw.dataset.statusRaw = "";
+  technical.append(summary, raw);
+
+  const footer = document.createElement("div");
+  footer.className = "generation-resume";
+  footer.id = "generation-resume-row";
+  footer.hidden = true;
+  const switchBtn = document.createElement("button");
+  switchBtn.type = "button";
+  switchBtn.className = "generation-status-secondary";
+  switchBtn.dataset.statusSwitch = "";
+  switchBtn.textContent = t("切换模型");
+  switchBtn.hidden = true;
+  switchBtn.addEventListener("click", () => focusAssistantModelPicker());
+  const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
+  stopBtn.className = "generation-status-secondary";
+  stopBtn.dataset.statusStop = "";
+  stopBtn.textContent = t("停止等待");
+  stopBtn.hidden = true;
+  stopBtn.addEventListener("click", () => { void stopLiveGeneration(); });
+  const resumeBtn = document.createElement("button");
+  resumeBtn.type = "button";
+  resumeBtn.id = "editor-generation-resume";
+  resumeBtn.dataset.control = "chrome.generation.resume";
+  resumeBtn.textContent = t("继续完成生成");
+  resumeBtn.hidden = true;
+  resumeBtn.addEventListener("click", () => { void resumeGeneration(); });
+  footer.append(switchBtn, stopBtn, resumeBtn);
+
+  card.append(head, detail, hint, technical, footer);
+  fragment.append(pill, card);
+  return fragment;
+}
+
+/** @param {any} row @param {boolean} isResolve */
+function generationResumeButtonLabel(row, isResolve) {
+  if (row.resumePending) return t("正在继续…");
+  if (row.resumeUncertain) return t("正在确认是否已发送…");
+  if (isResolve && row.hasModelSwitch) return t("用新模型继续");
+  return t("继续完成生成");
+}
+
+/** @param {any} row */
+function generationStatusActionFlags(row) {
+  const model = row.cardModel;
+  const isWait = model.tone === "wait" || model.recoveryKind === "wait-or-stop";
+  const isResolve = model.recoveryKind === "resolve";
+  const isCancelled = Boolean(row.isCancelled);
+  const isDiscussOrEdit = Boolean(row.isDiscussOrEdit);
+  const showSwitch = isDiscussOrEdit
+    ? !isCancelled
+    : isWait || (!isCancelled && (isResolve || model.tone === "error" || model.tone === "warning"));
+  const showResume = !isWait && !isDiscussOrEdit && Boolean(row.resumeActionable || (isResolve && row.canResolveIdle));
+  return { isWait, isResolve, showSwitch, showResume };
+}
+
+/** @param {Element} card @param {any} row */
+function updateGenerationStatusActions(card, row) {
+  const footer = /** @type {HTMLElement | null} */ (card.querySelector("#generation-resume-row"));
+  const switchBtn = /** @type {HTMLButtonElement | null} */ (card.querySelector("[data-status-switch]"));
+  const stopBtn = /** @type {HTMLButtonElement | null} */ (card.querySelector("[data-status-stop]"));
+  const resumeBtn = /** @type {HTMLButtonElement | null} */ (card.querySelector("#editor-generation-resume"));
+  if (!footer || !switchBtn || !stopBtn || !resumeBtn) return;
+
+  const { isWait, isResolve, showSwitch, showResume } = generationStatusActionFlags(row);
+
+  switchBtn.hidden = !showSwitch;
+  switchBtn.textContent = t("切换模型");
+  switchBtn.disabled = false;
+
+  stopBtn.hidden = !isWait;
+  stopBtn.disabled = Boolean(row.stopPending);
+  stopBtn.textContent = row.stopPending ? t("正在停止…") : t("停止等待");
+
+  resumeBtn.hidden = !showResume;
+  if (showResume) {
+    const waitForSwitch = isResolve && !row.hasModelSwitch;
+    resumeBtn.disabled = Boolean(row.resumePending || row.resumeUncertain || waitForSwitch);
+    resumeBtn.textContent = generationResumeButtonLabel(row, isResolve);
+  }
+  footer.hidden = !showSwitch && !isWait && !showResume;
+}
+
+function updateGenerationStatusNode(item, row) {
+  const cardModel = row.cardModel;
+  const pill = item.querySelector("[data-status-pill]");
+  const card = item.querySelector(".generation-status-card");
+  const footer = item.querySelector("#generation-resume-row");
+  const resumeBtn = item.querySelector("#editor-generation-resume");
+  if (!cardModel || cardModel.variant === "pill") {
+    if (pill) {
+      pill.hidden = false;
+      pill.classList.toggle("is-info", cardModel ? cardModel.tone !== "success" : row.status !== "success");
+      setNodeText(pill, cardModel?.title || row.displayTitle || row.title);
+    }
+    if (card) card.hidden = true;
+    if (footer) footer.hidden = true;
+    if (resumeBtn) resumeBtn.hidden = true;
+    return;
+  }
+  if (pill) pill.hidden = true;
+  if (!card) return;
+  card.hidden = false;
+  card.className = `generation-status-card is-${cardModel.tone || "info"}`;
+  setOptionalSlot(card.querySelector("[data-status-badge]"), cardModel.badge);
+  setNodeText(card.querySelector("[data-status-title]"), cardModel.title || row.displayTitle || row.title);
+  setOptionalSlot(
+    card.querySelector("[data-status-countdown]"),
+    cardModel.rateLimitWait ? formatWaitCountdownText(cardModel.rateLimitWait) : "",
+  );
+  setOptionalSlot(card.querySelector("[data-process-detail]"), cardModel.summary);
+  setOptionalSlot(card.querySelector("[data-status-hint]"), cardModel.hint);
+  const tech = card.querySelector("[data-status-technical]");
+  const rawText = String(cardModel.rawDetail || "").trim();
+  if (tech) {
+    tech.hidden = !rawText;
+    setNodeText(tech.querySelector("[data-status-raw]"), rawText);
+  }
+  updateGenerationStatusActions(card, row);
+}
+
 function createGenerationProcessNode(row) {
   const item = document.createElement("li");
   item.dataset.processKey = row.key;
@@ -7696,14 +7923,7 @@ function createGenerationProcessNode(row) {
     card.append(detail, receipt);
     item.append(card);
   } else if (row.kind === "status") {
-    const card = document.createElement("p");
-    card.className = "generation-turn-end";
-    card.dataset.processTitle = "";
-    const detail = document.createElement("p");
-    detail.className = "generation-turn-end-detail";
-    detail.dataset.processDetail = "";
-    detail.hidden = true;
-    item.append(card, detail);
+    item.append(createGenerationStatusNode());
   } else if (row.kind === "thought" || row.kind === "reasoning") {
     const controller = mountReasonCard({ host: item });
     controller.setDetail(row.detail || "", row.status === "running", row.stepLabel);
@@ -7780,6 +8000,12 @@ function updateGenerationProcessNode(item, row) {
     item.__question.update(row.question);
     return;
   }
+  if (row.kind === "status") {
+    item.className = `generation-process-entry is-status is-${row.status}`;
+    item.dataset.processStatus = row.status;
+    updateGenerationStatusNode(item, row);
+    return;
+  }
   const reasoning = row.kind === "thought" || row.kind === "reasoning";
   const inProcess = reasoning || row.kind === "tool" || row.inProcess;
   item.className = `generation-process-entry is-${row.kind} is-${row.status}${inProcess ? " is-process" : ""}`;
@@ -7799,7 +8025,7 @@ function updateGenerationProcessNode(item, row) {
   setNodeText(item.querySelector("[data-process-meta]"), meta);
   setNodeText(item.querySelector("[data-process-status]"), processStatusLabel(row.status));
   if (reasoning) {
-    const openNow = Boolean(isRunning || row.key === generationLiveThoughtKey || (row.processOpen && !generationEventFollowing));
+    const openNow = Boolean(isRunning || row.key === generationLiveThoughtKey || row.processOpen);
     item.__reason?.setOpen(openNow);
     item.__reason?.setDetail(row.detail || "", isRunning, row.stepLabel);
     const truncated = item.querySelector("[data-process-truncated]");
@@ -7823,14 +8049,6 @@ function updateGenerationProcessNode(item, row) {
       retry.hidden = !submission.retryable;
       retry.disabled = commentSubmitPending || aiReviewTurnActive || generationInteractionLocked();
     }
-    return;
-  }
-  if (row.kind === "status") {
-    item.querySelector(".generation-turn-end")?.classList.toggle("is-info", row.status !== "success");
-    setNodeText(item.querySelector("[data-process-title]"), row.displayTitle || row.title);
-    const detail = item.querySelector("[data-process-detail]");
-    setNodeText(detail, row.detail || "");
-    if (detail) detail.hidden = !row.detail;
     return;
   }
   if (row.kind === "tool") {
@@ -7879,28 +8097,6 @@ function updateGenerationProcessNode(item, row) {
     if (text) item.dataset.streamed = "1";
     const truncated = item.querySelector("[data-process-truncated]");
     if (truncated) truncated.hidden = !row.truncated;
-    if (reasoning) {
-      const details = item.querySelector(".generation-reasoning-card");
-      const live = generationInteractionLocked() || generationIsActive();
-      if (details && details.dataset.userToggled !== "true") {
-        const next = Boolean(isRunning || live);
-        // Closing a <details> unrenders its content, which would destroy a
-        // selection (and the reading position) the user is holding inside it, so
-        // a card under active selection is never auto-collapsed.
-        const active = document.getSelection();
-        const held = Boolean(active && !active.isCollapsed && details.contains(active.anchorNode));
-        // Skip redundant writes: re-assigning `open` churns the content box and
-        // can drop a selection the user is holding inside the card.
-        if (details.open !== next && (next || !held)) details.open = next;
-      }
-      const viewport = item.querySelector(".reason-viewport");
-      if (viewport) {
-        const overflowing = viewport.scrollHeight > viewport.clientHeight + 8;
-        details?.setAttribute("data-overflow", overflowing ? "true" : "false");
-        viewport.dataset.edges = overflowing ? "bottom" : "";
-        if (isRunning) viewport.scrollTop = viewport.scrollHeight;
-      }
-    }
   }
 }
 
@@ -7987,6 +8183,7 @@ function paintWorkspaceEditReceipts(rows) {
       footer.dataset.signature = signature;
       footer.dataset.messageId = receipt.message.id;
       if (receipt.error) {
+        footer.classList.add("is-error");
         const error = document.createElement("span");
         error.setAttribute("role", "status"); error.textContent = receipt.error;
         footer.append(error);
@@ -8012,6 +8209,22 @@ function paintWorkspaceEditReceipts(rows) {
     }
     if (receipt.footer.parentElement !== card) card.append(receipt.footer);
   }
+}
+
+/** @param {HTMLElement} list @param {HTMLElement | null} liveStatus */
+function pruneExistingProcessNodes(list, liveStatus) {
+  const existing = new Map();
+  for (const node of [...list.children]) {
+    if (node === liveStatus) continue;
+    const key = node.dataset.processKey;
+    if (!key || existing.has(key)) {
+      node.__reason?.destroy();
+      node.remove();
+      continue;
+    }
+    existing.set(key, node);
+  }
+  return existing;
 }
 
 function reconcileGenerationProcess(rows, active) {
@@ -8044,22 +8257,27 @@ function reconcileGenerationProcess(rows, active) {
     if (held?.processHidden) held.processHidden = false;
   }
   const liveStatus = $("generation-think-status");
-  const existing = new Map([...list.children].filter(node => node !== liveStatus).map((node) => [node.dataset.processKey, node]));
-  const keep = new Set();
+  const existing = pruneExistingProcessNodes(list, liveStatus);
+  const keepNodes = new Set();
   const hydrating = existing.size === 0 && rows.length > 1;
   rows.forEach((row, index) => {
     let item = existing.get(row.key);
-    if (!item || item.dataset.processKind !== row.kind) {
+    if (item && item.dataset.processKind !== row.kind) {
+      item.__reason?.destroy();
+      item.remove();
+      item = null;
+    }
+    if (!item) {
       item = createGenerationProcessNode(row);
       if (!hydrating && !prefersReducedMotion()) item.classList.add("is-enter");
     }
-    keep.add(row.key);
+    keepNodes.add(item);
     updateGenerationProcessNode(item, row);
     const current = list.children[index];
     if (current !== item) list.insertBefore(item, current || null);
   });
   for (const child of [...list.children]) {
-    if (child !== liveStatus && !keep.has(child.dataset.processKey)) {
+    if (child !== liveStatus && !keepNodes.has(child)) {
       child.__reason?.destroy();
       child.remove();
     }
@@ -8077,6 +8295,69 @@ function reconcileGenerationProcess(rows, active) {
   updateGenerationLatestButton();
 }
 
+/** @type {Record<string, string>} */
+const STAGE_LABELS = { plan: "策划", pages: "写页", review: "审阅", compose: "封板" };
+
+/** @param {any[]} rows */
+function generationDurationLabel(rows) {
+  const stamps = rows.map((row) => Date.parse(row.at || "")).filter(Number.isFinite);
+  const first = stamps[0];
+  const last = stamps.at(-1);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || last <= first) return "";
+  const total = Math.round((last - first) / 1000);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return minutes ? t(` · 用时 {p0} 分 {p1} 秒`, { p0: minutes, p1: seconds }) : t(` · 用时 {p0} 秒`, { p0: seconds });
+}
+
+/**
+ * @param {{
+ *   aiReviewTurnActive: boolean, phase: string, discussion: boolean, editing: boolean,
+ *   disconnected: boolean, active: boolean, activeStageLabel: string, cardModel: any,
+ * }} opts
+ */
+function resolveGenerationStatusText({ aiReviewTurnActive: reviewActive, phase, discussion, editing, disconnected, active, activeStageLabel, cardModel }) {
+  if (reviewActive) return t("正在修改并校验");
+  if (cardModel?.statusText) return cardModel.statusText;
+  if (phase === "edited") return t("已修改");
+  if (phase === "discussion") return t("继续聊聊");
+  if (phase === "discussing") return t("正在回复");
+  if (phase === "complete") return t("已完成");
+  if (phase === "paused") return t("已暂停，可继续编辑");
+  if (phase === "failed") return discussion ? t("回复未完成") : editing ? t("修改未完成") : t("生成失败");
+  if (disconnected) return t("连接中断，正在重连");
+  return active ? activeStageLabel || t("生成中") : t("正在连接");
+}
+
+/**
+ * @param {{
+ *   cardModel: any, locked: boolean, hasReviewReceipt: boolean,
+ *   hasWorkspaceReceipt: boolean, processRows: any[], hasFinalReply: boolean,
+ * }} opts
+ */
+function shouldAppendGenerationTurnEnd({ cardModel, locked, hasReviewReceipt, hasWorkspaceReceipt, processRows, hasFinalReply }) {
+  if (!cardModel) return false;
+  if (cardModel.tone === "wait") return true;
+  if (locked || hasReviewReceipt || hasWorkspaceReceipt) return false;
+  if (cardModel.variant === "card") return true;
+  return processRows.length > 0 && !hasFinalReply;
+}
+
+/**
+ * @param {{
+ *   showThinkStatus: boolean, disconnected: boolean, pendingQuestion: boolean,
+ *   submitting: boolean, reviewStage?: string, currentAction: string,
+ * }} opts
+ */
+function resolveThinkStatusLabel({ showThinkStatus, disconnected, pendingQuestion, submitting, reviewStage, currentAction }) {
+  if (!showThinkStatus) return "";
+  if (disconnected) return t("连接中断，正在重连…");
+  if (pendingQuestion) return t("等待你的回答");
+  if (submitting) return t("正在思考");
+  if (reviewStage) return reviewStage;
+  return currentAction && /思考|阅读|写入|检查|准备/.test(currentAction) ? currentAction : t("正在思考");
+}
+
 function paintEditorGeneration(activity) {
   const box = $("editor-generation");
   if (!box) return;
@@ -8086,14 +8367,14 @@ function paintEditorGeneration(activity) {
   const thread = $("work-thread");
   const empty = $("work-empty");
   const emptyIsOnlyThreadContent = Boolean(thread && empty && thread.children.length === 1 && thread.firstElementChild === empty);
-  if (!aiReviewTurnActive && !liveMode && !current.sessionId && events.length === 0) {
+  const disconnectedSession = current.connectionState === "disconnected" && Boolean(liveGenerationSessionId());
+  if (!aiReviewTurnActive && !liveMode && !disconnectedSession && !current.sessionId && events.length === 0) {
+    clearGenerationWaitTimer();
     box.hidden = true;
     $("work-chat")?.classList.remove("is-live-generation");
     document.querySelector(".app")?.classList.remove("is-live-generation");
     const form = $("work-form");
     if (form) form.hidden = false;
-    const lockNote = $("work-generation-lock");
-    if (lockNote) lockNote.hidden = true;
     const briefInput = $("work-brief");
     if (briefInput) {
       briefInput.disabled = false;
@@ -8114,117 +8395,23 @@ function paintEditorGeneration(activity) {
   const locked = workAgentSubmitPending || assistantTurnPending || current.phase === "discussing" || aiReviewTurnActive || generationInteractionLocked(current);
   const discussion = current.conversation?.mode === "discuss";
   const editing = current.conversation?.mode === "edit";
-  const terminalPresentation = aiReviewTurnActive || discussion || editing ? null : generationTerminalPresentation(current);
   if (!aiReviewTurnActive && !discussion && !editing && phase === "paused" && generationPreviousPhase && generationPreviousPhase !== "paused") {
     showToast(humanizeGenerationFault(current) || t("生成已暂停"), 8000);
   }
-  if (locked && (liveMode || aiReviewTurnActive) && !generationPanelUserToggled) generationPanelExpanded = true;
   generationPreviousPhase = phase;
   box.hidden = false;
-  box.classList.toggle("is-expanded", generationPanelExpanded);
-  const toggle = $("editor-generation-toggle");
-  if (toggle) {
-    toggle.textContent = generationPanelExpanded ? t("收起") : t("查看过程");
-    toggle.setAttribute("aria-expanded", String(generationPanelExpanded));
-  }
-  const stop = $("editor-generation-stop");
-  const stopControl = activeWorkspaceReviewControl || activeCommentReviewControl;
-  const liveBusy = Boolean(liveGenerationSessionId() && (active || current.agentStatus === "busy" || current.execution?.recovery?.kind === "wait-or-stop"));
-  if (stop) {
-    if (aiReviewTurnActive) {
-      stop.hidden = !stopControl;
-      stop.disabled = !stopControl || stopControl.cancelRequested;
-      stop.textContent = stopControl?.cancelRequested ? t("正在停止…") : t("停止修改");
-      stop.dataset.control = "chrome.workspace.stop";
-    } else {
-      stop.hidden = !liveBusy && !generationStopPending;
-      stop.disabled = generationStopPending || !liveBusy;
-      stop.textContent = generationStopPending ? t("正在停止…") : t("停止生成");
-      stop.dataset.control = "chrome.generation.stop";
-    }
-  }
-  const resume = $("editor-generation-resume");
-  const resumeRow = $("generation-resume-row");
   const resumeActionable = generationResumeActionable(current);
-  if (resumeRow) resumeRow.hidden = !resumeActionable;
-  if (resume) {
-    const samePending = generationResumePending && current.sessionId;
-    const sameUncertain = generationResumeUncertainSessionId === current.sessionId;
-    resume.disabled = Boolean(samePending || sameUncertain);
-    resume.textContent = samePending
-      ? t("正在继续…")
-      : sameUncertain
-        ? t("正在确认是否已发送…")
-        : t("继续完成生成");
-  }
   $("work-chat")?.classList.toggle("is-live-generation", locked);
   document.querySelector(".app")?.classList.toggle("is-live-generation", locked && current.conversation?.mode !== "discuss");
-  // The panel header shows the deck's real title; the raw brief stays available on
-  // hover instead of being repeated in three places.
-  const generationTitle = $("editor-generation-title");
-  generationTitle.textContent = aiReviewTurnActive
-    ? aiReviewLiveLabel || t("Agent 正在修改")
-    : current.project?.title || current.brief || t("AI 正在生成");
-  generationTitle.title = current.brief ? t(`原始需求：{p0}`, { p0: current.brief }) : "";
   const stages = Array.isArray(current.stages) ? current.stages : [];
   const activeStage = stages.find((stage) => stage.status === "active");
-  const activeStageName = activeStage
-    ? document.querySelector(`#editor-generation-stages span[data-stage="${activeStage.id === "pages" ? "write" : activeStage.id}"]`)?.textContent?.trim() || ""
-    : "";
-  const activeStageLabel = activeStage
-    ? [activeStageName, activeStage.detail].filter(Boolean).join(" · ")
-    : "";
-  $("editor-generation-status").textContent = aiReviewTurnActive ? t("正在修改并校验") : phase === "edited" ? t("已修改") : phase === "discussion" ? t("继续聊聊") : phase === "discussing" ? t("正在回复")
-    : terminalPresentation?.status
-      ? terminalPresentation.status
-    : phase === "complete"
-    ? t("已完成")
-    : phase === "paused"
-      ? t("已暂停，可继续编辑")
-      : phase === "failed"
-        ? (discussion ? t("回复未完成") : editing ? t("修改未完成") : t("生成失败"))
-        : disconnected
-          ? t("连接中断，正在重连")
-        : active
-          // "实时更新" said nothing the streaming list below does not; name the
-          // step the agent is on instead (策划 / 写页 / 审阅 / 封板).
-          ? (activeStageLabel || t("生成中"))
-          : t("正在连接");
-  const stagesById = new Map(stages.map((stage) => [stage.id, stage]));
-  $("editor-generation-stages")?.querySelectorAll("span").forEach((node) => {
-    const id = node.dataset.stage === "write" ? "pages" : node.dataset.stage;
-    const stage = stagesById.get(id);
-    node.classList.toggle("is-active", stage?.status === "active");
-    node.classList.toggle("is-done", stage?.status === "complete");
-    node.classList.toggle("is-attention", stage?.status === "needs-attention");
-    node.title = stage?.detail || node.textContent;
-  });
+  const activeStageName = activeStage ? t(STAGE_LABELS[activeStage.id] || "") : "";
+  const activeStageLabel = activeStage ? [activeStageName, activeStage.detail].filter(Boolean).join(" · ") : "";
   const pages = Array.isArray(current.inspection?.pages) ? current.inspection.pages : [];
   // Never mistake an already-opened fixture or stale local deck for output of
   // the requested session. Until the durable session record is present, the
   // only truthful output is “not written yet”.
   const pageCount = current.sessionId ? Number(current.project?.pageCount) || pages.length : 0;
-  const planned = Math.max(
-    pageCount,
-    pages.length,
-    Number(stages.find((stage) => stage.id === "plan")?.detail?.match(/\d+/)?.[0]) || 0,
-    1,
-  );
-  const pageBox = $("editor-generation-pages");
-  pageBox.replaceChildren();
-  for (let index = 0; index < Math.min(planned, 32); index += 1) {
-    const page = pages[index];
-    const tile = document.createElement("span");
-    tile.textContent = String(index + 1).padStart(2, "0");
-    tile.classList.toggle("is-written", Boolean(page) || index < pageCount);
-    tile.classList.toggle("is-reviewed", page?.visualReview === "pass");
-    tile.title = page?.visualReview === "pass"
-      ? t(`第 {p0} 页已通过检查`, { p0: index + 1 })
-      : page
-        ? t(`第 {p0} 页已写入`, { p0: index + 1 })
-        : t(`第 {p0} 页待生成`, { p0: index + 1 });
-    pageBox.append(tile);
-  }
   let processRows = projectGenerationProcess(events, {
     active,
     turnActive: aiReviewTurnActive,
@@ -8251,9 +8438,6 @@ function paintEditorGeneration(activity) {
     }
     folded.push(next);
   }
-  // Consecutive identical calls (page rewrites/re-renders) collapse into one
-  // row that carries the repeat count and the latest outcome, so the chat
-  // never shows a pile of identical "Write · 1_cover" lines.
   const compact = [];
   for (const row of folded) {
     const last = compact.at(-1);
@@ -8262,9 +8446,6 @@ function paintEditorGeneration(activity) {
       last.technicalName === row.technicalName && last.target === row.target &&
       last.status !== "running"
     ) {
-      // The projector already relabels a retried failure as "recovered", so treat
-      // that status as a failure predecessor here too; otherwise the merge would
-      // overwrite the recovery signal with a plain success.
       const failed = [last.status, row.status].some((status) => status === "failed" || status === "recovered");
       last.repeat = (last.repeat || 1) + 1;
       last.target = `${row.target} ×${last.repeat}`;
@@ -8277,7 +8458,25 @@ function paintEditorGeneration(activity) {
     compact.push(row);
   }
   processRows = compact;
-  if (locked && processRows.length === 0) {
+  const duration = generationDurationLabel(processRows);
+  const cardModel = aiReviewTurnActive
+    ? null
+    : generationTerminalCardModel(current, { now: Date.now(), pageCount, duration, phase });
+  const isWaitCard = cardModel?.tone === "wait";
+  const statusEl = $("editor-generation-status");
+  if (statusEl) {
+    statusEl.textContent = resolveGenerationStatusText({
+      aiReviewTurnActive,
+      phase,
+      discussion,
+      editing,
+      disconnected,
+      active,
+      activeStageLabel,
+      cardModel,
+    });
+  }
+  if (locked && !isWaitCard && processRows.length === 0) {
     processRows = [{
       key: "live-waiting",
       kind: "thought",
@@ -8297,37 +8496,45 @@ function paintEditorGeneration(activity) {
       title: t("用户"),
     }, ...processRows.filter((row) => row.key !== "user-brief" && row.key !== "turn-end")];
   }
+  const latestMessageId = current.conversation?.messages?.at(-1)?.id;
+  const latestReceipt = latestMessageId ? workspaceEditReceipts.get(latestMessageId) : null;
   const hasReviewReceipt = Boolean(current.conversation?.messages?.at(-1)?.reviewSubmissionId);
-  const hasWorkspaceReceipt = workspaceEditReceipts.has(current.conversation?.messages?.at(-1)?.id);
+  const hasWorkspaceReceipt = Boolean(latestReceipt && (latestReceipt.error || latestReceipt.snapshotId));
   const lastUserIndex = processRows.findLastIndex(row => row.kind === "user");
   const hasFinalReply = processRows.slice(lastUserIndex + 1).some(row => row.kind === "message" && !row.inProcess && row.detail);
-  if (!hasReviewReceipt && !hasWorkspaceReceipt && !locked && processRows.length && (!hasFinalReply || ["paused", "failed", "cancelled", "canceled"].includes(phase)) && ["complete", "paused", "failed", "cancelled", "canceled", "discussion", "edited"].includes(phase)) {
-    const duration = (() => {
-      const stamps = processRows.map((row) => Date.parse(row.at || "")).filter(Number.isFinite);
-      const first = stamps[0];
-      const last = stamps.at(-1);
-      if (!Number.isFinite(first) || !Number.isFinite(last) || last <= first) return "";
-      const total = Math.round((last - first) / 1000);
-      const minutes = Math.floor(total / 60);
-      const seconds = total % 60;
-      return minutes ? t(` · 用时 {p0} 分 {p1} 秒`, { p0: minutes, p1: seconds }) : t(` · 用时 {p0} 秒`, { p0: seconds });
-    })();
-    const endTitle = phase === "edited" ? t("本轮修改已完成，可以继续讨论或调整") : phase === "discussion" ? t("可以继续提问，也可以让我修改文稿") : phase === "complete"
-      ? (pageCount ? t(`已完成 · {p0} 页{p1}`, { p0: pageCount, p1: duration }) : t(`已完成{p0}`, { p0: duration }))
-      : phase === "paused"
-        ? (terminalPresentation?.status || humanizeGenerationFault(current) || t("已暂停"))
-        : phase === "failed"
-          ? (terminalPresentation?.status || humanizeGenerationFault(current) || t("未完成"))
-          : t("已停止");
+  const appendTurnEnd = shouldAppendGenerationTurnEnd({
+    cardModel,
+    locked,
+    hasReviewReceipt,
+    hasWorkspaceReceipt,
+    processRows,
+    hasFinalReply,
+  });
+  if (appendTurnEnd && cardModel) {
+    const samePending = Boolean(generationResumePending && current.sessionId);
+    const sameUncertain = Boolean(generationResumeUncertainSessionId && generationResumeUncertainSessionId === current.sessionId);
+    const canResolveIdle = Boolean(
+      current.sessionId && !locked && (lastGenerationState?.agentStatus === "idle" || current.agentStatus === "idle" || !active),
+    );
     processRows = [...processRows, {
       key: "turn-end",
       kind: "status",
-      title: endTitle,
-      displayTitle: endTitle,
-      detail: terminalPresentation ? [terminalPresentation.reason, terminalPresentation.action].filter(Boolean).join("\n") : "",
-      status: phase === "complete" ? "success" : "info",
+      title: cardModel.title || "",
+      displayTitle: cardModel.title || "",
+      detail: cardModel.summary || "",
+      status: cardModel.tone === "success" ? "success" : "info",
+      cardModel,
+      resumeActionable,
+      resumePending: samePending,
+      resumeUncertain: sameUncertain,
+      stopPending: generationStopPending,
+      hasModelSwitch: Boolean(assistantModelSelection()),
+      canResolveIdle,
+      isCancelled: phase === "cancelled" || phase === "canceled",
+      isDiscussOrEdit: discussion || editing,
     }];
   }
+  syncGenerationWaitCountdown(isWaitCard ? cardModel?.rateLimitWait : null);
   const questions = lastGenerationState?.questions || [];
   for (const question of questions) {
     const row = { key: `question:${question.id}`, kind: "question", at: question.at, status: question.status, question };
@@ -8339,50 +8546,17 @@ function paintEditorGeneration(activity) {
   const currentAction = lastReadable && (lastReadable.kind === "thought" || lastReadable.kind === "reasoning") && lastReadable.status === "running"
     ? t("模型正在思考")
     : lastReadable?.displayTitle || lastReadable?.title || "";
-  /** @type {Record<string, string>} */
-  const actionByPhase = {
-    "awaiting-project": t("正在连接生成会话并准备编辑画布"),
-    planning: t("正在梳理页面结构和事实来源"),
-    generating: t("正在写入页面并刷新右侧画布"),
-    reviewing: t("正在逐页检查可读性、遮挡与裁切"),
-    complete: t("全部页面已经写入并通过当前验收"),
-  };
-  $("editor-generation-intent").textContent = clipChromeText(current.brief, 88) || t("正在读取生成任务");
-  $("editor-generation-intent").title = current.brief || "";
-  $("editor-generation-action").textContent = aiReviewTurnActive
-    ? aiReviewLiveLabel || t("Agent 正在修改右侧页面")
-    : terminalPresentation?.action
-      ? terminalPresentation.action
-    : currentAction || activeStage?.detail || actionByPhase[phase] || t("正在同步生成状态");
-  $("editor-generation-output").textContent = terminalPresentation?.output || (pageCount
-    ? t(`已写入 {p0} 页`, { p0: pageCount })
-    : t("尚未写入页面"));
-  const indicator = $("editor-generation-indicator");
-  const detailEl = $("editor-generation-detail");
-  if (indicator) {
-    indicator.classList.toggle("is-running", active);
-    indicator.classList.toggle("is-complete", phase === "complete");
-    indicator.classList.toggle("is-attention", phase === "paused" || phase === "failed" || phase === "cancelled");
-  }
-  if (detailEl) {
-    detailEl.textContent = terminalPresentation?.detail || (phase === "complete"
-      ? t(`文稿生成完成 · 共 {p0} 页`, { p0: pageCount })
-      : phase === "paused"
-        ? current.error?.detail || t("生成已暂停 · 可继续或手动编辑")
-        : phase === "failed"
-          ? current.error?.detail || t("生成未完成 · 请重试")
-          : phase === "cancelled"
-            ? t("生成任务已取消")
-            : disconnected
-              ? t("连接中断，正在重连…")
-              : currentAction || activeStage?.detail || actionByPhase[phase] || t("AI 正在生成文稿…"));
-  }
-  $("editor-generation-event-count").textContent = events.length ? t(`· {p0} 条`, { p0: events.length }) : "";
+  const showThinkStatus = (locked || disconnected) && !isWaitCard;
   paintThinkStatus(
-    locked
-      ? (pendingQuestion ? t("等待你的回答") : workAgentSubmitPending ? t("正在思考") : activeWorkspaceReviewControl?.stage || (currentAction && /思考|阅读|写入|检查|准备/.test(currentAction) ? currentAction : t("正在思考")))
-      : "",
-    locked,
+    resolveThinkStatusLabel({
+      showThinkStatus,
+      disconnected,
+      pendingQuestion,
+      submitting: workAgentSubmitPending,
+      reviewStage: activeWorkspaceReviewControl?.stage,
+      currentAction,
+    }),
+    showThinkStatus,
   );
   // better-display protocol: while the turn is open, the LATEST thought stays
   // expanded and following; it collapses when a newer one arrives or the
@@ -8393,11 +8567,7 @@ function paintEditorGeneration(activity) {
     ? [...processRows].reverse().find((row) => row.kind === "thought" || row.kind === "reasoning")?.key ?? null
     : null;
   reconcileGenerationProcess(processRows, locked || active);
-  const eventDetails = $("editor-generation-events");
-  if (eventDetails && processRows.length) eventDetails.open = true;
-  const eventLabel = $("editor-generation-event-label");
-  if (eventLabel) eventLabel.textContent = eventDetails?.open ? t("收起生成过程") : t("生成过程");
-  empty?.toggleAttribute("hidden", locked || processRows.length > 0 || !emptyIsOnlyThreadContent);
+  empty?.toggleAttribute("hidden", locked || disconnected || processRows.length > 0 || !emptyIsOnlyThreadContent);
   const form = $("work-form");
   if (form) form.hidden = false;
   const sendButton = document.querySelector("#work-form .composer-send");
@@ -8423,14 +8593,7 @@ function paintEditorGeneration(activity) {
       ? (discussion ? t("助手正在回复，你可以先写下一个问题") : t("输入补充要求…"))
       : selectedCommentEntries().length ? t("补充要求（选填），或直接发送批注") : t("聊想法，或描述想修改的内容…");
   }
-  const lockNote = $("work-generation-lock");
-  if (lockNote) {
-    lockNote.hidden = true;
-    lockNote.textContent = locked
-      ? t("生成尚未结束。右侧只展示已通过检查的页面；完成后才开放 Agent 修改与编辑工具。")
-      : "";
-  }
-  if ($("notes-text")) $("notes-text").disabled = false;
+  if ($("notes-text")) $("notes-text").disabled = Boolean(aiReviewTurnActive);
   paintWorkAgentTarget();
   if ($("chat-close")) $("chat-close").disabled = false;
   void paintAssistantModel(current);
@@ -8459,15 +8622,88 @@ async function refreshLiveGeneratedProject(activity, force = false) {
   await refreshVersions();
 }
 
-async function refreshGenerationResumeAvailability(activity = generationActivity) {
-  const requestId = ++generationResumeEligibilityRequest;
-  const routeSessionId = liveGenerationSessionId();
-  const sessionId = String(activity?.sessionId || routeSessionId || "");
-  if (generationResumePending || !routeSessionId) {
-    paintEditorGeneration(activity);
+function mergeGenerationLiveState(activity, state) {
+  if (!activity || !state) return activity;
+  const next = { ...activity };
+  if (state.agentStatus !== undefined) next.agentStatus = state.agentStatus;
+  if (state.execution !== undefined) next.execution = state.execution;
+  if ("rateLimitWait" in state) next.rateLimitWait = state.rateLimitWait;
+  return next;
+}
+
+function syncResumeVerificationFromState(state, activity) {
+  if (generationResumePending) return;
+  const effectiveRouteSession = new URLSearchParams(location.search).get("session") || activity?.sessionId || "";
+  const sessionId = String(activity?.sessionId || effectiveRouteSession || "");
+  if (!effectiveRouteSession || (sessionId && effectiveRouteSession !== sessionId) || !state) {
+    generationResumeVerifiedSessionId = "";
     return;
   }
-  if (sessionId && routeSessionId !== sessionId) {
+  generationResumeVerifiedSessionId = generationStateCanResume(state, effectiveRouteSession)
+    ? effectiveRouteSession
+    : "";
+}
+
+function maybeClearUncertainResume(activity, state) {
+  if (!generationResumeUncertainSessionId) return;
+  const elapsed = Date.now() - generationResumeUncertainAt;
+  const progressed = Boolean(
+    generationResumeUncertainBaseline &&
+    generationActivityProgressSignature(activity) !== generationResumeUncertainBaseline,
+  );
+  const switchedSession = Boolean(activity?.sessionId && activity.sessionId !== generationResumeUncertainSessionId);
+  if (switchedSession || elapsed >= 15_000 || (state?.agentStatus === "idle" && progressed)) {
+    generationResumeUncertainSessionId = "";
+    generationResumeUncertainAt = 0;
+    generationResumeUncertainBaseline = "";
+  }
+}
+
+function applyLatestReviewToActivity(activity) {
+  const latestMessage = activity.conversation?.messages?.at(-1);
+  const latestReview = acceptedReviewSubmissions(activity).find((item) => item.id === latestMessage?.reviewSubmissionId);
+  if (!latestReview) return;
+  activity.phase = latestReview.status === "running"
+    ? "reviewing"
+    : latestReview.status === "applied"
+      ? "edited"
+      : latestReview.status === "cancelled"
+        ? "cancelled"
+        : "failed";
+  activity.error = latestReview.status === "failed"
+    ? { detail: latestReview.error || t("这次修改未完成，可以在原消息下重试。") }
+    : undefined;
+}
+
+/** @param {any} activity */
+function hasActiveRateLimitWait(activity) {
+  return Boolean(
+    activity?.rateLimitWait &&
+    Number.isFinite(Number(activity.rateLimitWait.nextRetryAt)) &&
+    Number(activity.rateLimitWait.nextRetryAt) > Date.now(),
+  );
+}
+
+function scheduleNextGenerationPoll(activity) {
+  if (generationResumePending) return;
+  if (generationResumeUncertainSessionId && generationResumeUncertainSessionId === activity?.sessionId) {
+    generationPollTimer = window.setTimeout(pollGenerationActivity, 4000);
+    return;
+  }
+  if (generationIsActive(activity) || assistantTurnPending || readPendingWorkspaceEdit() || hasActiveRateLimitWait(activity)) {
+    generationPollTimer = window.setTimeout(pollGenerationActivity, generationLiveOpen() ? 4000 : 260);
+  } else if (generationResumeCandidate(activity)) {
+    // A paused or failed partial run may become resumable after its current
+    // Host turn settles; keep watching without holding the editor lock.
+    generationPollTimer = window.setTimeout(pollGenerationActivity, 4000);
+  }
+}
+
+async function refreshGenerationResumeAvailability(activity = generationActivity) {
+  const requestId = ++generationResumeEligibilityRequest;
+  const routeSessionId = new URLSearchParams(location.search).get("session") || activity?.sessionId || "";
+  const sessionId = String(activity?.sessionId || routeSessionId || "");
+  if (generationResumePending || !routeSessionId || (sessionId && routeSessionId !== sessionId)) {
     paintEditorGeneration(activity);
     return;
   }
@@ -8477,7 +8713,7 @@ async function refreshGenerationResumeAvailability(activity = generationActivity
     if (!response.ok) throw new Error(state?.error || t("无法读取生成会话状态"));
     if (requestId !== generationResumeEligibilityRequest || generationResumePending) return;
     lastGenerationState = state;
-    generationResumeVerifiedSessionId = generationStateCanResume(state, routeSessionId) ? routeSessionId : "";
+    syncResumeVerificationFromState(state, activity);
   } catch {
     if (requestId !== generationResumeEligibilityRequest || generationResumePending) return;
     generationResumeVerifiedSessionId = "";
@@ -8489,40 +8725,53 @@ function generationStateSessionId(state = {}) {
   return String(state?.inspection?.sessionId || state?.binding?.dshSessionId || state?.binding?.sessionId || "");
 }
 
-async function loadGenerationRoster() {
-  if (generationRoster) return generationRoster;
+async function loadGenerationRoster({ force = false } = {}) {
+  const fresh = generationRoster && Date.now() - generationRosterLoadedAt < GENERATION_ROSTER_TTL_MS;
+  if (!force && fresh) return generationRoster;
+  generationRosterAttemptedAt = Date.now();
   const response = await fetch("/slides/providers");
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.error || t("无法读取可用模型"));
   generationRoster = parseProviderRoster(data);
+  generationRosterLoadedAt = Date.now();
   return generationRoster;
 }
 
-// A paused/failed run offers one recovery path: the 继续完成生成 row at the end of
-// the timeline. Steering text and model choice ride the shared composer
-// (#work-brief / #assistant-model), so resume needs no form of its own.
-function generationResumeActionable(current) {
-  if (!current) return false;
-  const discussion = current.conversation?.mode === "discuss";
-  const editing = current.conversation?.mode === "edit";
-  const phase = current.phase || "idle";
-  if (discussion || editing || phase === "discussion" || generationIsActive(current) || assistantTurnPending) return false;
-  const candidate = generationResumeCandidate(current) || generationResumeCandidate({
+/** @param {any} current */
+function isGenerationDiscussionOrActive(current) {
+  const mode = current?.conversation?.mode;
+  return mode === "discuss" || mode === "edit" || current?.phase === "discussion" || generationIsActive(current) || assistantTurnPending;
+}
+
+/** @param {any} current @param {any} execution */
+function isResolvableWithNewModel(current, execution) {
+  if (execution?.recovery?.kind !== "resolve") return false;
+  const idle = lastGenerationState?.agentStatus === "idle" || current?.agentStatus === "idle";
+  return Boolean(idle && assistantModelSelection());
+}
+
+/** @param {any} current @param {string} [sessionIdOverride] */
+function hasResumeCandidate(current, sessionIdOverride = "") {
+  if (generationResumeCandidate(current)) return true;
+  return generationResumeCandidate({
     ...current,
     execution: lastGenerationState?.execution,
-    sessionId: current.sessionId || lastGenerationState?.binding?.dshSessionId,
-    phase: lastGenerationState?.phase?.kind || current.phase,
+    sessionId: sessionIdOverride || current?.sessionId || lastGenerationState?.binding?.dshSessionId,
+    phase: lastGenerationState?.phase?.kind || current?.phase,
   });
-  const modeContinue = generationComposerMode({
-    agentStatus: lastGenerationState?.agentStatus,
-    execution: lastGenerationState?.execution || current.execution,
-  }) === "continue";
-  if (!(candidate || modeContinue)) return false;
-  const samePending = generationResumePending && current.sessionId;
-  const sameUncertain = generationResumeUncertainSessionId === current.sessionId;
-  const ready = generationResumeVerifiedSessionId === current.sessionId
-    || (modeContinue && lastGenerationState?.agentStatus === "idle");
-  return Boolean(samePending || sameUncertain || ready);
+}
+
+// A paused/failed run offers one recovery path inside the unified status card.
+// Steering text and model choice ride the shared composer (#work-brief / #assistant-model).
+function generationResumeActionable(current) {
+  if (!current || isGenerationDiscussionOrActive(current)) return false;
+  if (generationResumePending && current.sessionId) return true;
+  if (generationResumeUncertainSessionId && generationResumeUncertainSessionId === current.sessionId) return true;
+  const execution = lastGenerationState?.execution || current.execution;
+  if (execution?.recovery?.kind === "resolve") return isResolvableWithNewModel(current, execution);
+  const modeContinue = generationComposerMode({ agentStatus: lastGenerationState?.agentStatus, execution }) === "continue";
+  if (!modeContinue && !hasResumeCandidate(current)) return false;
+  return generationResumeVerifiedSessionId === current.sessionId || (modeContinue && lastGenerationState?.agentStatus === "idle");
 }
 
 function generationStatePhase(state = {}) {
@@ -8536,41 +8785,69 @@ async function readGenerationResumeState(sessionId) {
   return state;
 }
 
-async function waitForGenerationResume(sessionId, baselineSignature, { startTimeoutMs = 45_000 } = {}) {
+/** @param {any} state @param {any} activity @param {string} sessionId */
+function generationResumeTickTerminal(state, activity, sessionId) {
+  if (!state || state.agentStatus !== "idle") return false;
+  const stateTerminal = GENERATION_TERMINAL_PHASES.has(generationStatePhase(state));
+  const activityTerminal = activity?.sessionId === sessionId && GENERATION_TERMINAL_PHASES.has(activity.phase);
+  return stateTerminal && activityTerminal;
+}
+
+/** @param {any} activity @param {boolean} [force] */
+async function safeRefreshLiveGeneratedProject(activity, force = false) {
+  try {
+    await refreshLiveGeneratedProject(activity, force);
+  } catch (refreshError) {
+    console.warn(
+      "Live project refresh failed:",
+      refreshError instanceof Error ? refreshError.message : String(refreshError),
+    );
+  }
+}
+
+/** @param {string} sessionId @param {string} baselineSignature @param {any} state @param {any} activity @param {boolean} sawStart */
+function applyGenerationResumeTick(sessionId, baselineSignature, state, activity, sawStart) {
+  if (state && generationStateSessionId(state) !== sessionId) {
+    throw new Error(t("生成会话已切换，停止等待继续任务"));
+  }
+  let started = sawStart;
+  if (state) {
+    lastGenerationState = state;
+    started ||= Boolean(state.agentStatus && state.agentStatus !== "idle");
+  }
+  if (activity?.sessionId === sessionId) {
+    const merged = state ? mergeGenerationLiveState(activity, state) : activity;
+    const signature = generationActivityProgressSignature(merged);
+    started ||= Boolean((signature && signature !== baselineSignature) || generationIsActive(merged));
+    adoptPolledGenerationActivity(merged);
+    paintEditorGeneration(generationActivity);
+  }
+  return started;
+}
+
+async function waitForGenerationResume(
+  sessionId,
+  baselineSignature,
+  { startTimeoutMs = 45_000, resumeEpoch = generationResumeEpoch } = {},
+) {
   const startedAt = Date.now();
   const hardTimeoutMs = 20 * 60 * 1000;
   let sawStart = false;
   while (Date.now() - startedAt < hardTimeoutMs) {
+    if (resumeEpoch !== generationResumeEpoch) return null;
     const [stateResult, activityResult] = await Promise.allSettled([
       readGenerationResumeState(sessionId),
       api(generationActivityUrl(sessionId)),
     ]);
+    if (resumeEpoch !== generationResumeEpoch) return null;
     const state = stateResult.status === "fulfilled" ? stateResult.value : null;
     const activity = activityResult.status === "fulfilled" ? activityResult.value : null;
-    if (state && generationStateSessionId(state) !== sessionId) {
-      throw new Error(t("生成会话已切换，停止等待继续任务"));
-    }
-    if (activity?.sessionId === sessionId) {
-      const signature = generationActivityProgressSignature(activity);
-      sawStart ||= Boolean(signature && signature !== baselineSignature);
-      sawStart ||= generationIsActive(activity);
-      generationActivity = activity;
-      paintEditorGeneration(activity);
-    }
-    if (state) {
-      sawStart ||= Boolean(state.agentStatus && state.agentStatus !== "idle");
-      const statePhase = generationStatePhase(state);
-      const terminal = state.agentStatus === "idle" && GENERATION_TERMINAL_PHASES.has(statePhase);
-      const activityTerminal = activity?.sessionId === sessionId && GENERATION_TERMINAL_PHASES.has(activity.phase);
-      if (sawStart && terminal && activityTerminal) {
-        try {
-          await refreshLiveGeneratedProject(activity, true);
-        } catch {
-          // The terminal session state is authoritative. A canvas refresh can
-          // be retried by reopening the page without making another turn.
-        }
-        return activity;
-      }
+    sawStart = applyGenerationResumeTick(sessionId, baselineSignature, state, activity, sawStart);
+    if (sawStart && generationResumeTickTerminal(state, activity, sessionId)) {
+      const finalActivity = generationActivity || activity;
+      await safeRefreshLiveGeneratedProject(finalActivity, true);
+      if (resumeEpoch !== generationResumeEpoch) return null;
+      return finalActivity;
     }
     if (!sawStart && Date.now() - startedAt >= startTimeoutMs) {
       const error = new Error(t("无法确认继续请求是否已发送；请刷新页面重新读取会话状态，当前不会重复提交。"));
@@ -8578,6 +8855,7 @@ async function waitForGenerationResume(sessionId, baselineSignature, { startTime
       throw error;
     }
     await new Promise((resolve) => window.setTimeout(resolve, sawStart ? 1200 : 600));
+    if (resumeEpoch !== generationResumeEpoch) return null;
   }
   const error = new Error(t("继续生成超过最长等待时间；请刷新页面检查会话状态，当前不会重复提交。"));
   error.code = "GENERATION_RESUME_UNCONFIRMED";
@@ -8587,6 +8865,8 @@ async function waitForGenerationResume(sessionId, baselineSignature, { startTime
 function finishGenerationResume(terminal) {
   generationResumePending = false;
   generationResumeUncertainSessionId = "";
+  generationResumeUncertainAt = 0;
+  generationResumeUncertainBaseline = "";
   generationResumeVerifiedSessionId = "";
   generationActivity = terminal;
   paintEditorGeneration(terminal);
@@ -8594,52 +8874,45 @@ function finishGenerationResume(terminal) {
   showToast(terminal.phase === "complete" ? t("生成收尾已完成。") : t("继续任务已结束，请检查收尾状态。"), 5000);
 }
 
-async function resumeGeneration() {
-  const activity = generationActivity;
-  const routeSessionId = liveGenerationSessionId();
-  const sessionId = String(activity?.sessionId || lastGenerationState?.binding?.dshSessionId || routeSessionId || "");
-  const canContinue = generationResumeCandidate(activity)
-    || generationResumeCandidate({
-      ...activity,
-      execution: lastGenerationState?.execution,
-      sessionId,
-      phase: lastGenerationState?.phase?.kind || activity?.phase,
-    })
-    || (lastGenerationState?.agentStatus === "idle" && lastGenerationState?.execution?.recovery?.kind === "continue");
-  if (
-    generationResumePending ||
-    generationResumeUncertainSessionId ||
-    !routeSessionId ||
-    (sessionId && routeSessionId !== sessionId) ||
-    !canContinue
-  ) return;
-  clearTimeout(generationPollTimer);
-  generationResumePending = true;
-  generationResumeVerifiedSessionId = "";
-  paintEditorGeneration(activity);
-  const baselineSignature = generationActivityProgressSignature(activity);
+/** @param {any} activity @param {string} sessionId */
+function canResumeFromCurrentState(activity, sessionId) {
+  const execution = lastGenerationState?.execution || activity?.execution;
+  if (execution?.recovery?.kind === "resolve") return isResolvableWithNewModel(activity, execution);
+  const idleContinue = lastGenerationState?.agentStatus === "idle" && execution?.recovery?.kind === "continue";
+  return idleContinue || hasResumeCandidate(activity, sessionId);
+}
+
+/** @param {any} state @param {string} steer @param {any} modelSelection @param {any[]} attachments */
+function buildResumeTurnPayload(state, steer, modelSelection, attachments) {
+  const base = buildGenerationTurnRequest({
+    instruction: steer || generationResumeInstruction(state),
+    resumeGeneration: true,
+    modelSelection,
+    expectedAttemptId: state.attemptId || state.execution?.attemptId,
+    currentModel: currentModelFromState(state),
+  });
+  return attachments.length ? { ...base, attachments: attachments.map((entry) => entry.id) } : base;
+}
+
+/** @param {string} sessionId @param {string} baselineSignature */
+function markResumeUncertain(sessionId, baselineSignature) {
+  generationResumeUncertainSessionId = sessionId;
+  generationResumeUncertainAt = Date.now();
+  generationResumeUncertainBaseline = baselineSignature;
+}
+
+/** @param {string} sessionId @param {Record<string, any>} turnBody */
+async function dispatchResumeTurn(sessionId, turnBody) {
   let requestOutcomeUnknown = false;
+  generationResumeDispatching = true;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
   try {
-    const state = await readGenerationResumeState(sessionId);
-    lastGenerationState = state;
-    if (state.agentStatus !== "idle") {
-      throw new Error(t("当前会话尚未空闲。请先停止并等待确认后再继续。"));
-    }
-    if (!generationStateCanResume(state, sessionId)) {
-      throw new Error(t("当前会话不再处于可继续的空闲状态，请刷新后检查最新进度。"));
-    }
-    const steer = String($("work-brief")?.value || "").trim();
-    const modelSelection = assistantModelSelection();
     const response = await fetch(`/slides/sessions/${encodeURIComponent(sessionId)}/turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildGenerationTurnRequest({
-        instruction: steer || generationResumeInstruction(state),
-        resumeGeneration: true,
-        modelSelection,
-        expectedAttemptId: state.attemptId || state.execution?.attemptId,
-        currentModel: currentModelFromState(state),
-      })),
+      body: JSON.stringify(turnBody),
+      signal: controller.signal,
     }).catch((error) => {
       requestOutcomeUnknown = true;
       throw error;
@@ -8648,32 +8921,89 @@ async function resumeGeneration() {
       requestOutcomeUnknown = true;
       return {};
     });
-    if (!response.ok || result?.ok !== true) {
-      throw new Error(result?.error || t("生成会话没有接受继续请求"));
+    if (!response.ok || result?.ok !== true) throw new Error(result?.error || t("生成会话没有接受继续请求"));
+    return { ok: true, requestOutcomeUnknown: false, error: null };
+  } catch (error) {
+    return { ok: false, requestOutcomeUnknown, error };
+  } finally {
+    clearTimeout(timeoutId);
+    generationResumeDispatching = false;
+  }
+}
+
+/** @param {string} sessionId @param {string} baselineSignature @param {any} error @param {boolean} requestOutcomeUnknown @param {number} [resumeEpoch] */
+async function handleResumeError(sessionId, baselineSignature, error, requestOutcomeUnknown, resumeEpoch = generationResumeEpoch) {
+  if (resumeEpoch !== generationResumeEpoch) return;
+  let finalError = error;
+  if (requestOutcomeUnknown) {
+    generationResumePending = false;
+    markResumeUncertain(sessionId, baselineSignature);
+    paintEditorGeneration(generationActivity);
+    try {
+      const terminal = await waitForGenerationResume(sessionId, baselineSignature, { startTimeoutMs: 15_000, resumeEpoch });
+      if (!terminal) return;
+      finishGenerationResume(terminal);
+      return;
+    } catch (reconcileError) {
+      finalError = reconcileError;
     }
+  }
+  if (resumeEpoch !== generationResumeEpoch) return;
+  generationResumePending = false;
+  const uncertain = requestOutcomeUnknown || finalError?.code === "GENERATION_RESUME_UNCONFIRMED";
+  if (uncertain) markResumeUncertain(sessionId, baselineSignature);
+  else {
+    generationResumeUncertainSessionId = "";
+    generationResumeUncertainAt = 0;
+    generationResumeUncertainBaseline = "";
+  }
+  paintEditorGeneration(generationActivity);
+  if (uncertain) generationPollTimer = window.setTimeout(pollGenerationActivity, 4000);
+  else void refreshGenerationResumeAvailability(generationActivity);
+  showToast(finalError instanceof Error ? finalError.message : String(finalError), 7000);
+}
+
+async function resumeGeneration() {
+  const activity = generationActivity;
+  const routeSessionId = liveGenerationSessionId();
+  const sessionId = String(activity?.sessionId || lastGenerationState?.binding?.dshSessionId || routeSessionId || "");
+  if (
+    generationResumePending ||
+    generationResumeUncertainSessionId ||
+    !routeSessionId ||
+    (sessionId && routeSessionId !== sessionId) ||
+    !canResumeFromCurrentState(activity, sessionId)
+  ) return;
+  clearTimeout(generationPollTimer);
+  const resumeEpoch = ++generationResumeEpoch;
+  generationResumePending = true;
+  generationResumeVerifiedSessionId = "";
+  paintEditorGeneration(activity);
+  const baselineSignature = generationActivityProgressSignature(activity);
+  let requestOutcomeUnknown = false;
+  try {
+    const state = await readGenerationResumeState(sessionId);
+    if (resumeEpoch !== generationResumeEpoch) return;
+    lastGenerationState = state;
+    if (state.agentStatus !== "idle") throw new Error(t("当前会话尚未空闲。请先停止并等待确认后再继续。"));
+    const modelSelection = assistantModelSelection();
+    const resolveAllowed = Boolean(modelSelection && state.execution?.recovery?.kind === "resolve");
+    if (!resolveAllowed && !generationStateCanResume(state, sessionId)) {
+      throw new Error(t("当前会话不再处于可继续的空闲状态，请刷新后检查最新进度。"));
+    }
+    const steer = String($("work-brief")?.value || "").trim();
+    const attachments = pendingAgentAttachments.filter((entry) => !entry.consumed);
+    const turnBody = buildResumeTurnPayload(state, steer, modelSelection, attachments);
+    const dispatched = await dispatchResumeTurn(sessionId, turnBody);
+    requestOutcomeUnknown = dispatched.requestOutcomeUnknown;
+    if (!dispatched.ok) throw dispatched.error;
+    if (attachments.length) await consumePendingAgentAttachments(attachments);
     if (steer) acknowledgeAssistantDraft(steer);
-    const terminal = await waitForGenerationResume(sessionId, baselineSignature);
+    const terminal = await waitForGenerationResume(sessionId, baselineSignature, { resumeEpoch });
+    if (!terminal) return;
     finishGenerationResume(terminal);
   } catch (caughtError) {
-    let error = caughtError;
-    if (requestOutcomeUnknown) {
-      generationResumePending = false;
-      generationResumeUncertainSessionId = sessionId;
-      paintEditorGeneration(generationActivity);
-      try {
-        const terminal = await waitForGenerationResume(sessionId, baselineSignature, { startTimeoutMs: 15_000 });
-        finishGenerationResume(terminal);
-        return;
-      } catch (reconcileError) {
-        error = reconcileError;
-      }
-    }
-    generationResumePending = false;
-    const uncertain = requestOutcomeUnknown || error?.code === "GENERATION_RESUME_UNCONFIRMED";
-    generationResumeUncertainSessionId = uncertain ? sessionId : "";
-    paintEditorGeneration(generationActivity);
-    if (!uncertain) void refreshGenerationResumeAvailability(generationActivity);
-    showToast(error instanceof Error ? error.message : String(error), 7000);
+    await handleResumeError(sessionId, baselineSignature, caughtError, requestOutcomeUnknown, resumeEpoch);
   }
 }
 
@@ -8693,7 +9023,10 @@ function closeGenerationLive() {
   cancelAnimationFrame(generationLivePaint);
   generationLivePaint = 0;
 }
-window.addEventListener("pagehide", closeGenerationLive);
+window.addEventListener("pagehide", () => {
+  closeGenerationLive();
+  clearGenerationWaitTimer();
+});
 // Background tabs throttle or drop the event stream; reopen it and poll once
 // when the tab is visible again while a turn may still be running.
 resilience.bindVisibilityRecovery({
@@ -8770,42 +9103,35 @@ async function pollGenerationActivity() {
   // While a Create launch is still binding, there is no session of ours yet;
   // polling now would paint whichever session the server ran last.
   if (new URLSearchParams(location.search).has("launch")) return;
+  const pollSeq = ++generationPollSeq;
   try {
     connectGenerationLive();
     let activity = await api(generationActivityUrl());
+    if (pollSeq !== generationPollSeq) return;
     void resumePendingWorkspaceEdit(activity);
+    let state = null;
     if (activity.sessionId) {
       const response = await fetch(`/slides/state/${encodeURIComponent(activity.sessionId)}`);
+      if (pollSeq !== generationPollSeq) return;
       if (!response.ok) throw new Error(t("无法确认助手状态"));
-      const state = await response.json();
+      state = await response.json();
+      if (pollSeq !== generationPollSeq) return;
       lastGenerationState = state;
       if (state.agentStatus === "idle") assistantTurnPending = false;
-      activity = settledAssistantActivity(activity, state.agentStatus);
+      activity = mergeGenerationLiveState(settledAssistantActivity(activity, state.agentStatus), state);
     }
-    mergeAcknowledgedCommentTurns(activity);
-    const latestMessage = activity.conversation?.messages?.at(-1);
-    const latestReview = acceptedReviewSubmissions(activity).find(item => item.id === latestMessage?.reviewSubmissionId);
-    if (latestReview) {
-      activity.phase = latestReview.status === "running" ? "reviewing" : latestReview.status === "applied" ? "edited" : latestReview.status === "cancelled" ? "cancelled" : "failed";
-      activity.error = latestReview.status === "failed" ? { detail: latestReview.error || t("这次修改未完成，可以在原消息下重试。") } : undefined;
-    }
+    maybeClearUncertainResume(activity, state);
+    syncResumeVerificationFromState(state, activity);
+    applyLatestReviewToActivity(activity);
     generationPollFailures = 0;
     adoptPolledGenerationActivity(activity);
     renderCommentBatchChip();
     resilience.safePaint(paintEditorGeneration, generationActivity);
-    await refreshLiveGeneratedProject(generationActivity);
-    await refreshGenerationResumeAvailability(generationActivity);
-    if (generationResumePending || generationResumeUncertainSessionId === activity?.sessionId) {
-      return;
-    }
-    if (generationIsActive(activity) || assistantTurnPending || readPendingWorkspaceEdit()) {
-      generationPollTimer = window.setTimeout(pollGenerationActivity, generationLiveOpen() ? 4000 : 260);
-    } else if (generationResumeCandidate(activity)) {
-      // A paused or failed partial run may become resumable after its current
-      // Host turn settles; keep watching without holding the editor lock.
-      generationPollTimer = window.setTimeout(pollGenerationActivity, 4000);
-    }
+    await safeRefreshLiveGeneratedProject(generationActivity);
+    if (pollSeq !== generationPollSeq) return;
+    scheduleNextGenerationPoll(generationActivity);
   } catch (error) {
+    if (pollSeq !== generationPollSeq) return;
     console.warn("Generation activity refresh failed:", error instanceof Error ? error.message : String(error));
     generationPollFailures += 1;
     generationActivity = resilience.disconnectedActivity(generationActivity);
@@ -9409,12 +9735,6 @@ $("work-brief")?.addEventListener("keydown", (event) => {
   $("work-form")?.requestSubmit();
 });
 
-$("editor-generation-toggle")?.addEventListener("click", () => {
-  generationPanelUserToggled = true;
-  generationPanelExpanded = !generationPanelExpanded;
-  paintEditorGeneration(generationActivity);
-});
-
 async function waitForGenerationIdle(sessionId, { timeoutMs = 60_000 } = {}) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -9428,7 +9748,9 @@ async function waitForGenerationIdle(sessionId, { timeoutMs = 60_000 } = {}) {
 
 async function stopLiveGeneration() {
   const sessionId = liveGenerationSessionId();
-  if (!sessionId || generationStopPending || generationResumePending) return;
+  if (!sessionId || generationStopPending || generationResumeDispatching) return;
+  generationResumeEpoch += 1;
+  generationResumePending = false;
   generationStopPending = true;
   paintEditorGeneration(generationActivity);
   try {
@@ -9440,7 +9762,6 @@ async function stopLiveGeneration() {
     // "generating", and waiting for the next poll left ■ and 正在思考 on screen.
     await pollGenerationActivity();
     paintEditorGeneration(generationActivity);
-    void refreshGenerationResumeAvailability(generationActivity);
     showToast(t("已停止并确认空闲，可以继续或换模型。"), 4000);
   } catch (error) {
     generationStopPending = false;
@@ -9448,28 +9769,6 @@ async function stopLiveGeneration() {
     showToast(error instanceof Error ? error.message : String(error), 7000);
   }
 }
-
-$("editor-generation-stop")?.addEventListener("click", () => {
-  const control = activeWorkspaceReviewControl || activeCommentReviewControl;
-  if (control) {
-    if (control.cancelRequested) return;
-    control.cancelRequested = true;
-    paintEditorGeneration(generationActivity);
-    showToast(t("正在停止 Agent 修改；确认停止后会恢复修改前版本。"), 5000);
-    return;
-  }
-  void stopLiveGeneration();
-});
-
-$("editor-generation-resume")?.addEventListener("click", () => {
-  void resumeGeneration();
-});
-
-$("editor-generation-events")?.addEventListener("toggle", (event) => {
-  generationEventsUserToggled = true;
-  const label = $("editor-generation-event-label");
-  if (label) label.textContent = event.currentTarget.open ? t("收起完整行动记录") : t("查看完整行动记录");
-});
 
 if (new URLSearchParams(location.search).get("workspace") !== "0") {
   showWorkChat({ focusComposer: false });
@@ -9855,37 +10154,95 @@ $("work-brief")?.addEventListener("input", () => {
   }
 });
 
-let assistantModelPainting = false;
-async function paintAssistantModel(activity) {
-  const select = $("assistant-model");
-  if (!select || !activity?.provider || assistantModelPainting || select.dataset.loaded) return;
-  assistantModelPainting = true;
-  try {
-    const roster = await loadGenerationRoster();
+/** @param {any} roster */
+function rosterSignature(roster) {
+  return JSON.stringify(
+    (roster?.providers || [])
+      .filter((/** @type {any} */ entry) => entry.ready)
+      .map((/** @type {any} */ entry) => [entry.id, entry.name, entry.models]),
+  );
+}
+
+/** @param {HTMLSelectElement} select @param {any} roster @param {any} activity */
+function refreshAssistantModelOptions(select, roster, activity) {
+  const sessionId = String(activity?.sessionId || "");
+  if (sessionId && sessionId !== assistantModelSessionId) {
+    assistantModelSessionId = sessionId;
+    assistantModelUserOverride = false;
+  }
+  const current = activity?.provider;
+  const activityValue = current ? modelOptionValue(current.providerId, current.modelId) : "";
+  if (assistantModelUserOverride && activityValue && select.value === activityValue) {
+    assistantModelUserOverride = false;
+  }
+  const previousValue = select.value;
+  const signature = rosterSignature(roster);
+  if (signature !== generationRosterSignature || select.options.length === 0) {
     select.replaceChildren();
     for (const provider of roster.providers.filter((entry) => entry.ready)) {
-      const group = document.createElement("optgroup"); group.label = provider.name;
+      const group = document.createElement("optgroup");
+      group.label = provider.name;
       for (const name of provider.models) {
-        const option = document.createElement("option"); option.value = modelOptionValue(provider.id, name); option.textContent = name; group.append(option);
+        const option = document.createElement("option");
+        option.value = modelOptionValue(provider.id, name);
+        option.textContent = name;
+        group.append(option);
       }
       select.append(group);
     }
-    const current = activity?.provider;
-    const value = current ? modelOptionValue(current.providerId, current.modelId) : "";
-    if ([...select.options].some((option) => option.value === value)) select.value = value;
-    select.dataset.loaded = "true";
-    select.title = t("选择下一条消息使用的模型");
-    agentAttachments.refreshVision();
-  } catch { select.title = t("模型列表暂时不可用；仍使用当前会话模型"); }
-  finally { assistantModelPainting = false; }
+    generationRosterSignature = signature;
+  }
+  const hasOption = (value) => Boolean(value) && [...select.options].some((option) => option.value === value);
+  if (assistantModelUserOverride && hasOption(previousValue)) {
+    select.value = previousValue;
+  } else if (hasOption(activityValue)) {
+    select.value = activityValue;
+  } else if (hasOption(previousValue)) {
+    select.value = previousValue;
+  }
+  select.title = t("选择下一条消息使用的模型");
+  agentAttachments.refreshVision();
 }
-$("assistant-model")?.addEventListener("change", () => agentAttachments.refreshVision());
+
+let assistantModelPainting = false;
+async function paintAssistantModel(activity, { force = false } = {}) {
+  const select = /** @type {HTMLSelectElement | null} */ ($("assistant-model"));
+  if (!select || assistantModelPainting) return;
+  if (!force && !activity?.provider && !activity?.sessionId) return;
+  if (!force && !generationRoster && Date.now() - generationRosterAttemptedAt < 5000) return;
+  assistantModelPainting = true;
+  try {
+    const roster = await loadGenerationRoster({ force });
+    refreshAssistantModelOptions(select, roster, activity);
+  } catch {
+    select.title = t("模型列表暂时不可用；仍使用当前会话模型");
+  } finally {
+    assistantModelPainting = false;
+  }
+}
+$("assistant-model")?.addEventListener("change", () => {
+  assistantModelUserOverride = true;
+  agentAttachments.refreshVision();
+  if (generationActivity) paintEditorGeneration(generationActivity);
+});
+$("assistant-model")?.addEventListener("focus", () => {
+  void paintAssistantModel(generationActivity, { force: true });
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void paintAssistantModel(generationActivity, { force: true });
+  }
+});
 function assistantModelSelection() {
   const select = $("assistant-model");
   if (!generationRoster || !select?.value) return undefined;
-  const selection = selectedModelFromRoster(generationRoster, select.value);
-  const current = generationActivity?.provider;
-  return current?.providerId === selection.provider && current?.modelId === selection.model ? undefined : selection;
+  try {
+    const selection = selectedModelFromRoster(generationRoster, select.value);
+    const current = generationActivity?.provider;
+    return current?.providerId === selection.provider && current?.modelId === selection.model ? undefined : selection;
+  } catch {
+    return undefined;
+  }
 }
 
 
@@ -10077,6 +10434,15 @@ $("work-form")?.addEventListener("submit", async (ev) => {
   await dispatchAssistantRequest(text);
 });
 
+async function resolveAssistantSessionId() {
+  const existing = liveGenerationSessionId();
+  if (existing) return existing;
+  const activity = await api(generationActivityUrl());
+  if (!activity?.sessionId) return "";
+  if (!generationActivity) generationActivity = activity;
+  return String(activity.sessionId);
+}
+
 async function dispatchAssistantRequest(text, existingReceipt) {
   let plan;
   const contextKey = () => JSON.stringify([currentProjectPath(), model?.pageIndex, selectedIds()]);
@@ -10091,7 +10457,7 @@ async function dispatchAssistantRequest(text, existingReceipt) {
   try {
     await settlePendingEdits();
     submittedContext = contextKey();
-    const sessionId = liveGenerationSessionId();
+    const sessionId = await resolveAssistantSessionId();
     if (!sessionId) throw new Error(NO_AI_SESSION_MESSAGE);
     const response = await fetch("/slides/assistant-intent", {
       method: "POST", headers: { "Content-Type": "application/json" },

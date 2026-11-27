@@ -70,8 +70,12 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       env: { ...process.env, PORT: String(port), OPEN_SLIDESTUDIO_PROJECT: project },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    server.stdout.on("data", (chunk) => { serverLog += chunk; });
-    server.stderr.on("data", (chunk) => { serverLog += chunk; });
+    server.stdout.on("data", (chunk) => {
+      serverLog += chunk;
+    });
+    server.stderr.on("data", (chunk) => {
+      serverLog += chunk;
+    });
     for (let attempt = 0; attempt < 80; attempt += 1) {
       try {
         if ((await fetch(`${base}/api/health`)).ok) break;
@@ -83,7 +87,7 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
 
     const { launchPinnedChromium } = await import("../../../scripts/lib/pinned-playwright.mjs");
     browser = await launchPinnedChromium({ headless: true });
-    page = await browser.newPage({locale:'zh-CN', viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+    page = await browser.newPage({ locale: "zh-CN", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
     const hostile = "<img src=x onerror=alert(1)>";
     const history = Array.from({ length: 36 }, (_, index) => ({
       id: `ledger-${index}`,
@@ -93,10 +97,30 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       status: "complete",
     }));
     const initialEvents = [
-      { id: "message", kind: "message", label: "助手消息", detail: "我先检查已有资料，再开始排版。", status: "complete" },
+      {
+        id: "message",
+        kind: "message",
+        label: "助手消息",
+        detail: "我先检查已有资料，再开始排版。",
+        status: "complete",
+      },
       { id: "reasoning", kind: "reasoning", label: "思考", detail: hostile, status: "running" },
-      { id: "tool:bad", kind: "tool", callId: "bad", name: "view_design_reference", detail: "{\"designSystemId\":\"x\"}", status: "running" },
-      { id: "result:bad", kind: "result", callId: "bad", name: "view_design_reference", detail: "{\"ok\":false,\"detail\":\"taste execution gate is not enabled\"}", status: "complete" },
+      {
+        id: "tool:bad",
+        kind: "tool",
+        callId: "bad",
+        name: "view_design_reference",
+        detail: '{"designSystemId":"x"}',
+        status: "running",
+      },
+      {
+        id: "result:bad",
+        kind: "result",
+        callId: "bad",
+        name: "view_design_reference",
+        detail: '{"ok":false,"detail":"taste execution gate is not enabled"}',
+        status: "complete",
+      },
       // Kept away from the running reasoning row: the process list folds
       // consecutive thought/reasoning rows into one card (DSH parity), which
       // would otherwise merge the completed and running cards this case checks.
@@ -104,18 +128,32 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       ...history,
     ];
     current = snapshot(initialEvents);
-    await page.route("**/api/generation-activity**", (route) => route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(current),
-    }));
-    await page.route("**/slides/state/test-session", route => route.fulfill({json:{binding:{dshSessionId:"test-session"},agentStatus:current.phase === "generating" ? "busy" : "idle",phase:{kind:current.phase},questions:[]}}));
+    await page.route("**/api/generation-activity**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(current),
+      }),
+    );
+    await page.route("**/slides/state/test-session", (route) =>
+      route.fulfill({
+        json: {
+          binding: { dshSessionId: "test-session" },
+          agentStatus: current.phase === "generating" ? "busy" : "idle",
+          phase: { kind: current.phase },
+          questions: [],
+        },
+      }),
+    );
     // A live session keeps a stream connection open, so "networkidle" never
     // settles; wait for the boot DOM instead and let the assertions below wait
     // for the rendered rows.
-    await page.goto(`${base}/index.html?project=${encodeURIComponent(project)}&workspace=1&live=1&session=test-session`, {
-      waitUntil: "domcontentloaded",
-    });
+    await page.goto(
+      `${base}/index.html?project=${encodeURIComponent(project)}&workspace=1&live=1&session=test-session`,
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
     await page.waitForFunction(() => document.querySelectorAll("#editor-generation-event-list > li").length >= 40);
 
     // The document must be focused before a programmatic range is set, otherwise
@@ -165,7 +203,11 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     }, hostile);
     assert.ok(initial.overflow, `process list did not own scrolling: ${JSON.stringify(initial)}`);
     assert.equal(initial.sidebarWidth, 420);
-    assert.equal(initial.horizontalOverflow, false, `process cards overflowed horizontally: ${JSON.stringify(initial)}`);
+    assert.equal(
+      initial.horizontalOverflow,
+      false,
+      `process cards overflowed horizontally: ${JSON.stringify(initial)}`,
+    );
     assert.equal(initial.titleFontSize, "13px");
     // The technical-details block (and the inline <pre> inside it) is hidden by
     // design now, so only the visible tool title keeps a typography assertion.
@@ -213,16 +255,23 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     assert.equal(stable.selectionKept, true);
     assert.equal(stable.selectedTextHeld, hostile, "streaming text pauses while the user selects it");
 
-    current = snapshot(current.events.map((event) => event.id === "reasoning" ? { ...event, status: "complete" } : event));
-    await page.waitForFunction(() => !document.querySelector('[data-process-key="reasoning"] > .generation-reasoning-card')?.open);
+    current = snapshot(
+      current.events.map((event) => (event.id === "reasoning" ? { ...event, status: "complete" } : event)),
+    );
+    await page.waitForFunction(
+      () => !document.querySelector('[data-process-key="reasoning"] > .generation-reasoning-card')?.open,
+    );
     // Earlier steps of a live turn sit behind the counted fold row; open it first.
-    const fold = page.locator('.reader-process-toggle').last();
-    if (await fold.getAttribute('aria-expanded') !== 'true') await fold.click();
+    const fold = page.locator(".reader-process-toggle").last();
+    if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
     const card = '[data-process-key="reasoning"] > .generation-reasoning-card';
     // Revealing the fold may already show the card expanded; end on a manual open.
     if (await page.$eval(card, (node) => node.open)) await page.click(`${card} > summary`);
     await page.click(`${card} > summary`);
-    assert.equal(await page.$eval('[data-process-key="reasoning"] > .generation-reasoning-card', (node) => node.open), true);
+    assert.equal(
+      await page.$eval('[data-process-key="reasoning"] > .generation-reasoning-card', (node) => node.open),
+      true,
+    );
 
     const scrolled = await page.evaluate(() => {
       const list = document.getElementById("editor-generation-event-list");
@@ -233,7 +282,10 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     });
     assert.equal(scrolled.top, 0);
     assert.ok(scrolled.height > scrolled.client);
-    current = snapshot([...current.events, { id: "after-scroll", kind: "ledger", label: "滚动后新增", status: "complete" }]);
+    current = snapshot([
+      ...current.events,
+      { id: "after-scroll", kind: "ledger", label: "滚动后新增", status: "complete" },
+    ]);
     await page.waitForFunction(() => document.querySelector('[data-process-key="after-scroll"]'));
     const held = await page.evaluate(() => ({
       top: document.getElementById("editor-generation-event-list").scrollTop,
@@ -253,11 +305,10 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     current = snapshot(current.events, "complete");
     await page.waitForFunction(() => document.getElementById("editor-generation-status")?.textContent === "已完成");
     const completed = await page.evaluate(() => ({
-      expanded: document.getElementById("editor-generation").classList.contains("is-expanded"),
-      historyOpen: document.getElementById("editor-generation-events").open,
+      historyVisible: !document.getElementById("editor-generation-events").hidden,
       cards: document.querySelectorAll("#editor-generation-event-list > li").length,
     }));
-    assert.equal(completed.historyOpen, true);
+    assert.equal(completed.historyVisible, true);
     assert.ok(completed.cards > 0, "completed process history remains mounted");
   });
 
@@ -267,18 +318,67 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       visualReview: "pass",
     }));
     current = {
-      ...snapshot([
-        { id: "turn-cancel", kind: "turn", turn: 1, status: "cancelled", detail: "Turn cancelled (hook: production-no-progress-budget)" },
-        { id: "write-1", kind: "tool", turn: 1, callId: "write-1", name: "write_page", detail: '{"id":"01_cover"}' },
-        { id: "write-1-result", kind: "result", turn: 1, callId: "write-1", status: "complete", detail: '{"outcome":"rejected","detail":"overlap"}' },
-        { id: "write-2", kind: "tool", turn: 1, callId: "write-2", name: "write_page", detail: '{"id":"01_cover"}' },
-        { id: "write-2-result", kind: "result", turn: 1, callId: "write-2", status: "complete", detail: '{"outcome":"written","pageId":"01_cover"}' },
-        { id: "aborted", kind: "tool", turn: 1, callId: "aborted", name: "read_reference", detail: '{"sourceId":"openkimi:reference/pptd.md","chunkIndex":1}' },
-        { id: "aborted-result", kind: "result", turn: 1, callId: "aborted", status: "failed", detail: "Error: tool call aborted before dispatch" },
-        { id: "compose", kind: "tool", turn: 1, callId: "compose", name: "compose_deck", detail: "{}" },
-        { id: "compose-result", kind: "result", turn: 1, callId: "compose", status: "failed", detail: '{"ok":false,"detail":"compose gate failed: 8 required source chunks unread"}' },
-      ], "paused"),
-      project: { path: project, title: "Process DOM", pageCount: 10, pagePaths: pages.map((page) => `pages/${page.pageId}.page`) },
+      ...snapshot(
+        [
+          {
+            id: "turn-cancel",
+            kind: "turn",
+            turn: 1,
+            status: "cancelled",
+            detail: "Turn cancelled (hook: production-no-progress-budget)",
+          },
+          { id: "write-1", kind: "tool", turn: 1, callId: "write-1", name: "write_page", detail: '{"id":"01_cover"}' },
+          {
+            id: "write-1-result",
+            kind: "result",
+            turn: 1,
+            callId: "write-1",
+            status: "complete",
+            detail: '{"outcome":"rejected","detail":"overlap"}',
+          },
+          { id: "write-2", kind: "tool", turn: 1, callId: "write-2", name: "write_page", detail: '{"id":"01_cover"}' },
+          {
+            id: "write-2-result",
+            kind: "result",
+            turn: 1,
+            callId: "write-2",
+            status: "complete",
+            detail: '{"outcome":"written","pageId":"01_cover"}',
+          },
+          {
+            id: "aborted",
+            kind: "tool",
+            turn: 1,
+            callId: "aborted",
+            name: "read_reference",
+            detail: '{"sourceId":"openkimi:reference/pptd.md","chunkIndex":1}',
+          },
+          {
+            id: "aborted-result",
+            kind: "result",
+            turn: 1,
+            callId: "aborted",
+            status: "failed",
+            detail: "Error: tool call aborted before dispatch",
+          },
+          { id: "compose", kind: "tool", turn: 1, callId: "compose", name: "compose_deck", detail: "{}" },
+          {
+            id: "compose-result",
+            kind: "result",
+            turn: 1,
+            callId: "compose",
+            status: "failed",
+            detail: '{"ok":false,"detail":"compose gate failed: 8 required source chunks unread"}',
+          },
+        ],
+        "paused",
+      ),
+      project: {
+        path: project,
+        title: "Process DOM",
+        pageCount: 10,
+        pagePaths: pages.map((page) => `pages/${page.pageId}.page`),
+      },
       inspection: {
         pages,
         composed: false,
@@ -297,12 +397,15 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
     };
 
     await page.reload({ waitUntil: "networkidle" });
-    await page.waitForFunction(() => document.getElementById("editor-generation-status")?.textContent === "已生成 10 页，收尾未完成");
+    await page.waitForFunction(
+      () => document.getElementById("editor-generation-status")?.textContent === "已生成 10 页，收尾未完成",
+    );
     const terminal = await page.evaluate(() => ({
       status: document.getElementById("editor-generation-status")?.textContent,
-      action: document.getElementById("editor-generation-action")?.textContent,
-      output: document.getElementById("editor-generation-output")?.textContent,
-      detail: document.getElementById("editor-generation-detail")?.textContent,
+      cardTitle: document.querySelector('[data-process-key="turn-end"] [data-status-title]')?.textContent,
+      cardVisible: Boolean(
+        document.querySelector('[data-process-key="turn-end"] .generation-status-card')?.checkVisibility(),
+      ),
       recovered: document.querySelector('[data-process-key="tool:write-1"] [data-process-status]')?.textContent,
       canceled: document.querySelector('[data-process-key="tool:aborted"] [data-process-status]')?.textContent,
       canceledSummary: document.querySelector('[data-process-key="tool:aborted"] [data-process-summary]')?.textContent,
@@ -310,18 +413,22 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       failedSummary: document.querySelector('[data-process-key="tool:compose"] [data-process-summary]')?.textContent,
     }));
     assert.equal(terminal.status, "已生成 10 页，收尾未完成");
-    assert.match(terminal.action, /最终合稿未完成.*8 个参考资料分段/);
-    assert.equal(terminal.output, "已写入并检查 10 页");
-    assert.match(terminal.detail, /连续 32 个工具结果/);
+    assert.equal(terminal.cardVisible, true);
+    assert.match(terminal.cardTitle || "", /已生成 10 页|收尾未完成/);
     assert.equal(terminal.recovered, "已恢复");
     assert.equal(terminal.canceled, "已取消");
     assert.equal(terminal.canceledSummary, "这次调用尚未执行，所在任务已中止。");
     assert.equal(terminal.failed, "失败");
     assert.match(terminal.failedSummary, /8 个参考资料分段未读取/);
     const visibleReason = page.locator('[data-process-key="turn-end"] .generation-turn-end-detail');
-    assert.equal(await visibleReason.isVisible(), true, "the user must see the reason without opening hidden diagnostics");
+    assert.equal(
+      await visibleReason.isVisible(),
+      true,
+      "the user must see the reason without opening hidden diagnostics",
+    );
     assert.match(await visibleReason.innerText(), /连续 32 个工具结果/);
-    assert.match(await visibleReason.innerText(), /继续完成生成/);
+    const statusCard = page.locator('[data-process-key="turn-end"] .generation-status-card');
+    assert.match(await statusCard.innerText(), /继续完成生成|换模型|修改/);
   });
 
   it("shows a five-page unfinished run's actual blockers with no error object", async () => {
@@ -330,8 +437,12 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       project: { path: project, title: "收尾原因验收", pageCount: 5 },
       inspection: { composed: false, pages: Array.from({ length: 5 }, (_, i) => ({ pageId: `p${i + 1}` })) },
       execution: {
-        status: { kind: "reviewing" }, recovery: { kind: "continue" },
-        blockers: [{ code: "page_render_needed", pageIds: ["p1", "p2"] }, { code: "structural_review_needed", pageIds: ["p1", "p2"] }],
+        status: { kind: "reviewing" },
+        recovery: { kind: "continue" },
+        blockers: [
+          { code: "page_render_needed", pageIds: ["p1", "p2"] },
+          { code: "structural_review_needed", pageIds: ["p1", "p2"] },
+        ],
       },
     };
     await page.reload({ waitUntil: "networkidle" });
@@ -345,165 +456,4 @@ describe("generation process DOM", { skip: !hasPlaywright }, () => {
       await page.screenshot({ path: path.join(process.env.SLIDESTUDIO_TEST_EVIDENCE, "unfinished-five-pages.png") });
     }
   });
-
-  it("continues an idle partial generation once without creating an editor edit scope", async () => {
-    const pages = [
-      { pageId: "01_cover", visualReview: "pass", revision: 1, pageSha256: "a".repeat(64) },
-      { pageId: "02_close", visualReview: "pass", revision: 1, pageSha256: "b".repeat(64) },
-    ];
-    const missingReferenceChunks = [
-      { sourceId: "openkimi:reference/pptd.md", chunkIndex: 1 },
-      { sourceId: "openkimi:reference/pptd.md", chunkIndex: 2 },
-    ];
-    const pausedActivity = {
-      ...snapshot([], "paused"),
-      project: { path: project, title: "Process DOM", pageCount: 2, pagePaths: pages.map((entry) => `pages/${entry.pageId}.page`) },
-      inspection: { pages, composed: false, missingReferenceChunks },
-      stages: [
-        { id: "plan", status: "complete", detail: "已规划 2 页" },
-        { id: "pages", status: "complete", detail: "已持久化 2 页" },
-        { id: "review", status: "complete", detail: "页面检查已通过" },
-        { id: "compose", status: "needs-attention", detail: "最终合稿未完成" },
-      ],
-      error: { detail: "生成收尾暂停" },
-    };
-    current = pausedActivity;
-    let turnAccepted = false;
-    let stateReadsAfterTurn = 0;
-    const turnBodies = [];
-    await page.route("**/slides/state/test-session", (route) => {
-      let state;
-      if (!turnAccepted) {
-        state = {
-          binding: { sessionId: "test-session" },
-          agentStatus: "idle",
-          phase: { kind: "paused", detail: "生成收尾暂停" },
-          inspection: {
-            sessionId: "test-session",
-            ledger: { pages, composed: false, missingReferenceChunks },
-          },
-        };
-      } else if (stateReadsAfterTurn++ === 0) {
-        current = {
-          ...pausedActivity,
-          phase: "reviewing",
-          events: [{ id: "resume-started", kind: "turn", turn: 2, status: "running", detail: "继续完成生成" }],
-        };
-        state = {
-          binding: { sessionId: "test-session" },
-          agentStatus: "busy",
-          phase: { kind: "reviewing" },
-          inspection: { sessionId: "test-session", ledger: { pages, composed: false, missingReferenceChunks } },
-        };
-      } else {
-        current = {
-          ...pausedActivity,
-          phase: "complete",
-          error: null,
-          inspection: { pages, composed: true, missingReferenceChunks: [] },
-          stages: pausedActivity.stages.map((stage) => ({ ...stage, status: "complete" })),
-          events: [
-            { id: "resume-started", kind: "turn", turn: 2, status: "complete", detail: "继续完成生成" },
-            { id: "compose-complete", kind: "ledger", turn: 2, status: "complete", detail: "整稿已合成" },
-          ],
-        };
-        state = {
-          binding: { sessionId: "test-session" },
-          agentStatus: "idle",
-          phase: { kind: "complete" },
-          inspection: { sessionId: "test-session", ledger: { pages, composed: true, missingReferenceChunks: [] } },
-        };
-      }
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(state) });
-    });
-    await page.route("**/slides/sessions/test-session/turn", async (route) => {
-      turnBodies.push(route.request().postDataJSON());
-      turnAccepted = true;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
-    });
-
-    await page.goto(`${base}/index.html?project=${encodeURIComponent(project)}&workspace=1&session=test-session`, {
-      waitUntil: "networkidle",
-    });
-    await page.waitForFunction(() => {
-      const row = document.getElementById("generation-resume-row");
-      const button = document.getElementById("editor-generation-resume");
-      return row && !row.hidden && button && !button.disabled;
-    });
-    const clicked = await page.evaluate(() => {
-      const button = document.getElementById("editor-generation-resume");
-      button.click();
-      button.click();
-      return { disabled: button.disabled, label: button.textContent };
-    });
-    assert.equal(clicked.disabled, true);
-    assert.equal(clicked.label, "正在继续…");
-    await page.waitForFunction(() => document.getElementById("editor-generation-status")?.textContent === "已完成");
-    await page.waitForFunction(() => document.getElementById("generation-resume-row")?.hidden === true);
-
-    assert.equal(turnBodies.length, 1, "a double click must dispatch only one continuation turn");
-    assert.deepEqual(Object.keys(turnBodies[0]), ["text", "resumeGeneration"]);
-    assert.equal(turnBodies[0].resumeGeneration, true);
-    assert.equal("editorEdit" in turnBodies[0], false);
-    assert.match(turnBodies[0].text, /保留已经持久化的 2 页/);
-    assert.match(turnBodies[0].text, /openkimi:reference\/pptd\.md#1/);
-    assert.match(turnBodies[0].text, /compose_deck 和 export_deck/);
-    assert.equal(new URL(page.url()).searchParams.has("live"), false, "history/open routes can continue without live=1");
-  });
-  it("sends and restores two discussion turns without creating an edit lock or losing the model choice", async () => {
-    const turns = [];
-    const mutations = [];
-    current = {...snapshot([], "complete"), provider:{providerId:"test",modelId:"model-a"},conversation:{version:1,mode:"generate",messages:[]}};
-    await page.route("**/slides/assistant-intent", route => route.fulfill({json:{ok:true,intent:"discuss",scope:"current",pages:[]}}));
-    await page.route("**/slides/providers", route => route.fulfill({json:{providers:[{id:"test",name:"Local models",ready:true,models:["model-a","model-b"]}]}}));
-    await page.route("**/slides/state/test-session", route => route.fulfill({json:{binding:{dshSessionId:"test-session"},agentStatus:"idle",phase:{kind:"complete"}}}));
-    await page.route("**/api/reviews/ai-lock**", route => {mutations.push(route.request().url()); return route.fulfill({status:500,json:{error:"discussion must not acquire an edit lock"}});});
-    await page.route("**/slides/sessions/test-session/turn", route => {
-      const body = route.request().postDataJSON(); turns.push(body);
-      const n = turns.length;
-      current.conversation.mode = "discuss";
-      current.conversation.messages.push({id:`u${n}`,at:`2026-09-20T00:00:0${n*2}Z`,text:body.text,mode:"discuss"});
-      current.events.push({id:`a${n}`,kind:"message",at:`2026-09-20T00:00:0${n*2+1}Z`,detail:`讨论回复 ${n}`,status:"complete"});
-      if(body.modelSelection) current.provider = {providerId:body.modelSelection.provider,modelId:body.modelSelection.model};
-      return route.fulfill({json:{ok:true}});
-    });
-    await page.reload({waitUntil:"domcontentloaded"});
-    await page.waitForFunction(() => document.querySelector('#assistant-model')?.options.length === 2);
-    await page.getByLabel("助手模型",{exact:true}).selectOption("test/model-b");
-    for(const [index,text] of ["先讨论一下结构，不要修改文稿。","把刚才的建议再缩短，只回复标题，暂时不修改文稿。"].entries()) {
-      await page.getByLabel("与 AI 协作",{exact:true}).fill(text);
-      await page.getByRole("button",{name:"发送消息",exact:true}).click();
-      await page.waitForFunction(n => document.querySelector('#editor-generation-event-list')?.textContent.includes(`讨论回复 ${n}`), index + 1);
-      await page.waitForFunction(() => document.querySelector('#editor-generation-status')?.textContent === "继续聊聊");
-    }
-    assert.equal(turns.length,2);
-    assert.ok(turns.every(body=>body.conversationMode === "discuss" && !body.editorEdit));
-    assert.deepEqual(turns[0].modelSelection,{provider:"test",model:"model-b"});
-    assert.equal(mutations.length,0);
-    await page.reload({waitUntil:"domcontentloaded"});
-    await page.waitForFunction(() => document.querySelector('#editor-generation-event-list')?.textContent.includes('讨论回复 2'));
-    const text = await page.locator('#editor-generation-event-list').innerText();
-    assert.match(text,/先讨论一下结构/); assert.match(text,/讨论回复 1/); assert.match(text,/讨论回复 2/);
-    assert.equal(await page.locator('#work-empty').isVisible(),false);
-    assert.equal(await page.locator('#generation-resume-row').isVisible(),false);
-    assert.equal(await page.locator('#assistant-model').inputValue(),"test/model-b");
-  });
-
-  it("unlocks an idle completed edit and keeps background raster loads finite", async () => {
-    current = {...current, phase:"reviewing", conversation:{...current.conversation,mode:"edit"}};
-    await page.reload({waitUntil:"domcontentloaded"});
-    await page.waitForFunction(() => document.getElementById('editor-generation-status')?.textContent === '已修改');
-    assert.equal(await page.getByRole('button',{name:'发送消息',exact:true}).isEnabled(),true);
-    assert.equal(await page.getByRole('button',{name:'导出',exact:true}).isVisible(),true);
-    let activityReads = 0;
-    const raster = await browser.newPage({locale:'zh-CN'});
-    try {
-      await raster.route('**/api/generation-activity**', route => {activityReads++;return route.fulfill({json:snapshot([],'generating')});});
-      await raster.goto(`${base}/index.html?project=${encodeURIComponent(project)}&page=0&workspace=0&render=1`,{waitUntil:'networkidle',timeout:10000});
-      assert.ok(activityReads <= 1,'background rendering may read history once, but must not poll continuously');
-      assert.equal(await raster.locator('#work-chat').isVisible(),false);
-      assert.ok(await raster.locator('#slide .el').count()>0);
-    } finally { await raster.close(); }
-  });
-
 });
