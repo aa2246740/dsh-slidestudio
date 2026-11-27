@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationPageCount } from "./conversation-requirements.js";
+import { conversationPageCount, conversationPageCountRequirement } from "./conversation-requirements.js";
 import { composeBodyRules, requestedPageCountFromBrief } from "./compose-ir.js";
 
 test("a later page-count answer updates compose without inventing a default", (t) => {
@@ -55,6 +55,29 @@ test("a bare digit reply is ambiguous and never rewrites the page total", (t) =>
     }),
   );
   assert.equal(conversationPageCount(root), 2, "the last explicit total still wins");
+});
+
+test("a follow-up that edits only part of the deck preserves the four-page requirement", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "slides-requirements-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "_agent", "assistant-conversation.v1.json");
+  fs.mkdirSync(path.dirname(file));
+  for (const followUp of [
+    "不要修改前 3 页，更新第 4 页",
+    "我刚补充上传了 nov_supplement_update.csv，请把两条最新数据补充进第 4 页（4_risk_actions），不要修改前 3 页，优先使用 patch_page_elements 局部更新后完成检查、合稿并重新导出。",
+  ]) {
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        messages: [
+          { mode: "generate", text: "4 页", at: "2026-11-27T00:00:00Z" },
+          { mode: "generate", text: followUp, at: "2026-11-27T00:01:00Z" },
+        ],
+      }),
+    );
+    assert.deepEqual(conversationPageCountRequirement(root), { kind: "exact", count: 4 }, followUp);
+  }
 });
 
 test("Chinese totals and short replies do not confuse ordinal or component pages", () => {

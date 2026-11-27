@@ -10,7 +10,7 @@ for (const [name, contract] of Object.entries(apiContracts)) {
     openapi: "3.1.0",
     info: {
       title: contract.title,
-      version: "0.3.2",
+      version: "0.3.3",
       description: `Local-first API. Source: ${contract.source}. Critical interfaces only for native/Host; legacy routes are complete. Never expose this loopback-only API publicly.`,
     },
     servers: [

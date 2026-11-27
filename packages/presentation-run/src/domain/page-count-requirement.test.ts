@@ -53,6 +53,64 @@ describe("ordinal pages are never a total", () => {
   });
 });
 
+describe("Chinese page slices are never a total", () => {
+  it("ignores leading, trailing and other page slices", () => {
+    for (const text of [
+      "不要修改前 3 页",
+      "保留前两页",
+      "保留前面 3 页",
+      "保留最前 2 页",
+      "保留最前面 2 页",
+      "保留开头 2 页",
+      "只改后 2 页",
+      "只改后两页",
+      "只改后面 2 页",
+      "只改最后 2 页",
+      "只改最后面 2 页",
+      "只改结尾 2 页",
+      "只改末尾 2 页",
+      "保留其余 3 页",
+      "保留剩下 3 页",
+      "保留剩下的 3 页",
+      "保留剩余 3 页",
+      "保留剩余的 3 页",
+      "只改另外 2 页",
+      "只改其他 2 页",
+      "只改中间 2 页",
+    ]) {
+      assert.deepEqual(pageCountRequirementFromBrief(text), UNSPECIFIED, text);
+    }
+  });
+
+  it("ignores slice ranges and preserves a separate total range", () => {
+    for (const text of ["前 2-3 页", "中间 2-4 页", "后两至三页", "最后面 ２～４ 页"]) {
+      assert.deepEqual(pageCountRequirementFromBrief(text), UNSPECIFIED, text);
+    }
+    assert.deepEqual(pageCountRequirementFromBrief("中间 2-4 页写背景，最后做成 8–10 页"), {
+      kind: "range",
+      min: 8,
+      max: 10,
+    });
+  });
+
+  it("preserves total requests, including those alongside slices or after 最后", () => {
+    for (const [text, count] of [
+      ["总共 3 页", 3],
+      ["一共 5 页", 5],
+      ["固定 4 页", 4],
+      ["最后做成 5 页", 5],
+      ["最后生成 6 页", 6],
+      ["最后保持 4 页", 4],
+      ["前 3 页写背景，共 10 页", 10],
+      ["只改后 2 页，总页数保持 8 页", 8],
+      ["前 2-3 页写背景，固定 10 页", 10],
+      ["固定 10 页，中间 2-4 页写背景", 10],
+    ] as const) {
+      assert.deepEqual(pageCountRequirementFromBrief(text), { kind: "exact", count }, text);
+    }
+  });
+});
+
 describe("reference page counts never become the user's target", () => {
   it("keeps the user's fixed total next to a reference count in any form", () => {
     for (const text of [
