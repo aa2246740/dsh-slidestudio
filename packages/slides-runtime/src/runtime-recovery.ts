@@ -44,9 +44,20 @@ const STEP_DOWN: Readonly<Record<ThinkingLevel, ThinkingLevel>> = {
   off: "off",
 };
 
-/** One reasoning-effort notch lower: max/xhigh -> high -> medium -> low -> off. */
-export function stepDownThinking(level: ThinkingLevel): ThinkingLevel {
-  return STEP_DOWN[level] ?? "off";
+const EFFORT_DESC: readonly ThinkingLevel[] = ["max", "xhigh", "high", "medium", "low", "minimal", "off"];
+
+/** One reasoning-effort notch lower, skipping tiers absent from `supportedEfforts` when declared. */
+export function stepDownThinking(level: ThinkingLevel, supportedEfforts?: readonly string[]): ThinkingLevel {
+  const next = STEP_DOWN[level] ?? "off";
+  if (supportedEfforts === undefined) return next;
+  const supported = new Set(supportedEfforts);
+  const start = EFFORT_DESC.indexOf(next);
+  if (start < 0) return "off";
+  for (let i = start; i < EFFORT_DESC.length; i += 1) {
+    const candidate = EFFORT_DESC[i]!;
+    if (candidate === "off" || supported.has(candidate)) return candidate;
+  }
+  return "off";
 }
 
 /** The trailing assistant reply stopped at the output limit without issuing any tool call. */
@@ -173,7 +184,7 @@ async function recoverTruncation(ctx: RecoveryContext, counters: RecoveryCounter
   const limit = Math.max(0, Math.floor(options.maxTokensAutoRetries ?? DEFAULT_MAX_TOKENS_AUTO_RETRIES));
   if (!isTruncatedWithoutTools(last) || counters.truncated >= limit) return false;
   counters.truncated += 1;
-  const thinkingLevel = stepDownThinking(agent.state.thinkingLevel);
+  const thinkingLevel = stepDownThinking(agent.state.thinkingLevel, options.llm.route.supportedReasoningEfforts);
   agent.state.thinkingLevel = thinkingLevel;
   agent.state.messages = withoutTrailingTruncation(agent.state.messages);
   ctx.emit({ type: "max-tokens/retry", attempt: counters.truncated, thinkingLevel });

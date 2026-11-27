@@ -43,7 +43,11 @@ export type SessionRouteSpec = {
   readonly inputModalities: readonly ModelInputModality[];
 };
 
-export type RouteLimits = { readonly contextWindow: number; readonly maxTokens: number };
+export type RouteLimits = {
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+  readonly supportedEfforts?: readonly string[];
+};
 
 export const DEFAULT_ROUTE_LIMITS: RouteLimits = { contextWindow: 128_000, maxTokens: 8_192 };
 
@@ -81,12 +85,34 @@ export function resolveReferenceDeliveryConfirmation(env: NodeJS.ProcessEnv = pr
   return parseBoolEnv(env[REFERENCE_DELIVERY_ENV]) ?? parseBoolEnv(env[REFERENCE_DELIVERY_FLAG_ENV]) ?? true;
 }
 
-/** Cap high reasoning efforts on low-maxTokens routes so thinking does not starve tool calls. */
-export function capReasoningEffortForMaxTokens(effort: string | undefined, maxTokens: number): string | undefined {
-  if (!effort || effort === "off" || effort === "minimal" || effort === "low") return effort;
-  if (maxTokens <= 8_192 && ["max", "xhigh", "high", "medium"].includes(effort)) return "low";
-  if (maxTokens <= 16_384 && ["max", "xhigh", "high"].includes(effort)) return "medium";
-  return effort;
+const EFFORT_FALLBACK_ORDER: readonly string[] = ["max", "xhigh", "high", "medium", "low", "minimal", "off"];
+
+/**
+ * Cap high reasoning efforts on low-maxTokens routes so thinking does not starve tool calls.
+ * When `supportedEfforts` is declared, only pick an effort the model accepts rather than
+ * inventing an unsupported tier such as `"medium"` on binary-effort models.
+ */
+export function capReasoningEffortForMaxTokens(
+  effort: string | undefined,
+  maxTokens: number,
+  supportedEfforts?: readonly string[],
+): string | undefined {
+  if (!effort || effort === "off") return effort;
+  let target = effort;
+  if (maxTokens <= 8_192 && ["max", "xhigh", "high", "medium"].includes(effort)) target = "low";
+  else if (maxTokens <= 16_384 && ["max", "xhigh", "high"].includes(effort)) target = "medium";
+  if (supportedEfforts === undefined) return target;
+  const supported = new Set(supportedEfforts);
+  if (supported.has(target)) return target;
+  const start = EFFORT_FALLBACK_ORDER.indexOf(target);
+  if (start >= 0) {
+    for (let i = start + 1; i < EFFORT_FALLBACK_ORDER.length; i += 1) {
+      const candidate = EFFORT_FALLBACK_ORDER[i]!;
+      if (candidate === "off") return supported.has("off") ? "off" : undefined;
+      if (supported.has(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 type RuntimeContextBudgetConfig = Partial<Omit<ContextBudgetOptions, "contextWindow" | "maxOutputTokens">>;
@@ -122,7 +148,7 @@ export function llmRouteFor(spec: SessionRouteSpec, limits: RouteLimits): LlmRou
   const inputModalities = spec.inputModalities.filter(
     (modality): modality is LlmInputModality => modality === "text" || modality === "image",
   );
-  const effort = capReasoningEffortForMaxTokens(spec.reasoningEffort, limits.maxTokens);
+  const effort = capReasoningEffortForMaxTokens(spec.reasoningEffort, limits.maxTokens, limits.supportedEfforts);
   return {
     providerId: spec.providerId,
     modelId: spec.modelId,
@@ -131,6 +157,7 @@ export function llmRouteFor(spec: SessionRouteSpec, limits: RouteLimits): LlmRou
     inputModalities: inputModalities.length ? inputModalities : ["text"],
     // DSH reasoning effort ids are opaque adapter values passed straight through.
     ...(effort ? { reasoningEffort: effort as ThinkingLevel } : {}),
+    ...(limits.supportedEfforts !== undefined ? { supportedReasoningEfforts: limits.supportedEfforts } : {}),
   };
 }
 

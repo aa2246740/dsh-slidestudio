@@ -133,14 +133,18 @@ export class HostModels {
     return catalog;
   }
 
-  /** Context window and output cap for the session runtime's budget; unknown routes use safe defaults. */
+  /** Context window, output cap and supported reasoning efforts for the session runtime. */
   async routeLimits(spec: SessionRouteSpec): Promise<RouteLimits> {
     const info = await this.llm.resolveModelInfo(spec.providerId, spec.modelId).catch(() => undefined);
     const contextWindow = info?.context?.contextWindow;
     const maxTokens = info?.defaultMaxTokens;
+    const supportedEfforts = info?.reasoning?.efforts
+      ? info.reasoning.efforts.map((effort) => String(effort.id))
+      : undefined;
     return {
       contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_ROUTE_LIMITS.contextWindow,
       maxTokens: maxTokens && maxTokens > 0 ? maxTokens : DEFAULT_ROUTE_LIMITS.maxTokens,
+      ...(supportedEfforts !== undefined ? { supportedEfforts } : {}),
     };
   }
 

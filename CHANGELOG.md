@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-11-27
+
+- Small-context and low-`maxTokens` runtime optimization (`@open-slidestudio/slides-runtime`, `@open-slidestudio/dsh-slides-host`): adds online provider-usage token calibration (`TokenCalibration`), tiered window budgets (early `<60k` produce pre-flight rejection with `context-window-too-small`, `64k–96k` working-set pruning with superseded `write_page` compaction, `128k` balanced mode, and `>=180k` cache-first hold), `max-tokens` thinking-truncation auto step-down and continuation, model-declared `supportedReasoningEfforts` filtering for both effort capping and step-down, and disk-summary cold-start seeding for review and model-switch turns.
+- Sectioned references and stage-scoped tools (`@open-slidestudio/presentation-run`, `@open-slidestudio/slides-tools`): introduces `openkimi-sectioned-v2` reference loading (cutting pre-plan required reference payload by 51.5% with on-demand gates for `table`, `chart`, `image`, `line`, `icon`, and `animation`), delivery-confirmed reference accounting (`reference_delivery_confirmation` feature flag, default `true`), cross-model baseline reference carry-over (`reference.epoch-carried`), cross-turn disk raster awareness in `review_pages`, trimmed produce tool allowlist (−36.8 KB to −42.3 KB schema bytes), opt-in `patch_page_elements` targeted element patching, and compact design cards / capped rejection details.
+- Left-panel `context-window-too-small` recovery UI (`@open-slidestudio/native-web`): maps `context-window-too-small` to a clear pause/resolve card guiding users to switch to a `>=64k` model, with full Chinese and English i18n coverage.
+
 ## 0.3.1 — 2026-11-27
 
 - Unified left AI panel status and recovery card: replaces legacy hidden generation fallback DOM/CSS with a warm/ink-themed `.generation-status-card` featuring live 429 retry countdown, model switch, stop wait, resume, collapsible technical details, mode-aware discuss/edit failure cards, and complete English i18n coverage.

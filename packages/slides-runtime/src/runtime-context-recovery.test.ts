@@ -183,3 +183,36 @@ test("a summary-seeded runtime starts from a fresh context while the session log
   assert.match(String(second.find((message) => message.role === "user")?.content), /摘要 v2/);
   await seeded.dispose();
 });
+
+test("max-tokens step-down skips reasoning efforts not supported by the active model", async () => {
+  const { llm, runtime, events } = runtimeFor(
+    [() => truncated(), () => truncated(), () => ({ text: "已恢复" })],
+    { thinkingLevel: "high" },
+    { reasoningEffort: "high", supportedReasoningEfforts: ["low", "high"] },
+  );
+  const result = await runtime.prompt("生成");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === "max-tokens/retry")
+      .map((event) => (event.type === "max-tokens/retry" ? event.thinkingLevel : "")),
+    ["low", "off"],
+  );
+  assert.deepEqual(
+    llm.requests.map((request) => request.options?.reasoning),
+    ["high", "low", undefined],
+  );
+  await runtime.dispose();
+
+  const binary = runtimeFor(
+    [() => truncated(), () => ({ text: "关闭思考后完成" })],
+    { thinkingLevel: "high" },
+    { reasoningEffort: "high", supportedReasoningEfforts: ["high"] },
+  );
+  assert.equal((await binary.runtime.prompt("生成")).status, "completed");
+  assert.deepEqual(
+    binary.llm.requests.map((request) => request.options?.reasoning),
+    ["high", undefined],
+  );
+  await binary.runtime.dispose();
+});

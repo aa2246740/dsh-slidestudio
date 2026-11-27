@@ -4,6 +4,7 @@ import { reviewSkillPages, type LayoutReview } from "./layout-qa.js";
 import { loadProject } from "@open-slidestudio/pptd-v2";
 import { persistPageKey } from "./page-identity.js";
 import { reportFactIssues } from "./report-facts.js";
+import { inspectRunLedger } from "./run-ledger.js";
 import type { SkillPageInput } from "./skill-pages.js";
 import { resolveTodoExhibitContract, type TodoExhibitContract } from "./todo-exhibits.js";
 
@@ -60,4 +61,48 @@ export function reviewCurrent(
   }
   state.lastReview = review;
   return review;
+}
+
+/**
+ * Summarize raster readiness for `review_pages`: prefer the in-session render when
+ * present, otherwise fall back to current-revision disk raster facts so a cold-started
+ * or switched model does not re-render pages that already passed layout QA on disk.
+ */
+export function reviewRasterNote(state: AgentToolState): {
+  readonly note: string;
+  readonly allCurrentOnDisk: boolean;
+} {
+  if (state.lastRaster) {
+    return {
+      note: `last render_page: ${state.lastRaster.kind} ${state.lastRaster.src ?? ""} — ${state.lastRaster.note}`,
+      allCurrentOnDisk: false,
+    };
+  }
+  if (state.projectRoot) {
+    const inspection = inspectRunLedger(state.projectRoot);
+    const total = inspection.pages.length;
+    if (total > 0) {
+      const rendered = inspection.pages.filter((page) => page.raster);
+      if (rendered.length > 0) {
+        const passed = rendered.filter((page) => page.layout === "pass").length;
+        const failed = rendered.filter((page) => page.layout === "fail").length;
+        const summary = `${passed} layout pass${failed ? `, ${failed} layout fail` : ""}`;
+        if (rendered.length === total) {
+          return {
+            note: `disk rasters current: ${rendered.length}/${total} pages rendered (${summary}); no re-render needed unless you edit a page.`,
+            allCurrentOnDisk: failed === 0,
+          };
+        }
+        const missing = inspection.pages
+          .filter((page) => !page.raster)
+          .map((page) => page.pageId)
+          .join(", ");
+        return {
+          note: `disk rasters: ${rendered.length}/${total} pages current (${summary}); missing render_page: ${missing}`,
+          allCurrentOnDisk: false,
+        };
+      }
+    }
+  }
+  return { note: "no render_page yet — you have not seen the native #slide", allCurrentOnDisk: false };
 }

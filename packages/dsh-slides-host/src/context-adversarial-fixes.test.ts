@@ -18,8 +18,10 @@ import { isUnrecoverableFault } from "./agent-fault.js";
 import { recordConversationMessage } from "./assistant-conversation.js";
 import { hasPersistedDeckHistory, recordAcceptedTurnAttachments } from "./context-summary.js";
 import type { DshGenerateOptions, DshLlmService, DshStreamChunk } from "./dsh-llm-port.js";
+import { HostModels } from "./host-models.js";
 import { sessionHasAttachments, sessionProduceToolAllowlist } from "./produce-tool-policy.js";
 import { writeSliceRuntime } from "./runtime.js";
+import { capReasoningEffortForMaxTokens, llmRouteFor } from "./session-runtime-config.js";
 import { SessionRuntimeManager } from "./session-runtime-manager.js";
 import { SliceSessionStore } from "./slice-session.js";
 
@@ -278,4 +280,41 @@ test("context-window-too-small projects as paused + resolve recovery and follow-
   recordAcceptedTurnAttachments(projectRoot, [{ id: "att-followup-1", name: "q3.csv" }]);
   assert.equal(sessionHasAttachments(projectRoot), true);
   assert.equal(sessionProduceToolAllowlist(deps, sessionId).has("read_material"), true);
+});
+
+test("capReasoningEffortForMaxTokens and HostModels.routeLimits never emit an unsupported effort tier", async () => {
+  // Models without "medium" (e.g. glm-5.4 / grok-4.7 binary or low+high tiers) must never be capped to "medium".
+  assert.equal(capReasoningEffortForMaxTokens("high", 16_384, ["low", "high"]), "low");
+  assert.equal(capReasoningEffortForMaxTokens("high", 16_384, ["high"]), undefined);
+  assert.equal(capReasoningEffortForMaxTokens("high", 16_384, ["off", "high"]), "off");
+  assert.equal(capReasoningEffortForMaxTokens("high", 8_192, ["minimal", "high"]), "minimal");
+  assert.equal(capReasoningEffortForMaxTokens("high", 32_768, ["low", "high"]), "high");
+  assert.equal(capReasoningEffortForMaxTokens("high", 32_768, []), undefined);
+
+  const models = new HostModels(
+    {
+      listProviders: () => [{ id: "air-cpa-chat" }],
+      listModels: async () => [{ id: "glm-5.4", name: "GLM 5.4", inputModalities: ["text"] }],
+      resolveModelInfo: async () => ({
+        inputModalities: ["text"],
+        context: { contextWindow: 128_000 },
+        defaultMaxTokens: 16_384,
+        reasoning: { efforts: [{ id: "low" }, { id: "high" }] },
+      }),
+    },
+    { dshHome: os.tmpdir(), personal: true },
+  );
+  const limits = await models.routeLimits({
+    providerId: "air-cpa-chat",
+    modelId: "glm-5.4",
+    reasoningEffort: "high",
+    inputModalities: ["text"],
+  });
+  assert.deepEqual(limits.supportedEfforts, ["low", "high"]);
+  const route = llmRouteFor(
+    { providerId: "air-cpa-chat", modelId: "glm-5.4", reasoningEffort: "high", inputModalities: ["text"] },
+    limits,
+  );
+  assert.equal(route.reasoningEffort, "low");
+  assert.deepEqual(route.supportedReasoningEfforts, ["low", "high"]);
 });
