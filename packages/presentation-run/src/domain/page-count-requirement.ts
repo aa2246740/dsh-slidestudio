@@ -49,15 +49,19 @@ const COUNT_BEFORE_REFERENCE = new RegExp(
   `(?<!${USER_ASK_VERB}\\s*${ARTICLE}\\s*)(?<!${RAW_COUNT})${PAGE_COUNT}\\s*的\\s*(?=${REFERENCE_WORD})`,
   "g",
 );
-const ORDINAL_PAGES = new RegExp(`第\\s*${COUNT}(?:\\s*${RANGE_SEPARATOR}\\s*${COUNT})?\\s*页`, "g");
+const PAGE_REFERENCE_PREFIX = "(?:第|最?前(?:面)?|最?后(?:面)?|开头|结尾|末尾|其余|剩(?:下|余)(?:的)?|另外|其他|中间)";
+const PAGE_REFERENCES = new RegExp(
+  `${PAGE_REFERENCE_PREFIX}\\s*${RAW_COUNT}(?:\\s*${RANGE_SEPARATOR}\\s*${RAW_COUNT})?\\s*页`,
+  "g",
+);
 
 function asciiDigits(text: string): string {
   return text.replace(/[０-９]/g, (char) => String(char.charCodeAt(0) - 0xfee0));
 }
 
 /**
- * Drop page counts that belong to someone else: the reference's own size and
- * 第 n 页 ordinals. A count is the task's total only as the object of the user's
+ * Drop counts for reference materials, page ordinals and slices (前 3 页).
+ * A count is the task's total only as the object of the user's
  * request. A reference noun that is a clause subject owns the count in its
  * predicate ("参考稿由系统生成约 12 页"), so the owner, not a verb in the same
  * clause, decides; a reference noun that only modifies the user's request
@@ -69,7 +73,7 @@ function withoutNonTotalPageCounts(text: string): string {
   const kept = text
     .split(CLAUSE_BOUNDARY)
     .map((clause) => clause.replace(COUNT_BEFORE_REFERENCE, "").replace(REFERENCE_SUBJECT_CLAUSE, " "));
-  return kept.join("，").replace(ORDINAL_PAGES, " ");
+  return kept.join("，").replace(PAGE_REFERENCES, " ");
 }
 
 function chineseCount(raw: string): number | undefined {
@@ -110,8 +114,8 @@ function positiveCount(raw: string | undefined): number | undefined {
 }
 
 /**
- * The user's total-page requirement. A bare ordinal (第 2 页) never becomes a
- * total, reference-material page counts are ignored, and an approximate count
+ * The user's total-page requirement. Ordinals, page slices and reference-material
+ * counts are ignored, and an approximate count
  * carries no invented tolerance: it has no min/max field at all.
  */
 export function pageCountRequirementFromBrief(brief: string): PageCountRequirement {

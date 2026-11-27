@@ -1,5 +1,5 @@
 import { createObservability } from "../../../scripts/lib/observability.mjs";
 
 export function createLogger(options = {}) {
-  return createObservability({ app: "legacy-api", version: "0.3.2", ...options });
+  return createObservability({ app: "legacy-api", version: "0.3.3", ...options });
 }

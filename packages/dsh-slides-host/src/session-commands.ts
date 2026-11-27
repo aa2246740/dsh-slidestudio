@@ -11,6 +11,7 @@ import {
   persistPresentationRunProvider,
   type PresentationRun,
 } from "@open-slidestudio/presentation-run";
+import { verifySessionMaterials, writeSessionMaterials } from "@open-slidestudio/slides-tools";
 import { clearRateLimitWait, recordAgentError } from "./agent-fault.js";
 import { discussionInstruction, recordConversationMessage } from "./assistant-conversation.js";
 import { modelForRoute } from "./args.js";
@@ -32,10 +33,10 @@ import type { XaiLoginSnapshot } from "./oauth-login.js";
 import { assertHubProduceGatesReady } from "./produce-gates.js";
 import type { DesignDirective } from "./protocol.js";
 import type { SlidesHostRuntime } from "./routes.js";
-import { turnTextWithAttachments } from "./routes.js";
 import type { RenderRuntimeSnapshot } from "./runtime-provision.js";
 import { writeSliceRuntime } from "./runtime.js";
 import type { SessionRecovery } from "./session-recovery.js";
+import { materialAttachments, turnTextWithAttachments, withMaterialDetails } from "./session-materials.js";
 import type { SessionRouteSpec } from "./session-runtime-config.js";
 import type { SessionRuntimeManager } from "./session-runtime-manager.js";
 import { beginAttempt } from "./session-transition.js";
@@ -118,6 +119,7 @@ export class SessionCommands {
     const { design, snapshotDesign } = this.designFor(input.designSystemId);
     const attachments = input.attachments ?? [];
     assertAttachmentBudget(attachments);
+    const preparedMaterials = verifySessionMaterials(dataRoot, materialAttachments(attachments));
     const sessionId = crypto.randomUUID();
     const provider = models.capabilityProvider(route.provider, model, true, catalog);
     const reasoningEffort = reasoningEffortForModel(dshHome, route.provider, model, input.reasoningEffort, catalog);
@@ -128,10 +130,6 @@ export class SessionCommands {
           hasAttachments: attachments.length > 0,
           patchPageElements: true,
         });
-    const initialMessage = turnTextWithAttachments(
-      `${brief}\n\nDocument format: Slides ${format.layout}, ${format.size[0]} x ${format.size[1]} pixels. Preserve this canvas size.`,
-      attachments,
-    );
     const opened = store.openProject({
       dshSessionId: sessionId,
       title: deckTitleFromBrief(input.brief),
@@ -140,6 +138,12 @@ export class SessionCommands {
       size: format.size,
     });
     const projectRoot = store.resolveRoot(opened.binding);
+    const delivered = withMaterialDetails(attachments, writeSessionMaterials(projectRoot, preparedMaterials));
+    const initialMessage = turnTextWithAttachments(
+      `${brief}\n\nDocument format: Slides ${format.layout}, ${format.size[0]} x ${format.size[1]} pixels. Preserve this canvas size.`,
+      delivered,
+      { modelAcceptsImages: provider.modelInputModalities.includes("image") },
+    );
     persistGenerationInput(projectRoot, {
       version: 1,
       sessionId,
@@ -148,7 +152,7 @@ export class SessionCommands {
       format,
       design: snapshotDesign,
       model: { provider: route.provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) },
-      attachments: attachments.map((attachment) => ({
+      attachments: delivered.map((attachment) => ({
         ...attachment,
         contentBlockSha256: inputSha256(attachmentDeliveryBlock(attachment)),
       })),

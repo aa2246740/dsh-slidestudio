@@ -4,11 +4,25 @@ import crypto from "node:crypto";
 import { publicAssistantDetail } from "./agent-trace.js";
 
 export type AssistantMode = "discuss" | "edit" | "generate";
-export type ConversationMessage = { id: string; at: string; text: string; mode: AssistantMode; reviewSubmissionId?: string; clientRequestId?: string };
+export type ConversationMessage = {
+  id: string;
+  at: string;
+  text: string;
+  mode: AssistantMode;
+  reviewSubmissionId?: string;
+  clientRequestId?: string;
+};
 export type Conversation = { version: 1; mode: AssistantMode; messages: ConversationMessage[] };
 const FILE = "assistant-conversation.v1.json";
 export const DISCUSSION_TOOLS: ReadonlySet<string> = new Set([
-  "inspect_capabilities", "list_references", "read_reference", "read_page", "ask_user_question",
+  "inspect_capabilities",
+  "list_references",
+  "read_reference",
+  "read_page",
+  "ask_user_question",
+  "list_materials",
+  "read_material",
+  "query_material",
 ]);
 
 export function readConversation(root: string): Conversation {
@@ -26,11 +40,19 @@ export function discussionOnly(root: string): boolean {
   return readConversation(root).mode === "discuss";
 }
 
-export function recordConversationMessage(root: string, text: string, mode: AssistantMode, reviewSubmissionId?: string, clientRequestId?: string): ConversationMessage {
+export function recordConversationMessage(
+  root: string,
+  text: string,
+  mode: AssistantMode,
+  reviewSubmissionId?: string,
+  clientRequestId?: string,
+): ConversationMessage {
   const current = readConversation(root);
   const message = {
-    id: crypto.randomUUID(), at: new Date().toISOString(),
-    text: publicAssistantDetail(text).detail || "", mode,
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    text: publicAssistantDetail(text).detail || "",
+    mode,
     ...(reviewSubmissionId ? { reviewSubmissionId } : {}),
     ...(clientRequestId && /^[a-f0-9-]{36}$/.test(clientRequestId) ? { clientRequestId } : {}),
   };

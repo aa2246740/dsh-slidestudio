@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 — 2026-11-27
+
+- Full multi-format attachment materialization in Hub and Editor (`@open-slidestudio/dsh-slides-host`): replaces the legacy `utf8-full-v1`-only receipt gate in `verifiedAttachment` and `routes.ts` with full `@open-slidestudio/slides-tools` material verification (`verifySessionMaterials`), project materialization (`writeSessionMaterials` / `materializeSessionAttachments`), and `<reference_materials>` delivery across `POST /slides/sessions`, follow-up turns, and busy steers. DOCX, XLSX, PDF, PPTX, images, and >48k text uploads now pass end-to-end instead of failing with HTTP 400, small UTF-8 text/CSV uploads also materialize into `_agent/materials/manifest.json` so `list_materials` / `read_material` / `query_material` and provenance checks work accurately, discussion mode gains read-only material tools, and disk-summary cold starts list materialized reference files.
+- Follow-up slice-page count parsing (`@open-slidestudio/presentation-run`): updates `page-count-requirement.ts` to ignore Chinese page-slice references (`前 N 页`, `后 N 页`, `最后 N 页`, `其余 N 页`, `剩下 N 页`, `开头/结尾/中间 N 页`) in addition to `第 N 页` ordinals, preventing follow-up edit instructions like `"不要修改前 3 页"` from overwriting the deck's total page requirement and blocking `compose_deck` / `export_deck`.
+
 ## 0.3.2 — 2026-11-27
 
 - Small-context and low-`maxTokens` runtime optimization (`@open-slidestudio/slides-runtime`, `@open-slidestudio/dsh-slides-host`): adds online provider-usage token calibration (`TokenCalibration`), tiered window budgets (early `<60k` produce pre-flight rejection with `context-window-too-small`, `64k–96k` working-set pruning with superseded `write_page` compaction, `128k` balanced mode, and `>=180k` cache-first hold), `max-tokens` thinking-truncation auto step-down and continuation, model-declared `supportedReasoningEfforts` filtering for both effort capping and step-down, and disk-summary cold-start seeding for review and model-switch turns.

@@ -320,7 +320,10 @@ describe("DSH 4-service thin shell", () => {
       assert.deepEqual(discussTools, [
         "ask_user_question",
         "inspect_capabilities",
+        "list_materials",
         "list_references",
+        "query_material",
+        "read_material",
         "read_page",
         "read_reference",
       ]);

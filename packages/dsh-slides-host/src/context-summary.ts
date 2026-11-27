@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { inspectRunLedger, listSourceReceipts, readCommittedPagePlan } from "@open-slidestudio/presentation-run";
-import { designContractCard } from "@open-slidestudio/slides-tools";
+import { designContractCard, readMaterialsManifest } from "@open-slidestudio/slides-tools";
 import { readConversation } from "./assistant-conversation.js";
 
 export type DiskSummaryReason = "comment-edit" | "model-switch" | "failover";
@@ -176,6 +176,12 @@ export function buildDiskContextSummary(projectRoot: string, options: DiskContex
   const sections: string[] = [reasonHeading(options.reason)];
   const brief = readOriginalBrief(projectRoot);
   if (brief) sections.push(`原始需求：${brief}`);
+  const materialNames = readMaterialsManifest(projectRoot)
+    .materials.map((entry) => entry?.name)
+    .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+  if (materialNames.length) {
+    sections.push(`已上传资料：${clip(materialNames.join("、"), 300)}（可用 list_materials / read_material 查阅）`);
+  }
   const design = formatDesignSummary(projectRoot);
   if (design) sections.push(`设计契约：${design}`);
   const status = formatDeckStatus(projectRoot);
