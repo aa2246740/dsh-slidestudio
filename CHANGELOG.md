@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-11-27
+
+- Unified left AI panel status and recovery card: replaces legacy hidden generation fallback DOM/CSS with a warm/ink-themed `.generation-status-card` featuring live 429 retry countdown, model switch, stop wait, resume, collapsible technical details, mode-aware discuss/edit failure cards, and complete English i18n coverage.
+- Fault classification parity and live recovery: aligns provider fault classification (`2056` token-plan, `401/403` auth, `429` rate-limit, `5xx` unavailable, quota) across `@open-slidestudio/dsh-slides-host` and `@open-slidestudio/slides-runtime`, persists `turn-max-tokens` pause faults instead of leaving the panel stuck on thinking, and detects interrupted long turns whose start scrolled past the 128 KB trace tail window.
+- Left-panel state machine and responsiveness fixes: unlocks resume on 0-page empty decks, prevents ghost DOM leaks on row kind changes, eliminates duplicate `/slides/state` polling with out-of-order sequence guards, makes reasoning timers demand-driven, ensures Stop works immediately after Resume, isolates `/api/open` refresh failures from disconnect handling, surfaces visible reconnect status, and lazily resolves the session ID on early submit.
+
 ## 0.3.0 — 2026-11-27
 
 - DSH 0.2.2-rc.5 compatibility and 4-service thin shell: `dsh-slidestudio` and `@open-slidestudio/dsh-slides-host` inject only `webServer`, `connection`, `llm`, and `attachments`, removing host agent, tool-registry, preset, workspace, and session-journal dependencies.
