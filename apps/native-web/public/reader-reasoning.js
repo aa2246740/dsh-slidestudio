@@ -74,7 +74,8 @@ export function mountReasonCard({ host, readingHost }) {
   let targetOffset = 0;
   let pendingText = null;
   let resize = null;
-  let previousExpanded = false;
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let poll = null;
 
   const tail = () => Math.max(0, text.offsetHeight - viewport.clientHeight);
   const clamp = (value) => Math.max(0, Math.min(tail(), value));
@@ -127,7 +128,8 @@ export function mountReasonCard({ host, readingHost }) {
     if (tail() - painted < 1) return;
     timer = setTimeout(start, Math.max(0, nextAt - performance.now()));
   };
-  const canFollow = () => alive && root.open && running && following && !reduced.matches && !document.hidden && !hasSelection();
+  const canFollow = () =>
+    alive && root.open && running && following && !reduced.matches && !document.hidden && !hasSelection();
   const start = () => {
     timer = undefined;
     if (!canFollow()) return;
@@ -201,13 +203,15 @@ export function mountReasonCard({ host, readingHost }) {
     following = false;
     paintFooter();
     measure();
+    syncPoll();
     const to = viewport.clientHeight;
     if (!reduced.matches && Math.abs(to - from) > 1) {
       resize?.cancel();
-      resize = viewport.animate(
-        [{ height: `${from}px` }, { height: `${to}px` }],
-        { duration: 300, easing: EASING, fill: "both" },
-      );
+      resize = viewport.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+        duration: 300,
+        easing: EASING,
+        fill: "both",
+      });
       resize.onfinish = () => {
         resize?.cancel();
         resize = null;
@@ -222,8 +226,12 @@ export function mountReasonCard({ host, readingHost }) {
     if (!event.deltaY) return;
     const handoff = automatic && event.cancelable;
     if (handoff) event.preventDefault();
-    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight()
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight : 1;
+    const unit =
+      event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? lineHeight()
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? viewport.clientHeight
+          : 1;
     pause();
     if (handoff) {
       viewport.scrollTop = clamp(viewport.scrollTop + event.deltaY * unit);
@@ -239,11 +247,47 @@ export function mountReasonCard({ host, readingHost }) {
       schedule();
     }
   };
+  const shouldPoll = () => alive && root.open && (running || expanded) && !document.hidden;
+  const stopPoll = () => {
+    if (poll !== null) {
+      clearInterval(poll);
+      poll = null;
+    }
+  };
+  const syncPoll = () => {
+    if (shouldPoll()) {
+      if (poll === null) {
+        poll = setInterval(() => {
+          if (!shouldPoll()) {
+            stopPoll();
+            return;
+          }
+          measure();
+          if (expanded) fitReading();
+          schedule();
+        }, 500);
+      }
+    } else {
+      stopPoll();
+    }
+  };
   const onVisibility = () => {
     cancel();
     manual();
     nextAt = performance.now() + REASON_HOLD;
     if (!document.hidden) schedule();
+    syncPoll();
+  };
+  const onToggle = () => {
+    if (root.open) {
+      measure();
+      if (expanded) fitReading();
+      schedule();
+    } else {
+      cancel();
+      manual();
+    }
+    syncPoll();
   };
   const observer = new ResizeObserver(() => {
     if (automatic && targetOffset > tail() + 1) {
@@ -257,14 +301,7 @@ export function mountReasonCard({ host, readingHost }) {
   });
   observer.observe(text);
   observer.observe(viewport);
-  // Some embedded webviews drop ResizeObserver delivery for offscreen tabs;
-  // a light poll keeps overflow masks and follow stepping honest.
-  const poll = setInterval(() => {
-    if (document.hidden) return;
-    measure();
-    if (expanded) fitReading();
-    schedule();
-  }, 500);
+  root.addEventListener("toggle", onToggle);
   viewport.addEventListener("scroll", onScroll, { passive: true });
   viewport.addEventListener("wheel", onWheel, { passive: false });
   document.addEventListener("selectionchange", onSelection);
@@ -280,7 +317,7 @@ export function mountReasonCard({ host, readingHost }) {
     if (expanded) toggleExpanded();
   });
 
-  measure(false);
+  measure();
   paintFooter();
 
   return {
@@ -291,10 +328,14 @@ export function mountReasonCard({ host, readingHost }) {
       running = isRunning;
       root.dataset.streaming = String(running);
       label.textContent = running ? t("思考中") : t("思考");
-      if (!running) { cancel(); manual(); }
+      if (!running) {
+        cancel();
+        manual();
+      }
       const value = String(content || "");
       if (hasSelection()) {
         pendingText = value;
+        syncPoll();
         return;
       }
       pendingText = null;
@@ -305,16 +346,19 @@ export function mountReasonCard({ host, readingHost }) {
       // boundary, not from this block's own stream state.
       measure();
       schedule();
+      syncPoll();
     },
     setOpen(open) {
       if (root.dataset.userToggled === "true" || expanded) return;
       root.open = open;
+      syncPoll();
     },
     destroy() {
       alive = false;
       cancel();
-      clearInterval(poll);
+      syncPoll();
       observer.disconnect();
+      root.removeEventListener("toggle", onToggle);
       viewport.removeEventListener("scroll", onScroll);
       viewport.removeEventListener("wheel", onWheel);
       document.removeEventListener("selectionchange", onSelection);

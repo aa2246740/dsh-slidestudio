@@ -1106,8 +1106,9 @@ describe("project-owned review thread revisions", () => {
     assert.match(client, /async function refreshAiReviewCanvas/);
     assert.match(client, /body: JSON\.stringify\(\{ path: project, page: pageIndex \}\)/);
     assert.doesNotMatch(html, /id="agent-live-preview"/);
-    assert.match(html, /id="editor-generation-toggle"/);
-    assert.match(css, /\.editor-generation:not\(\.is-expanded\)/);
+    assert.doesNotMatch(html, /id="editor-generation-toggle"/);
+    assert.match(html, /id="editor-generation-events"/);
+    assert.match(css, /\.generation-status-card/);
   });
 
   it("opens an in-progress empty project as a clean editor placeholder", async () => {
@@ -1150,9 +1151,10 @@ describe("project-owned review thread revisions", () => {
     assert.match(client, /function generationInteractionLocked/);
     assert.match(client, /"awaiting-project"/);
     assert.match(client, /generationPlaceholder/);
-    assert.match(client, /完成后才开放 Agent 修改与编辑工具/);
-    assert.match(html, /id="editor-generation-now"/);
-    assert.match(html, /id="work-generation-lock"/);
+    assert.match(client, /generationTerminalCardModel/);
+    assert.doesNotMatch(html, /id="editor-generation-now"/);
+    assert.doesNotMatch(html, /id="work-generation-lock"/);
+    assert.match(html, /id="editor-generation-status"[^>]*class="sr-only"/);
     // The insert row is #insert-toolbar / .insert-toolbar now (renamed from the
     // retired .insert-pill), so the live-generation lock must hide that selector.
     assert.match(css, /\.app\.is-live-generation [^{]*\.insert-toolbar/);

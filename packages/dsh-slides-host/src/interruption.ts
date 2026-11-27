@@ -12,6 +12,7 @@ import {
 } from "@open-slidestudio/slides-tools";
 import { readRuntimeTurnLease, readTraceHighWater } from "@open-slidestudio/slides-runtime";
 import { AGENT_TRACE_REL, appendAgentTrace, type AgentTraceRow } from "./agent-trace.js";
+import { scanOpenTurns } from "./interruption-scan.js";
 import { readAgentError, readRateLimitWait, recordAgentError } from "./agent-fault.js";
 import { readAttempt } from "./session-transition.js";
 import type { SliceSessionStore } from "./slice-session.js";
@@ -374,69 +375,8 @@ export function createHubWriterLeaseController(
   };
 }
 
-/** Long generations append megabytes of deltas; the marker only needs the tail. */
-const TAIL_BYTES = 128 * 1024;
-
 export const HOST_INTERRUPTED_CODE = "host-interrupted";
 const INTERRUPTED_DETAIL = "Turn interrupted during restart or recovery";
-
-type OpenTurnScan = {
-  /** Step rows (kind "turn", name "step") whose last write is still running. */
-  readonly openSteps: AgentTraceRow[];
-  /** Turn rows (kind "turn", name "turn") whose last write is still running. */
-  readonly openTurns: AgentTraceRow[];
-  /** Terminal status of the most recently written closed turn, if any. */
-  readonly lastTurnTerminal?: AgentTraceRow["status"];
-};
-
-function asRow(value: unknown): AgentTraceRow | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = value as AgentTraceRow;
-  return typeof row.id === "string" && row.id ? row : undefined;
-}
-
-/** Fold the append-only trace tail: a later row replaces the status of its id. */
-function scanOpenTurns(projectRoot: string): OpenTurnScan {
-  const file = path.join(projectRoot, AGENT_TRACE_REL);
-  if (!fs.existsSync(file)) return { openSteps: [], openTurns: [] };
-  const size = fs.statSync(file).size;
-  const offset = Math.max(0, size - TAIL_BYTES);
-  const buffer = Buffer.alloc(Math.min(size, TAIL_BYTES));
-  const fd = fs.openSync(file, "r");
-  try {
-    fs.readSync(fd, buffer, 0, buffer.length, offset);
-  } finally {
-    fs.closeSync(fd);
-  }
-  // Drop the first partial line when the window starts mid-record.
-  const text = buffer.toString("utf8");
-  const lines = text.split("\n");
-  if (offset > 0) lines.shift();
-  const latest = new Map<string, AgentTraceRow>();
-  let lastTurnTerminal: AgentTraceRow["status"] | undefined;
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    let row: AgentTraceRow | undefined;
-    try {
-      row = asRow(JSON.parse(line));
-    } catch {
-      continue;
-    }
-    if (!row || row.kind !== "turn" || typeof row.name !== "string") continue;
-    if (row.status === "running") {
-      latest.set(row.id, row);
-    } else {
-      latest.delete(row.id);
-      if (row.name === "turn") lastTurnTerminal = row.status;
-    }
-  }
-  const open = [...latest.values()];
-  return {
-    openSteps: open.filter((row) => row.name === "step"),
-    openTurns: open.filter((row) => row.name === "turn"),
-    lastTurnTerminal,
-  };
-}
 
 /**
  * A turn the process never closed is dead work: the Host was killed (SIGKILL,

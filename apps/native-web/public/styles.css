@@ -30,6 +30,17 @@
 .font-warmup span {
   display: block;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 * {
   box-sizing: border-box;
@@ -94,22 +105,6 @@ body {
 .editor-generation[hidden] {
   display: none;
 }
-/* The stages/now/pages blocks are superseded by the event flow below, so those
-   stay hidden. 继续完成生成 lives in .generation-resume at the timeline end. */
-.editor-generation > header {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: center;
-}
-.editor-generation-stages,
-.editor-generation-now,
-.editor-generation-pages {
-  display: none !important;
-}
-.editor-generation > p {
-  display: none !important;
-}
 .editor-generation-events {
   margin: 0;
   flex: 1;
@@ -118,29 +113,13 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
-.editor-generation-events > summary {
-  display: none !important;
-}
-.editor-generation-events[open] {
-  position: relative;
-  display: flex;
-  flex-direction: column;
+.editor-generation-event-flow {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-}
-.editor-generation-event-flow {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   overflow: hidden;
   margin: 0;
-}
-.editor-generation-event-flow {
-  display: flex;
-  flex-direction: column;
 }
 #editor-generation-event-list {
   flex: 1 1 auto;
@@ -751,74 +730,6 @@ body {
 .generation-technical-details {
   display: none !important;
 }
-.generation-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(49, 88, 68, 0.12);
-  width: fit-content;
-}
-.generation-indicator-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--s-700);
-  flex: none;
-  position: relative;
-}
-.generation-indicator.is-running .generation-indicator-dot {
-  background: var(--a-600);
-}
-.generation-indicator.is-running .generation-indicator-dot::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1.5px solid rgb(var(--accent-rgb) / 0.45);
-  animation: indicator-pulse 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
-}
-@keyframes indicator-pulse {
-  0% {
-    transform: scale(0.8);
-    opacity: 0.95;
-  }
-  60% {
-    transform: scale(1.8);
-    opacity: 0.15;
-  }
-  100% {
-    transform: scale(2.3);
-    opacity: 0;
-  }
-}
-.generation-indicator-text {
-  font-size: 11px;
-  font-weight: 550;
-  color: var(--s-700);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.2px;
-}
-.generation-indicator.is-running .generation-indicator-text {
-  background: linear-gradient(90deg, var(--a-800) 0%, var(--a-500) 35%, var(--a-300) 55%, var(--a-800) 100%);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: indicator-shimmer 2.4s linear infinite;
-}
-@keyframes indicator-shimmer {
-  0% {
-    background-position: 200% center;
-  }
-  100% {
-    background-position: -200% center;
-  }
-}
 .streaming-cursor {
   display: inline-block;
   width: 2px;
@@ -836,33 +747,6 @@ body {
   50% {
     opacity: 0;
   }
-}
-.editor-generation:not(.is-expanded) {
-  box-shadow: none;
-}
-.editor-generation-now strong {
-  min-width: 0;
-  color: var(--n-800);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-/* 停止生成 lives on the composer square now (it stops both generation and review
-   turns), and the panel-collapse toggle did nothing visible after the process
-   flow became the panel body, so neither keeps a header button. 继续完成生成
-   stays: it is the only entry back into a paused generation. */
-#editor-generation-stop,
-#editor-generation-toggle {
-  display: none !important;
-}
-
-.generation-indicator {
-  display: none !important;
 }
 /* 回到最新 stays reachable: it is the only way back to live streaming after the
    user scrolls up (and app.js still drives it). */
@@ -904,25 +788,193 @@ body {
 .generation-process-truncated {
   display: none;
 }
-/* 继续完成生成 sits at the end of the timeline, next to the pause notice it
-   resolves — same primary-pill language as the question card's continue. */
+/* Unified conversation status & recovery card mounted at timeline end. */
+.generation-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 6px;
+  padding: 13px 15px 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+.generation-status-card.is-warning {
+  border-left-color: var(--w-500);
+}
+.generation-status-card.is-error {
+  border-left-color: var(--d-500);
+}
+.generation-status-card.is-wait {
+  border-left-color: var(--a-400);
+}
+.generation-status-card.is-info {
+  border-left-color: var(--line-strong);
+}
+.generation-status-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+.generation-status-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-sunken);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.generation-status-card.is-warning .generation-status-badge {
+  background: var(--w-50);
+  border-color: var(--w-100);
+  color: var(--w-700);
+}
+.generation-status-card.is-error .generation-status-badge {
+  background: var(--d-50);
+  border-color: var(--d-200);
+  color: var(--d-700);
+}
+.generation-status-card.is-wait .generation-status-badge {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-text);
+}
+.generation-status-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.generation-status-countdown {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.generation-status-card .generation-turn-end-detail {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.generation-status-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.generation-status-technical {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line-soft);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.generation-status-technical > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.generation-status-technical > summary::-webkit-details-marker {
+  display: none;
+}
+.generation-status-technical > summary::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.generation-status-technical[open] > summary::before {
+  transform: rotate(90deg);
+}
+.generation-status-technical > summary:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+.generation-status-technical > pre {
+  margin: 7px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .generation-resume {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   flex: 0 0 auto;
-  padding: 10px 0 0;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
 }
 .generation-resume[hidden] {
   display: none;
 }
-.generation-resume-hint {
-  flex: 1;
-  min-width: 0;
-  color: var(--muted);
+.generation-status-secondary {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  padding: 6px 13px;
+  background: var(--bg-app);
+  color: var(--text-2);
+  font: inherit;
   font-size: 12px;
-  line-height: 1.5;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.generation-status-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.generation-status-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.generation-status-secondary:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
 }
 #editor-generation-resume {
   flex: none;
@@ -933,7 +985,9 @@ body {
   color: var(--primary-text);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 #editor-generation-resume:hover:not(:disabled) {
   background: var(--primary-bg-hover);
@@ -943,7 +997,7 @@ body {
   cursor: default;
 }
 #editor-generation-resume:focus-visible {
-  outline: 2px solid var(--a-400);
+  outline: 2px solid var(--focus-outline);
   outline-offset: 2px;
 }
 @keyframes generation-pulse {
@@ -955,19 +1009,12 @@ body {
   .generation-process-entry.is-running .generation-process-head > i {
     animation: none;
   }
+  .generation-status-technical > summary::before {
+    transition: none;
+  }
   #editor-generation-event-list {
     scroll-behavior: auto;
   }
-}
-.work-generation-lock {
-  margin: 8px 18px 6px;
-  padding: 9px 10px;
-  border: 1px solid var(--n-150);
-  border-radius: 9px;
-  background: var(--n-50);
-  color: var(--n-700);
-  font-size: 11px;
-  line-height: 1.45;
 }
 .work-thread {
   flex: 1;
@@ -4093,14 +4140,6 @@ body.is-presenting #ctx-menu {
     --editor-rail-width: 136px;
     --editor-stage-padding-inline: 16px;
   }
-  .work-chat {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 50;
-    width: min(360px, 100vw);
-    min-width: 0;
-    box-shadow: var(--shadow-float);
-  }
   .title-actions {
     flex: none;
     gap: 4px;
@@ -4114,9 +4153,6 @@ body.is-presenting #ctx-menu {
   :root {
     --editor-rail-width: 88px;
     --editor-stage-padding-inline: 8px;
-  }
-  .work-chat {
-    width: 100%;
   }
   .titlebar {
     padding-inline: 6px;
@@ -5328,9 +5364,6 @@ body.is-presenting #ctx-menu {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-#editor-generation:not([hidden]) ~ #work-thread {
-  display: none !important;
-}
 #editor-generation:not([hidden]) ~ #work-thread > .bubble {
   display: none;
 }
@@ -5350,32 +5383,6 @@ body.is-presenting #ctx-menu {
 }
 #work-thread .refine-card {
   flex-wrap: wrap;
-}
-.editor-generation > header {
-  gap: 6px;
-  font-size: 12px;
-  padding-bottom: 8px;
-  color: var(--muted);
-}
-.editor-generation > header > div {
-  min-width: 0;
-  flex: 1;
-}
-.editor-generation > header small {
-  display: none;
-}
-#editor-generation-title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
-}
-#editor-generation-status {
-  max-width: 58%;
-  font-size: 11px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
 }
 .chat-head {
   flex-shrink: 0;
@@ -5918,40 +5925,58 @@ body.is-presenting #ctx-menu {
 }
 
 /* One conversation, with recovery next to the reply it belongs to. */
-.editor-generation > header,
-.editor-generation > header > div,
-#editor-generation-status {
-  display: none;
-}
 .assistant-reply-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: baseline;
   margin-top: 10px;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
+}
+.assistant-reply-actions.is-error {
+  align-items: center;
+  padding: 9px 12px;
+  border: 1px solid var(--d-200);
+  border-left: 3px solid var(--d-500);
+  border-radius: var(--radius-md);
+  background: var(--d-50);
+  color: var(--d-700);
 }
 .assistant-reply-actions > span {
   flex-basis: 100%;
   overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .assistant-reply-actions button {
   font: inherit;
-  color: var(--muted);
+  color: var(--text-muted);
   background: transparent;
   border: 0;
   padding: 5px 0;
   cursor: pointer;
 }
 .assistant-reply-actions button:hover {
-  color: var(--ink);
+  color: var(--text);
   text-decoration: underline;
 }
+.assistant-reply-actions.is-error button {
+  padding: 4px 12px;
+  border: 1px solid var(--d-200);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--d-700);
+  font-weight: 500;
+}
+.assistant-reply-actions.is-error button:hover {
+  background: var(--d-100);
+  color: var(--d-800);
+  text-decoration: none;
+}
 .assistant-reply-actions button:focus-visible {
-  outline: 2px solid var(--selected);
-  outline-offset: 3px;
-  border-radius: 3px;
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 .generation-turn-end-detail {
   margin: 8px 0 12px;
@@ -6039,7 +6064,7 @@ body.is-presenting #ctx-menu {
   font-size: 13px;
   line-height: 1.5;
   color: inherit;
-  background: white;
+  background: var(--surface);
 }
 .assistant-question-card :focus-visible {
   outline: 2px solid var(--a-400);

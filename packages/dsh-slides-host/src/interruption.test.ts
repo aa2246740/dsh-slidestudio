@@ -133,6 +133,54 @@ describe("markInterruptedTurn", () => {
     assert.equal(readTrace(root).length, 2);
   });
 
+  it("closes an interrupted long turn whose initial running row scrolled past the 128 KB tail window", () => {
+    const root = tempRoot();
+    const padding = "x".repeat(40_000);
+    appendAgentTrace(root, [
+      turnRow({ turn: 1 }),
+      {
+        id: "r1",
+        at: "2026-10-05T17:25:01.000Z",
+        turn: 1,
+        step: 1,
+        kind: "result",
+        status: "complete",
+        detail: padding,
+      },
+      {
+        id: "r2",
+        at: "2026-10-05T17:25:02.000Z",
+        turn: 1,
+        step: 2,
+        kind: "result",
+        status: "complete",
+        detail: padding,
+      },
+      {
+        id: "r3",
+        at: "2026-10-05T17:25:03.000Z",
+        turn: 1,
+        step: 3,
+        kind: "result",
+        status: "complete",
+        detail: padding,
+      },
+      {
+        id: "r4",
+        at: "2026-10-05T17:25:04.000Z",
+        turn: 1,
+        step: 4,
+        kind: "result",
+        status: "complete",
+        detail: padding,
+      },
+    ]);
+    assert.equal(markInterruptedTurn(root, new Date("2026-10-06T04:00:00.000Z")), true);
+    const closedTurn = readTrace(root).find((row) => row.id === "turn:1" && row.status === "cancelled");
+    assert.ok(closedTurn, "long turn must be synthesized and closed");
+    assert.equal(readAgentError(root)?.code, HOST_INTERRUPTED_CODE);
+  });
+
   it("marks an open turn even when an earlier turn completed", () => {
     const root = tempRoot();
     appendAgentTrace(root, [

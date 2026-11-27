@@ -6,10 +6,10 @@
     <title data-i18n="DSH SlideStudio · 编辑器">DSH SlideStudio · 编辑器</title>
     <link rel="stylesheet" href="./fonts.css" />
     <script src="./theme-boot.js"></script>
-    <link rel="stylesheet" href="./tokens.css?v=20260923-warm" />
-    <link rel="stylesheet" href="./styles.css?v=20260923-warm" />
+    <link rel="stylesheet" href="./tokens.css?v=20261127-panel" />
+    <link rel="stylesheet" href="./styles.css?v=20261127-panel" />
     <link rel="stylesheet" href="./material-notices.css?v=20261025" />
-    <link rel="stylesheet" href="./tooltips.css?v=20260923-warm" />
+    <link rel="stylesheet" href="./tooltips.css?v=20261127-panel" />
     <script src="./snap-guides.js"></script>
     <script src="./border-width.js"></script>
     <script src="./shape-paint.js"></script>
@@ -35,38 +35,12 @@
         </button>
       </header>
       <section class="editor-generation" id="editor-generation" aria-live="polite" hidden>
-        <header>
-          <div><small data-i18n="AI 助手">AI 助手</small><strong id="editor-generation-title" data-i18n="AI 正在生成">AI 正在生成</strong></div>
-          <span id="editor-generation-status" data-i18n="准备中">准备中</span>
-          <button type="button" id="editor-generation-stop" data-control="chrome.workspace.stop" hidden data-i18n="停止修改">停止修改</button>
-          <button type="button" id="editor-generation-toggle" aria-expanded="false" data-i18n="查看过程">查看过程</button>
-        </header>
-        <div class="editor-generation-stages" id="editor-generation-stages">
-          <span data-stage="plan" data-i18n="策划">策划</span>
-          <span data-stage="write" data-i18n="写页">写页</span>
-          <span data-stage="review" data-i18n="审阅">审阅</span>
-          <span data-stage="compose" data-i18n="封板">封板</span>
-        </div>
-        <div class="editor-generation-now" id="editor-generation-now">
-          <div><span data-i18n="任务">任务</span><strong id="editor-generation-intent" data-i18n="正在读取生成任务">正在读取生成任务</strong></div>
-          <div><span data-i18n="当前行动">当前行动</span><strong id="editor-generation-action" data-i18n="正在连接生成会话">正在连接生成会话</strong></div>
-          <div><span data-i18n="已产出">已产出</span><strong id="editor-generation-output" data-i18n="尚未写入页面">尚未写入页面</strong></div>
-        </div>
-        <div class="editor-generation-pages" id="editor-generation-pages" data-i18n-aria-label="页面生成状态" aria-label="页面生成状态"></div>
-        <div class="generation-indicator" id="editor-generation-indicator">
-          <i class="generation-indicator-dot" aria-hidden="true"></i>
-          <span class="generation-indicator-text" id="editor-generation-detail" data-i18n="准备中…">准备中…</span>
-        </div>
-        <details id="editor-generation-events" class="editor-generation-events">
-          <summary><span id="editor-generation-event-label" data-i18n="生成过程">生成过程</span> <span id="editor-generation-event-count"></span></summary>
+        <span id="editor-generation-status" class="sr-only" role="status" aria-live="polite" data-i18n="准备中">准备中</span>
+        <div id="editor-generation-events" class="editor-generation-events">
           <div class="editor-generation-event-flow">
             <ol id="editor-generation-event-list" data-i18n-aria-label="与 AI 的对话" aria-label="与 AI 的对话"><li id="generation-think-status" class="generation-think-status" role="status" hidden></li></ol>
             <button type="button" id="editor-generation-latest" hidden data-i18n="↓ 回到最新">↓ 回到最新</button>
           </div>
-        </details>
-        <div class="generation-resume" id="generation-resume-row" hidden>
-          <span class="generation-resume-hint" data-i18n="留空按当前计划继续；要纠偏或换模型，先在下方修改。">留空按当前计划继续；要纠偏或换模型，先在下方修改。</span>
-          <button type="button" id="editor-generation-resume" data-control="chrome.generation.resume" data-i18n="继续完成生成">继续完成生成</button>
         </div>
       </section>
       <div class="work-thread" id="work-thread">
@@ -80,7 +54,6 @@
           </div>
         </section>
       </div>
-      <p class="work-generation-lock" id="work-generation-lock" role="status" aria-live="polite" hidden></p>
       <form class="chat-composer" id="work-form">
         <p id="assistant-feedback" role="status" hidden></p>
         <p class="work-target" id="work-target" aria-live="polite" data-i18n="目标：当前页">目标：当前页</p>

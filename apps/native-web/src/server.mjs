@@ -1877,7 +1877,9 @@ async function readGenerationActivity(native, root) {
     "provider-unavailable",
     "operator-stop",
     "host-interrupted",
+    "turn-max-tokens",
     "tool-invalid-args-loop",
+    "repeated-invalid-args",
     "repeated-business-rejection",
     "planning-no-progress-budget",
     "production-no-progress-budget",
@@ -1890,6 +1892,25 @@ async function readGenerationActivity(native, root) {
   const error = phase === "paused" || phase === "failed"
     ? { code: faultCode, detail: faultDetail }
     : undefined;
+  const rateLimitWaitFields = () => {
+    if (phase !== "paused" || faultCode !== "provider-rate-limit") return {};
+    const wait = /** @type {Record<string, unknown>} */ (
+      readProjectRecord(path.join(agentDir, "dsh-rate-limit-wait.json"))
+    );
+    const { attempt, waitMs, nextRetryAt, code } = wait;
+    if (
+      typeof attempt === "number" &&
+      Number.isFinite(attempt) &&
+      typeof waitMs === "number" &&
+      Number.isFinite(waitMs) &&
+      typeof nextRetryAt === "number" &&
+      Number.isFinite(nextRetryAt) &&
+      typeof code === "string"
+    ) {
+      return { rateLimitWait: { attempt, waitMs, nextRetryAt, code } };
+    }
+    return {};
+  };
   const activeStageIndex = activity.stages.findIndex((stage) => stage.status === "active");
   const attentionIndex = error
     ? activeStageIndex >= 0 ? activeStageIndex : activity.stages.length - 1
@@ -1919,6 +1940,7 @@ async function readGenerationActivity(native, root) {
     inspection,
     execution: snapshot.execution,
     error,
+    ...rateLimitWaitFields(),
     ...deliveryActivityFields({ projectRoot: root, activityPhase: activity.phase, fault: persistedFault, inspection }),
   };
 }

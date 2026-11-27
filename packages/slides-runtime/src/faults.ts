@@ -91,26 +91,30 @@ function errorRecord(error: unknown): ErrorRecord {
   return { code: "", detail: String(error) };
 }
 
+const NON_RATE_LIMIT_PROVIDER_ERROR =
+  /\b(?:400|401|403|404|422|500|502|503|504)\b|invalid api key|unauthorized|forbidden|bad request|invalid_request|invalid_argument|context[_\s-]?length|maximum context|not found|not supported|unavailable/i;
+
 const isAuth = (rec: ErrorRecord): boolean =>
   ["AUTH", "401", "403"].includes(rec.code) ||
-  /unauthorized|forbidden|invalid api key|鉴权|401\b|403\b/i.test(rec.detail);
+  /unauthorized|forbidden|invalid api key|鉴权|\b401\b|\b403\b/i.test(rec.detail);
 const isRateLimit = (rec: ErrorRecord): boolean =>
-  rec.code === "RATE_LIMIT" || rec.code === "429" || /(?:\b429\b|rate[\s_-]?limit)/i.test(rec.detail);
+  rec.code === "RATE_LIMIT" || rec.code === "429" || /(?:\b429\b|rate[\s_-]?limit|too many requests)/i.test(rec.detail);
 const isQuota = (rec: ErrorRecord): boolean => rec.code === "QUOTA" || /quota|RESOURCE_EXHAUSTED/i.test(rec.detail);
 const isUnavailable = (rec: ErrorRecord): boolean =>
-  rec.code === "SERVER" || /UNAVAILABLE|"code":\s*503/.test(rec.detail);
+  ["SERVER", "UNAVAILABLE", "500", "502", "503", "504"].includes(rec.code) ||
+  /\b(?:500|502|503|504)\b|unavailable/i.test(rec.detail);
 const isGenericProviderError = (rec: ErrorRecord): boolean =>
   rec.code === "PI_AI_ERROR" &&
   /Provider returned error/i.test(rec.detail) &&
-  !/401|403|invalid api key/i.test(rec.detail);
+  !NON_RATE_LIMIT_PROVIDER_ERROR.test(rec.detail);
 
 function providerCode(rec: ErrorRecord): string | undefined {
   if (isTokenPlanExhausted(rec.detail) || rec.code === "2056") return "provider-token-plan";
-  if (isGenericProviderError(rec)) return "provider-rate-limit";
-  if (isQuota(rec)) return "provider-quota";
   if (isAuth(rec)) return "provider-auth";
   if (isRateLimit(rec)) return "provider-rate-limit";
+  if (isQuota(rec)) return "provider-quota";
   if (isUnavailable(rec)) return "provider-unavailable";
+  if (isGenericProviderError(rec)) return "provider-rate-limit";
   return undefined;
 }
 

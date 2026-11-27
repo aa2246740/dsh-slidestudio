@@ -14,22 +14,29 @@ export function parseProviderRoster(data) {
     if (!row || typeof row !== "object" || Array.isArray(row)) continue;
     const id = text(row.id);
     const models = Array.isArray(row.models)
-      ? [...new Set(row.models.map((model) => (typeof model === "string" ? model.trim() : text(model?.id))).filter(Boolean))]
+      ? [
+          ...new Set(
+            row.models.map((model) => (typeof model === "string" ? model.trim() : text(model?.id))).filter(Boolean),
+          ),
+        ]
       : [];
     if (!id || ids.has(id) || !models.length) continue;
     ids.add(id);
-    providers.push(Object.freeze({
-      id,
-      name: text(row.name) || id,
-      ready: row.ready === true,
-      models: Object.freeze(models),
-    }));
+    providers.push(
+      Object.freeze({
+        id,
+        name: text(row.name) || id,
+        ready: row.ready === true,
+        models: Object.freeze(models),
+      }),
+    );
   }
   if (!providers.length) throw new Error(t("没有可用的生成模型"));
   return Object.freeze({
-    connection: data.connection && typeof data.connection === "object" && !Array.isArray(data.connection)
-      ? Object.freeze({ ...data.connection })
-      : Object.freeze({}),
+    connection:
+      data.connection && typeof data.connection === "object" && !Array.isArray(data.connection)
+        ? Object.freeze({ ...data.connection })
+        : Object.freeze({}),
     providers: Object.freeze(providers),
   });
 }
@@ -58,7 +65,11 @@ export function currentModelFromState(state = {}) {
 
 /** Build the exact /turn payload. Does not send editorEdit or page-edit scopes. */
 export function buildGenerationTurnRequest({
-  instruction, resumeGeneration, modelSelection, expectedAttemptId, currentModel,
+  instruction,
+  resumeGeneration,
+  modelSelection,
+  expectedAttemptId,
+  currentModel,
 } = {}) {
   const textValue = text(instruction);
   if (!textValue) throw new Error(t("请填写继续或纠偏说明"));
@@ -68,13 +79,15 @@ export function buildGenerationTurnRequest({
     const provider = text(modelSelection.provider);
     const model = text(modelSelection.model);
     if (!provider || !model) throw new Error(t("请选择供应商和模型"));
-    const unchanged = currentModel
-      && currentModel.provider === provider
-      && currentModel.model === model
-      && !text(modelSelection.reasoningEffort);
+    const unchanged =
+      currentModel &&
+      currentModel.provider === provider &&
+      currentModel.model === model &&
+      !text(modelSelection.reasoningEffort);
     if (!unchanged) {
       body.modelSelection = Object.freeze({
-        provider, model,
+        provider,
+        model,
         ...(text(modelSelection.reasoningEffort) ? { reasoningEffort: text(modelSelection.reasoningEffort) } : {}),
       });
     }
@@ -84,13 +97,28 @@ export function buildGenerationTurnRequest({
   return Object.freeze(body);
 }
 
-export function generationComposerMode({ agentStatus, execution, recoveryKind } = {}) {
+/**
+ * @param {{
+ *   agentStatus?: string,
+ *   execution?: Record<string, any>,
+ *   recoveryKind?: string,
+ *   hasError?: boolean,
+ *   phase?: string | { kind?: string }
+ * }} [options]
+ */
+export function generationComposerMode({ agentStatus, execution, recoveryKind, hasError = false, phase = "" } = {}) {
   const recovery = text(recoveryKind || execution?.recovery?.kind);
   if (agentStatus === "busy" || recovery === "wait-or-stop") return "wait-or-stop";
   if (recovery === "resolve") return "resolve";
   // "continue" also covers a composed deck that only wants a fresh export.
   // That export belongs to the editor's own 导出 button, not to another Agent turn.
-  if (text(execution?.status?.kind) === "ready-to-export" && execution?.fault == null) return "hidden";
+  const effectivePhase = text(typeof phase === "object" ? phase?.kind : phase);
+  const awaitingUserExport =
+    text(execution?.status?.kind) === "ready-to-export" &&
+    execution?.fault == null &&
+    !hasError &&
+    !["paused", "failed"].includes(effectivePhase);
+  if (awaitingUserExport) return "hidden";
   if (recovery === "continue") return "continue";
   return "hidden";
 }

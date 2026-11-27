@@ -6,14 +6,25 @@ export function createGenerationLiveBuffer(sessionId) {
   let cursor = -1;
   const rows = new Map();
   function eventOf(row) {
-    const kind = row.kind === "think" ? "message" : row.kind;
-    return { ...row, kind, type: `agent.${kind}`, label: row.label || (kind === "reasoning" ? t("思考") : kind === "message" ? t("回复") : row.name || "") };
+    const kind = row.kind === "think" ? "thought" : row.kind;
+    return {
+      ...row,
+      kind,
+      type: `agent.${kind}`,
+      label:
+        row.label ||
+        (kind === "reasoning" || kind === "thought" ? t("思考") : kind === "message" ? t("回复") : row.name || ""),
+    };
   }
   return {
     accept(envelope) {
       if (envelope?.version !== 1 || envelope.sessionId !== sessionId || !Array.isArray(envelope.rows)) return false;
       if (typeof envelope.epoch !== "string" || !Number.isSafeInteger(envelope.cursor)) return false;
-      if (epoch !== envelope.epoch) { rows.clear(); epoch = envelope.epoch; cursor = -1; }
+      if (epoch !== envelope.epoch) {
+        rows.clear();
+        epoch = envelope.epoch;
+        cursor = -1;
+      }
       if (envelope.cursor < cursor || (envelope.cursor === cursor && !envelope.snapshot)) return false;
       cursor = envelope.cursor;
       let changed = false;
@@ -23,7 +34,8 @@ export function createGenerationLiveBuffer(sessionId) {
         const prior = rows.get(row.id);
         if (row.detailMode === "append") next.detail = `${prior?.detail || ""}${row.detail || ""}`;
         // Current protocol emits replace snapshots; replaying a cursor never duplicates text.
-        if (!prior || prior.detail !== next.detail || prior.status !== next.status || prior.kind !== next.kind) changed = true;
+        if (!prior || prior.detail !== next.detail || prior.status !== next.status || prior.kind !== next.kind)
+          changed = true;
         rows.delete(row.id);
         rows.set(row.id, next);
       }
@@ -43,11 +55,17 @@ export function createGenerationLiveBuffer(sessionId) {
           rows.set(id, persisted);
           continue;
         }
-        if (index === undefined) { positions.set(id, events.length); events.push(live); }
-        else events[index] = { ...persisted, ...live, at: persisted.at || live.at };
+        if (index === undefined) {
+          positions.set(id, events.length);
+          events.push(live);
+        } else events[index] = { ...persisted, ...live, at: persisted.at || live.at };
       }
       return { ...activity, sessionId: activity.sessionId || sessionId, events };
     },
-    clear() { rows.clear(); epoch = ""; cursor = -1; },
+    clear() {
+      rows.clear();
+      epoch = "";
+      cursor = -1;
+    },
   };
 }

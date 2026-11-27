@@ -126,3 +126,32 @@ test("host and runtime fault classification, Retry-After and backoff agree", () 
     assert.equal(runtimeWait(row.attempt, row.retryAfterMs), rateLimitWaitMs(row.attempt, row.retryAfterMs));
   }
 });
+
+test("host and runtime agree on auth/rate-limit-over-quota and PI_AI_ERROR exclusions", () => {
+  const cases: [unknown, string][] = [
+    [{ message: "429 Too Many Requests: rate limit quota exceeded" }, "provider-rate-limit"],
+    [{ code: "429", message: "RESOURCE_EXHAUSTED: quota exceeded" }, "provider-rate-limit"],
+    [{ message: "Too Many Requests: quota exceeded" }, "provider-rate-limit"],
+    [{ code: "403", message: "Forbidden: quota check failed" }, "provider-auth"],
+    [{ message: "鉴权失败: invalid api key quota" }, "provider-auth"],
+    [{ message: "You exceeded your current quota, RESOURCE_EXHAUSTED" }, "provider-quota"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error" }, "provider-rate-limit"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 500 Internal Server Error" }, "provider-unavailable"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 502 Bad Gateway" }, "provider-unavailable"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error 503" }, "provider-unavailable"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 504 Gateway Timeout" }, "provider-unavailable"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: Service UNAVAILABLE" }, "provider-unavailable"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 400 Bad Request" }, "PI_AI_ERROR"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 404 model not found" }, "PI_AI_ERROR"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 422 invalid_request" }, "PI_AI_ERROR"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: maximum context length exceeded" }, "PI_AI_ERROR"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: invalid_argument tool not supported" }, "PI_AI_ERROR"],
+    [{ code: "PI_AI_ERROR", message: "Provider returned error: 2056 Token Plan 用量上限" }, "provider-token-plan"],
+  ];
+  for (const [input, expectedCode] of cases) {
+    const host = classifyAgentError(input);
+    const runtime = classifyFault(input);
+    assert.equal(host.code, expectedCode, JSON.stringify(input));
+    assert.deepEqual(runtime, host, JSON.stringify(input));
+  }
+});

@@ -402,7 +402,6 @@ const EN = {
   "继续完成生成": "Resume generation",
   "留空按当前计划继续；要纠偏或换模型，先在下方修改。": "Leave empty to continue the plan — write steering notes or switch models below first.",
   "纠偏说明（可选），随「继续完成生成」一起发送": "Steering notes (optional), sent with Resume generation",
-  "查看过程": "View process",
   "写页": "Write",
   "审阅": "Review",
   "封板": "Finalize",
@@ -928,7 +927,6 @@ const EN = {
   "第 {p0} 页已写入": "Page {p0} written",
   "第 {p0} 页待生成": "Page {p0} pending",
   "收起生成过程": "Collapse generation log",
-  "生成尚未结束。右侧只展示已通过检查的页面；完成后才开放 Agent 修改与编辑工具。": "Generation isn't finished — the right side shows only checked pages; Agent edits and tools unlock when it completes.",
 
   // ---- editor: generation composer & send flow ----
   "回答问题": "Answer",
@@ -1000,8 +998,6 @@ const EN = {
   "停止后仍未确认空闲，未发送继续请求": "Idle wasn't confirmed after stopping — resume request not sent",
   "已停止并确认空闲，可以继续或换模型。": "Stopped and confirmed idle — resume or switch models.",
   "正在停止 Agent 修改；确认停止后会恢复修改前版本。": "Stopping the Agent edit — the pre-edit version restores once the stop is confirmed.",
-  "收起完整行动记录": "Collapse full activity log",
-  "查看完整行动记录": "View full activity log",
   "{p0} 分钟前": "{p0}m ago",
   "{p0} 小时前": "{p0}h ago",
   "{p0} 天前": "{p0}d ago",
@@ -1279,6 +1275,10 @@ const EN = {
   "已嵌入字体：{p0}": "Embedded fonts: {p0}",
   "Office / WPS 自带，无需嵌入：{p0}": "Bundled with Office / WPS, no embedding needed: {p0}",
   "未能嵌入：{p0}": "Could not embed: {p0}",
+  "模型服务连接超时或网络不可达，请稍后重试或切换模型。": "Model service timed out or network is unreachable — retry shortly or switch models.", "上下文内容超出当前模型长度限制，请切换更大上下文的模型或精简指令后继续。": "Context exceeds this model's limit — switch to a larger-context model or shorten your instructions.", "模型服务暂时不可用，请稍后重试或切换模型。": "Model service is temporarily unavailable — retry shortly or switch models.", "当前模型拒绝了本次请求，请检查模型配置或切换其他模型后重试。": "This model rejected the request — check the model configuration or switch models and retry.", "自动重试中": "Auto-retrying", "需要处理": "Action needed", "模型暂时限流": "Model temporarily rate-limited", "模型登录或密钥失效": "Model sign-in or API key expired",
+  "模型额度已用尽": "Model quota exhausted", "已停止，保留 {n} 页": "Stopped — {n} pages kept", "已停止生成": "Generation stopped", "已停止回复": "Reply stopped", "已停止修改": "Edit stopped", "仍缺 {n} 个参考资料分段未读取": "{n} reference sections still unread", "模型暂时限流，等待自动重试": "Rate-limited — waiting to auto-retry", "可以直接在编辑器里修改并导出已有页面，也可以继续完成生成，或在下方补充要求、切换模型后继续。": "You can edit and export existing pages right now, resume generation, or add notes / switch models below.", "你可以直接编辑已有页面，或在下方输入新指令继续协作。": "You can edit existing pages directly, or enter a new instruction below to keep collaborating.",
+  "可以重新发送消息，或在下方切换模型后再试。": "Resend your message, or switch models below and try again.", "文稿未受影响；可以重新发送修改要求，或在下方切换模型后再试。": "Your deck is unchanged; resend the edit request, or switch models below and try again.", "你已手动停止本轮任务。": "You stopped this turn manually.", "后台服务意外中断，任务已自动暂停。": "Background service interrupted unexpectedly; the task was paused.", "模型连续返回无效的工具参数，任务已自动暂停。": "The model returned invalid tool arguments repeatedly; the task was paused.", "连续多次写入未通过校验，任务已自动暂停。": "Repeated writes failed validation; the task was paused.", "规划阶段长时间未推进，任务已自动暂停。": "Planning made no progress for too long; the task was paused.", "制作阶段长时间未产生新页面修订，任务已自动暂停。": "Production made no new page revisions for too long; the task was paused.",
+  "请求触发了上游频率限制，系统正在按退避间隔等待自动续跑。": "The request hit an upstream rate limit; waiting on backoff before auto-resuming.", "倒计时结束后会自动继续，也可以先在下方切换模型立即继续，或点击停止等待。": "It will resume automatically after the countdown, or you can switch models below to continue now, or stop waiting.", "当前供应商拒绝了身份认证，需要重新认证或更换模型后才能继续。": "The provider rejected authentication; re-authenticate or switch models to continue.", "可在下方切换到其他可用模型，或在设置中更新密钥或重新登录。": "Switch to another available model below, or update your API key / sign in again in Settings.", "当前模型的套餐额度已用尽，自动重试无法恢复。": "This model's plan quota is exhausted; auto-retry cannot recover it.", "当前模型账户额度已用尽，自动重试无法恢复。": "This model's account quota is exhausted; auto-retry cannot recover it.", "请在下方切换到其他已连接的模型，或充值补充额度后再继续。": "Switch to another connected model below, or top up quota before continuing.",
 };
 
 let active = resolveLang();

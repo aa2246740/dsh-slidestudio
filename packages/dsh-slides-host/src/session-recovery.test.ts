@@ -414,4 +414,17 @@ describe("session recovery on SlidesAgentRuntime turn outcomes", () => {
       assert.deepEqual(continued, [`s1:${RATE_LIMIT_RESUME_TEXT}`]);
     }
   });
+
+  it("persists a turn-max-tokens pause fault when a turn finishes with status max-tokens and no thrown fault", () => {
+    const { store, root, recovery } = harness("minimax-cn");
+    recovery.onTurnEnd("s1", {
+      turn: 1,
+      status: "max-tokens",
+      toolNames: [],
+    });
+    const recorded = readAgentError(root);
+    assert.equal(recorded?.code, "turn-max-tokens");
+    assert.match(recorded?.detail ?? "", /output limit/i);
+    assert.equal(store.inspect("s1").phase.kind, "paused");
+  });
 });

@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { unfinishedGenerationReason } from "./generation-reason.js";
+import { buildTerminalCardModel, humanizeGenerationFault, unfinishedGenerationReason } from "./generation-reason.js";
 import {
   TOOL_TITLES,
   TOOL_VERBS,
@@ -9,11 +9,12 @@ import {
   toolTarget,
 } from "./generation-process-details.js";
 
-export { unfinishedGenerationReason } from "./generation-reason.js";
+export { humanizeGenerationFault, unfinishedGenerationReason } from "./generation-reason.js";
 export { PROCESS_STATUS_LABEL, processStatusLabel } from "./generation-process-details.js";
 
 const TERMINAL_FAILURE = new Set(["failed", "needs-attention"]);
 const TERMINAL_CANCEL = new Set(["cancelled", "canceled"]);
+const ASSISTANT_EVENT_KINDS = new Set(["think", "thought", "reasoning", "message"]);
 
 /**
  * Rows intentionally accumulate optional fields while a tool call moves from
@@ -77,34 +78,6 @@ export function generationEventsForTask(events, baselineTurn) {
   const start = source.findIndex((event) => event?.turn === firstTurn);
   if (start < 0) return [];
   return source.slice(start).filter((event) => !Number.isFinite(event?.turn) || event.turn > floor);
-}
-
-export function humanizeGenerationFault(activity = {}) {
-  const code = text(activity?.error?.code);
-  const raw = text(activity?.error?.detail || activity?.phaseDetail);
-  if (/free tier can only be used from within OpenCode/i.test(raw))
-    return t("当前模型的免费通道只能在其官方客户端内使用。请在输入框下方切换到其他已连接的模型，当前对话会保留。");
-  if (/Requested model .* not supported/i.test(raw))
-    return t("当前供应商已不支持这个模型。请在输入框下方换一个模型，再发送继续要求。");
-  if (code === "provider-token-plan" || /2056|Token Plan 用量上限|请升级 Token Plan/i.test(raw)) {
-    return t("当前模型的套餐额度已用尽。请换模型或充值后再点继续；自动重试无法恢复额度。");
-  }
-  if (code === "provider-quota" || /quota|RESOURCE_EXHAUSTED/i.test(raw)) {
-    return t("模型额度已用尽。请换模型或充值后再继续。");
-  }
-  if (code === "provider-rate-limit") return t("模型暂时限流，稍后再继续即可。");
-  if (code === "provider-unavailable") return t("模型服务暂时不可用。");
-  if (code === "provider-auth") return t("模型登录失效，请重新登录或更换密钥。");
-  const stripped = raw.replace(/^provider-[a-z-]+:\s*/i, "").trim();
-  const jsonish = stripped.replace(/^429\s*/, "");
-  try {
-    const parsed = JSON.parse(jsonish);
-    const message = parsed?.error?.message || parsed?.message;
-    if (typeof message === "string" && message.trim()) return message.trim();
-  } catch {
-    /* keep stripped */
-  }
-  return stripped.replace(/\{[\s\S]*$/, "").trim() || raw.trim();
 }
 
 /** Describe a terminal generation without hiding usable partial output. */
@@ -176,6 +149,26 @@ export function generationTerminalPresentation(activity = {}) {
   return { status, action, output, detail, reason, pageCount, reviewedPageCount, missingReferenceCount, composed };
 }
 
+/**
+ * Build a unified terminal pill or structured fault/wait card view-model.
+ * @param {Record<string, any>} [activity]
+ * @param {{now?: number, pageCount?: number, duration?: string, phase?: string}} [options]
+ */
+export function generationTerminalCardModel(activity = {}, options = {}) {
+  const effectivePhase = text(options?.phase || activity?.phase);
+  const injectCount = typeof options?.pageCount === "number" && activity?.project?.pageCount == null;
+  const target =
+    effectivePhase === text(activity?.phase) && !injectCount
+      ? activity
+      : {
+          ...activity,
+          phase: effectivePhase,
+          ...(injectCount ? { project: { ...(activity?.project || {}), pageCount: options.pageCount } } : {}),
+        };
+  const presentation = generationTerminalPresentation(target);
+  return buildTerminalCardModel(activity, presentation, options);
+}
+
 function generationLedger(snapshot = {}) {
   const inspection = snapshot?.inspection && typeof snapshot.inspection === "object" ? snapshot.inspection : {};
   if (inspection.ledger && typeof inspection.ledger === "object") return inspection.ledger;
@@ -185,24 +178,35 @@ function generationLedger(snapshot = {}) {
 /**
  * A composed deck whose only remaining item is "export the current document"
  * is finished work. The user exports it themselves; "继续完成生成" is reserved
- * for a generation that was actually interrupted. A fault on top of that state
- * still means the agent run stopped short and can be resumed.
+ * for a generation that was actually interrupted. A fault or paused/failed state
+ * on top of that still means the agent run stopped short and can be resumed.
  */
-function generationAwaitingUserExport(execution) {
-  return text(execution?.status?.kind) === "ready-to-export" && execution?.fault == null;
+/** @param {any} execution @param {any} [activityOrState] */
+function generationAwaitingUserExport(execution, activityOrState) {
+  const phase = text(activityOrState?.phase?.kind || activityOrState?.phase);
+  return (
+    text(execution?.status?.kind) === "ready-to-export" &&
+    execution?.fault == null &&
+    !activityOrState?.error &&
+    !["paused", "failed"].includes(phase)
+  );
+}
+
+/** @param {any} execution @param {any} [activityOrState] */
+function executionCanResume(execution, activityOrState) {
+  const statusKind = text(execution.status?.kind);
+  if (statusKind === "delivered") return false;
+  if (generationAwaitingUserExport(execution, activityOrState)) return false;
+  const recoveryKind = text(execution.recovery?.kind);
+  if (recoveryKind === "continue") return true;
+  if (recoveryKind === "wait-or-stop" || recoveryKind === "resolve" || recoveryKind === "none") return false;
+  return ["paused", "failed", "blocked", "ready-to-export"].includes(statusKind);
 }
 
 export function generationResumeCandidate(activity = {}) {
   const phase = text(activity?.phase);
   const execution = activity?.execution;
-  if (execution) {
-    const statusKind = text(execution.status?.kind);
-    if (statusKind === "delivered") return false;
-    if (generationAwaitingUserExport(execution)) return false;
-    if (execution.recovery?.kind === "continue") return true;
-    if (["paused", "failed", "blocked", "ready-to-export"].includes(statusKind)) return true;
-    return false;
-  }
+  if (execution) return executionCanResume(execution, activity);
   const ledger = generationLedger(activity);
   const pages = Array.isArray(ledger.pages) ? ledger.pages : [];
   const pageCount = Math.max(
@@ -240,14 +244,7 @@ export function generationStateCanResume(state = {}, expectedSessionId = "") {
   if (state?.agentStatus !== "idle") return false;
 
   const execution = state?.execution;
-  if (execution) {
-    const statusKind = text(execution.status?.kind);
-    if (statusKind === "delivered") return false;
-    if (generationAwaitingUserExport(execution)) return false;
-    if (execution.recovery?.kind === "continue") return true;
-    if (["paused", "failed", "blocked", "ready-to-export"].includes(statusKind)) return true;
-    return false;
-  }
+  if (execution) return executionCanResume(execution, state);
 
   const phase = text(state?.phase?.kind || state?.phase);
   const ledger = generationLedger(state);
@@ -385,8 +382,9 @@ function coalesceAssistantDeltas(events) {
   const positions = new Map();
   for (const event of events) {
     const kind = event?.kind;
-    const assistant = kind === "think" || kind === "reasoning" || kind === "message";
-    const id = assistant && event?.id ? `${kind === "think" ? "reasoning" : kind}:${event.id}` : "";
+    const assistant = ASSISTANT_EVENT_KINDS.has(kind);
+    const id =
+      assistant && event?.id ? `${kind === "think" || kind === "thought" ? "reasoning" : kind}:${event.id}` : "";
     if (!id || !positions.has(id)) {
       if (id) positions.set(id, rows.length);
       rows.push(event);
@@ -427,7 +425,7 @@ export function projectGenerationProcess(events, context = {}) {
       });
       continue;
     }
-    if (kind === "think" || kind === "reasoning" || kind === "message") {
+    if (ASSISTANT_EVENT_KINDS.has(kind)) {
       const row = baseRow(event, index, kind === "message" ? "message" : "thought");
       if (kind === "think") row.title = t("过程说明");
       row.status =
