@@ -3,17 +3,21 @@
  * from their capability-filtered set and apply these editor/review scopes so
  * every host offers the same write surfaces for the same project state.
  */
+import { loadProject } from "@open-slidestudio/pptd-v2";
 import {
   editorTurnAuthorityLost,
   editorTurnRecorded,
   LAPSED_EDITOR_WRITE_TOOLS,
   layoutEditGrant,
   readActiveReviewGuard,
+  readCommittedPagePlan,
   readRunLedger,
   reviewWriteTargets,
   type CapabilitySnapshot,
 } from "@open-slidestudio/presentation-run";
 import { activeElementEditScope } from "./edit-elements.js";
+import { readMaterialsManifest } from "./material-store.js";
+import { PATCH_PAGE_ELEMENTS_TOOL_NAME } from "./page-patch.js";
 import { VISION_ONLY_TOOL_NAMES, visionUnavailableDetail } from "./vision-tools.js";
 import { editableMetaScope, metaOnlyEditScope, rewriteEditScope, structuralEditScope } from "./produce-edit-scope.js";
 
@@ -33,6 +37,7 @@ export const SCOPED_SLIDE_TOOL_NAMES = [
 
 const META_ONLY_WITHHELD = [
   "write_page",
+  "patch_page_elements",
   "write_layout",
   "edit_elements",
   "edit_page_background",
@@ -44,6 +49,7 @@ const META_ONLY_WITHHELD = [
 
 const LAYOUT_MODE_WITHHELD = [
   "write_page",
+  "patch_page_elements",
   "edit_elements",
   "edit_page_background",
   "batch_remove_footers",
@@ -68,7 +74,10 @@ function applyElementScope(allowed: Set<string>, projectRoot: string): void {
   // Element review is an exact-subset operation. Expose one write surface so
   // the model cannot choose whole-page replacement as well.
   const targets = reviewWriteTargets(readActiveReviewGuard(projectRoot));
-  if (targets.every(({ scope }) => scope.kind === "elements")) allowed.delete("write_page");
+  if (targets.every(({ scope }) => scope.kind === "elements")) {
+    allowed.delete("write_page");
+    allowed.delete("patch_page_elements");
+  }
   allowed.add("edit_elements");
 }
 
@@ -100,16 +109,92 @@ function applyWithholding(allowed: Set<string>, projectRoot: string): void {
   if (editorTurnAuthorityLost(projectRoot)) for (const name of LAPSED_EDITOR_WRITE_TOOLS) allowed.delete(name);
 }
 
-/** Apply the project's editor and review scopes to a capability-filtered allowlist (mutates `allowed`). */
-export function applyProjectEditScopes(allowed: Set<string>, projectRoot: string): Set<string> {
+/** Tools that only read or annotate uploaded materials; useless when a project has none. */
+export const MATERIAL_SLIDE_TOOL_NAMES = [
+  "list_materials",
+  "read_material",
+  "query_material",
+  "view_material",
+  "record_material_notes",
+] as const;
+
+/**
+ * Stage options for a produce (generation/edit) turn. Every field is optional;
+ * an empty policy changes nothing except the layout/patch stage rules below.
+ */
+export type ProduceStagePolicy = {
+  /**
+   * Whether the project has uploaded materials. `false` drops the material
+   * tools; `true` or omitted keeps them. `projectHasMaterials` reads it from disk.
+   */
+  readonly hasAttachments?: boolean;
+  /** Force write_layout into the turn (for example a template whose layouts aspect is adopted). */
+  readonly layouts?: boolean;
+  /** Offer `patch_page_elements` whenever write_page is offered. Defaults to true. */
+  readonly patchPageElements?: boolean;
+};
+
+/** True when the project's materials manifest lists at least one material. */
+export function projectHasMaterials(projectRoot: string): boolean {
+  return readMaterialsManifest(projectRoot).materials.length > 0;
+}
+
+/** Whether write_layout is part of this turn's work: layout mode, existing layouts, or a plan naming one. */
+export function layoutStageActive(projectRoot: string | undefined, policy: ProduceStagePolicy = {}): boolean {
+  if (policy.layouts === true) return true;
+  if (!projectRoot) return false;
+  if (layoutEditGrant(projectRoot)) return true;
+  try {
+    const { presentation } = loadProject(projectRoot);
+    if (presentation.layouts?.length || presentation.masters?.length) return true;
+  } catch {
+    // An unreadable project has no layouts to maintain.
+  }
+  try {
+    return readCommittedPagePlan(projectRoot).some((page) => Boolean(page.layoutId?.trim()));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Slim a produce allowlist to the tools this stage can use (mutates `allowed`).
+ * Apply after the edit scopes: write_layout leaves the turn unless the layout
+ * stage is active, material tools leave when `hasAttachments === false`, and
+ * `patch_page_elements` follows write_page so every lock that withholds
+ * whole-page writes withholds patches too.
+ */
+export function applyProduceStagePolicy(
+  allowed: Set<string>,
+  projectRoot: string | undefined,
+  policy: ProduceStagePolicy = {},
+): Set<string> {
+  if (!layoutStageActive(projectRoot, policy)) allowed.delete("write_layout");
+  if (policy.hasAttachments === false) for (const name of MATERIAL_SLIDE_TOOL_NAMES) allowed.delete(name);
+  if (policy.patchPageElements !== false && allowed.has("write_page")) allowed.add(PATCH_PAGE_ELEMENTS_TOOL_NAME);
+  else allowed.delete(PATCH_PAGE_ELEMENTS_TOOL_NAME);
+  return allowed;
+}
+
+/**
+ * Apply the project's editor and review scopes to a capability-filtered
+ * allowlist (mutates `allowed`). With `produce`, the stage policy runs last.
+ */
+export function applyProjectEditScopes(
+  allowed: Set<string>,
+  projectRoot: string,
+  produce?: ProduceStagePolicy,
+): Set<string> {
   applyElementScope(allowed, projectRoot);
   applyStructureScopes(allowed, projectRoot);
   applyWithholding(allowed, projectRoot);
+  if (produce) applyProduceStagePolicy(allowed, projectRoot, produce);
   return allowed;
 }
 
 const WRITE_SURFACES = [
   "write_page",
+  PATCH_PAGE_ELEMENTS_TOOL_NAME,
   "write_layout",
   "edit_elements",
   "edit_page_background",

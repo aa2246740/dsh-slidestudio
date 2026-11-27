@@ -4,6 +4,7 @@
  * compose mode: empty pages + unlabeled invented numbers + dangling src.
  * strict mode: also wants a non-image-or-image exhibit and rejects three plates.
  */
+import { cappedIssueDetail, WRITE_PAGE_DETAIL_MAX_CHARS } from "./rejection-detail.js";
 import type { ImageElement, PptdElement, ShapeElement, TableElement, TextElement } from "@open-slidestudio/pptd-v2";
 import { colorRefusal, officialPptdColorKind, toRgbHex, type Theme } from "@open-slidestudio/pptd-v2";
 import { persistPageKey, persistPagePathFromId } from "./page-identity.js";
@@ -737,10 +738,17 @@ export function writePageSchemaError(
       issue.code === "reused_cover_src" ||
       issue.code === "missing_media",
   );
+  // Capped: a palette refusal names every offending field but never repeats the palette per colour.
+  const detail = () =>
+    cappedIssueDetail(
+      issues.map((issue) => issue.message),
+      ctx.adoptedPackHexes,
+      WRITE_PAGE_DETAIL_MAX_CHARS,
+    );
   if (structural) {
     return {
       error: structural.code,
-      detail: issues.map((issue) => issue.message).join("\n"),
+      detail: detail(),
       pageId: page.id,
     };
   }
@@ -757,7 +765,7 @@ export function writePageSchemaError(
   const first = issues[0]!;
   return {
     error: first.code,
-    detail: issues.map((issue) => issue.message).join("\n"),
+    detail: detail(),
     pageId: page.id,
   };
 }

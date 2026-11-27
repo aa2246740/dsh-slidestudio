@@ -28,7 +28,7 @@ import {
   type ComposeDeck,
 } from "./compose-ir.js";
 import { parseCanonicalPagePlan } from "./page-plan.js";
-import { diskSkillPages, reviewCurrent } from "./agent-page-review.js";
+import { diskSkillPages, reviewCurrent, reviewRasterNote } from "./agent-page-review.js";
 import { aspectFromSlot, type ImagePort } from "./image-port.js";
 import type { ImageSearchPort } from "./image-search-port.js";
 import type { GrokWebSearchResult } from "./grok-hosted.js";
@@ -1133,15 +1133,13 @@ export function executeGenerateTool(
       reviewCurrent(state, pages, "compose"),
     );
     const ok = review.ok;
-    const rasterNote = state.lastRaster
-      ? `last render_page: ${state.lastRaster.kind} ${state.lastRaster.src ?? ""} — ${state.lastRaster.note}`
-      : "no render_page yet — you have not seen the native #slide";
+    const raster = reviewRasterNote(state);
     return {
       name,
       ok,
       summary: ok ? `${pages.length} 页通过` : `${review.issues.length} 个问题`,
       detail: ok
-        ? `${rasterNote}\nstructural QA only unless render_page returned native-slide.\n${review.pages.map((p) => `${p.id} cover=${p.coverage.toFixed(2)} exhibit=${p.exhibit ?? "none"}`).join("\n")}`
+        ? `${raster.note}\n${raster.allCurrentOnDisk ? "rendered layout checks already passed on disk for current revisions." : "structural QA only unless render_page returned native-slide."}\n${review.pages.map((p) => `${p.id} cover=${p.coverage.toFixed(2)} exhibit=${p.exhibit ?? "none"}`).join("\n")}`
         : [review.hint, ...review.issues.map((i) => `${i.pageId}: ${i.message}`)]
             .filter(Boolean)
             .join("\n"),

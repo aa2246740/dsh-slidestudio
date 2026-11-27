@@ -110,6 +110,7 @@ const PAUSE_CODES = new Set([
   "operator-stop",
   "host-interrupted",
   "turn-max-tokens",
+  "context-window-too-small",
   "tool-invalid-args-loop",
   "repeated-invalid-args",
   "repeated-business-rejection",
@@ -150,6 +151,11 @@ export function isWaitAndResumeFault(error: SliceError): boolean {
 /** 401/403 empty or rejected key. Do not wait-and-retry. */
 export function isHardProviderFault(error: SliceError): boolean {
   return error.code === "provider-auth";
+}
+
+/** Faults that cannot succeed by simply clicking Continue on the same model/credentials. */
+export function isUnrecoverableFault(error: SliceError): boolean {
+  return isHardProviderFault(error) || error.code === "context-window-too-small";
 }
 
 /** MiniMax China token-plan 2056. Pause for the user; do not auto-retry. */
@@ -218,6 +224,9 @@ export function classifyAgentError(error: unknown): SliceError {
   const detail = scrubRegisteredSecrets(redactText(raw.detail)).slice(0, 800);
   const serialization = classifySerializationFault(detail);
   if (serialization) return serialization;
+  if (raw.code === "CONTEXT_WINDOW_TOO_SMALL" || raw.code === "context-window-too-small") {
+    return { code: "context-window-too-small", detail };
+  }
   const rec = { code: raw.code, detail };
   return { code: providerFaultCode(rec) ?? (rec.code || "agent-error"), detail };
 }

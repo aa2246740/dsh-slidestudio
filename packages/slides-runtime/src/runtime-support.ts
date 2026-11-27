@@ -1,5 +1,5 @@
 /** Pure helpers for the runtime: transcript inspection, turn outcomes, guard events and ports. */
-import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage, AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   createInitialSystemMessage,
   toToolDeclaration,
@@ -24,6 +24,8 @@ export type TurnState = {
   readonly invalidArgs: Map<string, RuntimeToolArgsError>;
   readonly deliveries: Map<string, () => Promise<void>>;
   inFlightImageCallIds: Set<string>;
+  /** Read-reference results projected untruncated into the request in flight. */
+  inFlightReferenceCallIds?: readonly string[];
   readonly signal: AbortController;
 };
 
@@ -59,9 +61,17 @@ export type RuntimeEvent =
   | { readonly type: "lease/lost"; readonly fault: RuntimeFault }
   | { readonly type: "rate-limit/wait"; readonly attempt: number; readonly waitMs: number }
   | { readonly type: "context/escalate"; readonly tier: number }
+  | { readonly type: "max-tokens/retry"; readonly attempt: number; readonly thinkingLevel: ThinkingLevel }
   | { readonly type: "post-turn"; readonly results: readonly { name: string; ok: boolean; error?: string }[] };
 
-export type PromptInput = string | { readonly text: string; readonly images?: readonly ImageContent[] };
+export type PromptInput =
+  | string
+  | {
+      readonly text: string;
+      readonly images?: readonly ImageContent[];
+      /** Start this turn from a fresh context seeded with this compact disk summary instead of replayed history. */
+      readonly seedFromSummary?: string;
+    };
 
 export function userPromptMessage(input: PromptInput): AgentMessage {
   const text = typeof input === "string" ? input : input.text;
@@ -124,10 +134,14 @@ export function lastAssistant(messages: readonly AgentMessage[]): AssistantMessa
   return undefined;
 }
 
-/** Remove a trailing failed assistant reply so the loop can `continue()` from the prior message. */
+/** Remove a trailing failed or tool-less truncated assistant reply so `continue()` can resume cleanly. */
 export function withoutTrailingFailure(messages: readonly AgentMessage[]): AgentMessage[] {
-  const last = messages[messages.length - 1] as { role?: unknown; stopReason?: unknown } | undefined;
-  const failed = last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted");
+  const last = messages[messages.length - 1] as { role?: unknown; stopReason?: unknown; content?: unknown } | undefined;
+  const hasToolCall =
+    Array.isArray(last?.content) && last.content.some((b) => (b as { type?: unknown })?.type === "toolCall");
+  const failed =
+    last?.role === "assistant" &&
+    (last.stopReason === "error" || last.stopReason === "aborted" || (last.stopReason === "length" && !hasToolCall));
   return failed ? messages.slice(0, -1) : [...messages];
 }
 

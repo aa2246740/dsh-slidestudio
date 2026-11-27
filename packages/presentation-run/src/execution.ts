@@ -173,6 +173,8 @@ export function projectExecution(input: ProjectExecutionInput): ExecutionProject
     "provider-unavailable",
     "operator-stop",
     "host-interrupted",
+    "turn-max-tokens",
+    "context-window-too-small",
     "tool-invalid-args-loop",
     "repeated-invalid-args",
     "repeated-business-rejection",

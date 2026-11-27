@@ -6,6 +6,7 @@ import { writeFileAtomic } from "./domain/atomic-file.js";
 import { imageConfigFromEnv, imageConfigured } from "./domain/image-port.js";
 import { rasterRuntimeReady } from "./domain/page-raster.js";
 import { materialCapabilityEntries } from "./domain/material-pack.js";
+import { applyModelSwitchContinuity } from "./domain/reference-continuity.js";
 import type {
   CapabilitySnapshot,
   CapabilityVia,
@@ -193,6 +194,25 @@ export function inspectProjectCapabilities(
   };
 }
 
+export type PersistProviderOptions = {
+  /**
+   * Carry baseline reference reads verified in the previous epoch into the new
+   * one on a model switch (sectioned v2 ledgers with a committed plan only).
+   * Defaults to on; v1 ledgers are never affected.
+   */
+  readonly referenceContinuity?: boolean;
+};
+
+/** Best effort: a continuity failure must never block the provider switch itself. */
+function carryReferencesAcrossSwitch(projectRoot: string, fromEpochId: unknown, toEpochId: string): void {
+  if (typeof fromEpochId !== "string" || !fromEpochId.trim()) return;
+  try {
+    applyModelSwitchContinuity(projectRoot, { fromEpochId, toEpochId });
+  } catch {
+    // The new epoch simply starts without carried reads, exactly as before.
+  }
+}
+
 /**
  * Write the Hub session provider onto disk SSOT so inspect_capabilities,
  * domain-hands ports, and Hub chips stay one object. Missing binding files
@@ -206,6 +226,7 @@ export function persistPresentationRunProvider(
     readonly ready?: boolean;
     readonly modelInputModalities?: readonly ModelInputModality[];
   },
+  options: PersistProviderOptions = {},
 ): boolean {
   const file = path.join(projectRoot, BINDING_REL);
   if (!fs.existsSync(file)) return false;
@@ -234,8 +255,12 @@ export function persistPresentationRunProvider(
   // A provider/model change is a different brain: receipts earned by the old
   // route (chunk reads, rendered rasters, reviews) must stop counting. Mint a
   // fresh context epoch; same-route rewrites (restart, ready refresh) keep it.
+  const previousEpochId = rec.contextEpochId;
   if (!sameRoute) rec.contextEpochId = `dsh-${crypto.randomUUID()}`;
   writeFileAtomic(file, `${JSON.stringify(rec, null, 2)}\n`);
+  if (!sameRoute && options.referenceContinuity !== false) {
+    carryReferencesAcrossSwitch(projectRoot, previousEpochId, String(rec.contextEpochId));
+  }
   return true;
 }
 

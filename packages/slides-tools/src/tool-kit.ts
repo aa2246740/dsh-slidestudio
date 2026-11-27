@@ -64,6 +64,8 @@ export type SlideToolRuntimeDeps = {
   readonly ensureMediaEnv?: () => void;
   /** Writer-lease TTL; `false` disables the gate (tests of other behaviour only). */
   readonly writerLease?: { readonly ttlMs?: number } | false;
+  /** Require read_reference chunks to be confirmed delivered before counting toward preflight gates. */
+  readonly confirmReferenceDelivery?: boolean;
 };
 
 export function sessionKeyOf(ctx: SlideToolContext): string {

@@ -60,7 +60,27 @@ export function pagesHintForBrief(brief: string): string {
   return "Plan every page the brief actually needs. A one-page cover is only correct when the brief is a single cover.";
 }
 
-export function directorBrief(brief: string, explicit?: string): string {
+/** Optional stage facts a host knows when it opens a turn. Omitted fields keep the full brief. */
+export type DirectorBriefOptions = {
+  /** `false` drops the attachment/material adoption rules (nothing is attached). */
+  readonly hasAttachments?: boolean;
+  /** `true` when the host offers patch_page_elements this turn. */
+  readonly patchPageElements?: boolean;
+};
+
+const ATTACHMENT_RULES =
+  'Decide each attached PPTX separately from the user\'s own words; apply the same independent per-source choice to images, screenshots and logos. Declare designAspects as [{source:"material:<id>",aspects:["palette","fonts"]}]. The allowed aspects are palette, fonts, logo, layouts, decorations, photos, content, data. Visual aspects require adoptedSourceIds plus every design chunk read in the current epoch; content requires slides and data requires charts or tables read in the current epoch, without visual adoption. If A is for visuals and B is for content only, adopt only A and declare content for B. Declare only the aspects the user wants; do not adopt rejected palette/fonts/logo, for example 「不要使用…配色/字体/Logo」. Only palette adoption authorizes theme and observed colors; only fonts adoption seeds font pairs. Omitted adopted PPTX aspects default to palette/fonts/logo for older callers. Put the user\'s main brand first when adopting several. A chart series fill is the color of every bar in that series. In every branch, author every page for this brief; never import or copy a sample slide or layout XML.';
+
+const NO_ATTACHMENT_RULES = "No materials are attached. In every branch, author every page for this brief.";
+
+function stepScopeLine(patch: boolean): string {
+  const fix = patch
+    ? " For a small layout or contrast fix on a written page (move/resize, font size, text color, fill, remove or reorder an element), call patch_page_elements with its pageSha256 instead of rewriting the whole page."
+    : "";
+  return `Step scope: each step decides only what the next tool call needs. Plan pages and the design system at commit_design; leave per-slide element choices (exact text, bounds, colors) to that page's write_page.${fix}`;
+}
+
+export function directorBrief(brief: string, explicit?: string, options: DirectorBriefOptions = {}): string {
   return [
     brief,
     "",
@@ -73,9 +93,10 @@ export function directorBrief(brief: string, explicit?: string): string {
     "For a multi-page deck, the last page is a 结束页 with a title, one-line recap, and concrete next action. A host-opened 1_cover.page seed must not remain as slide 1. Host will not paint leftover pages. Do not strip text to pass layout; repair the named bounds or content issue. If compose_deck reports an empty closer or leftover host seed, rewrite the named page before composing again.",
     "For every current page revision, wait for render_page to finish. If vision.mode is main-model, inspect the attached PNG, copy the exact full DELIVERY_TOKEN into review_page for the same page/revision, and use issues=[] for pass or concrete visible defects for revise. If vision.mode is none, do not call review_page. In either mode, satisfy the deterministic render layout gate and run review_pages; if it fails, repair the named pages rather than repeating review_pages. Do not stamp layoutStatus=pass yourself.",
     "After all page and structural gates pass, call compose_deck to seal the deck. On compose rejection, follow payload.next and its exact chunk/page lists before retrying.",
+    stepScopeLine(options.patchPageElements === true),
     "A chart or architecture exhibit promised by write_todo must be present as editable elements in the same write_page; an empty slot is refused.",
     "Editing must reuse the same page id. Do not create a duplicate page file. Splitting a section into more pages is fine: update write_todo with the new pageIds before writing them; a page not in the todo is refused. For an editor-selected existing page, call read_page immediately before editing and use its pageSha256 as expectedPageSha256; a stale hash is a conflict, so re-read and reapply the requested change. When the active server-verified review scope is elements, use edit_elements with exactly the selected elementIds and one complete canonical native element per target; do not copy or send the rest of the page and do not call write_page. Explicit whole-page and deck edits still use write_page with the complete elements[] array. Keep all style, bounds, fill, line, alignment, and layoutRole fields inside their owning element. layoutStatus=pass is overflow-only, not a rewrite seal. The same pageId may be rewritten until review_pages records a current structural pass for that revision. After structural pass, rewrite only if review_pages names the page failing or review_page says revise.",
-    'Decide each attached PPTX separately from the user\'s own words; apply the same independent per-source choice to images, screenshots and logos. Declare designAspects as [{source:"material:<id>",aspects:["palette","fonts"]}]. The allowed aspects are palette, fonts, logo, layouts, decorations, photos, content, data. Visual aspects require adoptedSourceIds plus every design chunk read in the current epoch; content requires slides and data requires charts or tables read in the current epoch, without visual adoption. If A is for visuals and B is for content only, adopt only A and declare content for B. Declare only the aspects the user wants; do not adopt rejected palette/fonts/logo, for example 「不要使用…配色/字体/Logo」. Only palette adoption authorizes theme and observed colors; only fonts adoption seeds font pairs. Omitted adopted PPTX aspects default to palette/fonts/logo for older callers. Put the user\'s main brand first when adopting several. A chart series fill is the color of every bar in that series. In every branch, author every page for this brief; never import or copy a sample slide or layout XML.',
+    options.hasAttachments === false ? NO_ATTACHMENT_RULES : ATTACHMENT_RULES,
     pagesHintForBrief(brief),
     "Deliver to the user, in their language and in product terms: what the deck argues, how many pages it has, the visual style it follows, where the facts came from, and anything still unresolved. The deck is reviewed, edited, and exported inside this product — the right-hand panel edits the selected object, comments ask this Agent for another pass, and the export menu produces PPTX/PDF/PNG — so a gate that blocks the seal is not a dead end: name the page and what is missing, and say plainly that the deck can still be edited and exported. Keep the message free of file-system paths, session ids, tool names, commands, and local addresses.",
     explicit

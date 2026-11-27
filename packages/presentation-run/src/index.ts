@@ -470,3 +470,4 @@ export { recordTemplateComponentUsed } from "./domain/template-component-ledger.
 export { rebuildNodesFromImage, imageToDataUrl } from "./domain/image-rebuild.js";
 export type { ImageRebuildConfig, RebuildNode } from "./domain/image-rebuild.js";
 export { listMedia, mediaExists, mediaId, saveMediaFile } from "./domain/media-store.js";
+export * from "./reference-budget.js";

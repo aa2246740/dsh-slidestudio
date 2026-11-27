@@ -11,6 +11,7 @@ import {
   type SimpleStreamOptions,
   type ToolCall,
   type TranscriptContext,
+  type Usage,
 } from "@earendil-works/pi-ai";
 import { createPresentationRun, resolveRepoRoot, type PresentationRun } from "@open-slidestudio/presentation-run";
 import {
@@ -40,11 +41,17 @@ export const TEST_ROUTE: LlmRoute = {
   inputModalities: ["text", "image"],
 };
 
-export type ScriptReply =
+export type ScriptReply = (
   | { readonly text: string }
   | { readonly calls: readonly { readonly name: string; readonly args: Record<string, unknown> }[] }
   | { readonly failure: LlmFailure }
-  | { readonly hang: true };
+  | { readonly hang: true }
+  /** Reply cut off by the output limit (`stopReason: "length"`) without tool calls. */
+  | { readonly truncated: { readonly thinking?: string; readonly text?: string } }
+) & {
+  /** Provider-reported usage for the reply (input tokens drive online calibration). */
+  readonly usage?: Partial<Usage>;
+};
 
 export type ScriptStep = (context: TranscriptContext, call: number) => ScriptReply | Promise<ScriptReply>;
 
@@ -93,6 +100,7 @@ export class ScriptedLlm implements LlmPort {
     reply: ScriptReply,
     signal?: AbortSignal,
   ): void {
+    if (reply.usage) shell = { ...shell, usage: { ...shell.usage, ...reply.usage } };
     if ("hang" in reply) {
       const onAbort = () => {
         const aborted = attachLlmFailure({ ...shell, stopReason: "aborted" }, { code: "ABORTED", message: "aborted" });
@@ -105,6 +113,14 @@ export class ScriptedLlm implements LlmPort {
     if ("failure" in reply) {
       const failed = attachLlmFailure({ ...shell, stopReason: "error" }, reply.failure);
       out.push({ type: "error", reason: "error", error: failed });
+      return;
+    }
+    if ("truncated" in reply) {
+      const content: AssistantMessage["content"] = [
+        ...(reply.truncated.thinking ? [{ type: "thinking" as const, thinking: reply.truncated.thinking }] : []),
+        ...(reply.truncated.text ? [{ type: "text" as const, text: reply.truncated.text }] : []),
+      ];
+      out.push({ type: "done", reason: "length", message: { ...shell, content, stopReason: "length" } });
       return;
     }
     if ("text" in reply) {

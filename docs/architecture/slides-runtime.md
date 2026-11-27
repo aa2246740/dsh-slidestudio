@@ -11,23 +11,24 @@ durable-loop, native image codec or internal-deployment reference.
 
 ## Modules
 
-| Module                                                  | Role                                                                                                                      |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `llm-port.ts`                                           | `LlmPort` / `LlmRoute` / `LlmFailure`; failures travel as a terminal assistant message with a structured diagnostic       |
-| `llm-port-pi-ai.ts`                                     | `PiAiLlmPort`: registered pi-ai models or a custom OpenAI-compatible endpoint + API key; captures HTTP status/Retry-After |
-| `token-estimate.ts`                                     | CJK-aware token estimation, image load                                                                                    |
-| `context-compaction.ts`, `context-budget.ts`            | tiered projection for `transformContext`, image offload, `maxTokens` clamp, overflow detection, `GatewayCompat` / hooks   |
-| `guard-events.ts`                                       | host-neutral turn / step / tool-call / tool-result vocabulary                                                             |
-| `tool-loop-guard.ts`                                    | short loop on identical invalid arguments (3, one count per step)                                                         |
-| `progress-snapshot.ts`, `progress-guard.ts`             | durable progress reducer (rejection 3, invalid args 8, planning 64, production 32) over ledger + disk evidence            |
-| `faults.ts`, `redact.ts`                                | fault taxonomy, Retry-After parsing, 429 backoff, redaction                                                               |
-| `session-store.ts`                                      | `_agent/runtime-session.v1.jsonl` append log, crash recovery, transcript repair                                           |
-| `trace-projection.ts`                                   | `_agent/agent-trace.jsonl` rows compatible with the host `AgentTraceRow` contract, truth-guarded                          |
-| `user-question.ts`                                      | optional `ask_user_question` suspension tool and `_agent/assistant-questions.v1.json` broker                              |
-| `tool-adapter.ts`                                       | `SlideToolDefinition` → `AgentTool` (INVALID_ARGS, images, deferred `onContentDelivered`, timeout, serial gate)           |
-| `lease-keeper.ts`                                       | acquire / heartbeat / loss detection / release of the slides-tools writer lease                                           |
-| `local-project-port.ts`                                 | standalone `SlideProjectPort` under `<dataRoot>/output/dsh-slices/run-*`                                                  |
-| `runtime-config.ts`, `runtime-support.ts`, `runtime.ts` | options, tool assembly, budget-aware stream, `SlidesAgentRuntime` / `createSlidesRuntime`                                 |
+| Module                                                                 | Role                                                                                                                                                                              |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm-port.ts`                                                          | `LlmPort` / `LlmRoute` / `LlmFailure`; failures travel as a terminal assistant message with a structured diagnostic                                                               |
+| `llm-port-pi-ai.ts`                                                    | `PiAiLlmPort`: registered pi-ai models or a custom OpenAI-compatible endpoint + API key; captures HTTP status/Retry-After                                                         |
+| `token-estimate.ts`                                                    | CJK-aware token estimation, image load, `TokenCalibration` online `usage` calibration                                                                                             |
+| `context-compaction.ts`, `context-budget.ts`, `context-working-set.ts` | calibrated tiered projection, superseded-write pruning, small-window working set, >=180k cache-first hold, `onDeliveredReferences`, `insufficientWindow`, `GatewayCompat` / hooks |
+| `runtime-recovery.ts`                                                  | thinking `max-tokens` step-down & auto-continue (`maxTokensAutoRetries`), `insufficientWindowFailure`, summary-seeded fresh context (`seededContext`)                             |
+| `guard-events.ts`                                                      | host-neutral turn / step / tool-call / tool-result vocabulary                                                                                                                     |
+| `tool-loop-guard.ts`                                                   | short loop on identical invalid arguments (3, one count per step)                                                                                                                 |
+| `progress-snapshot.ts`, `progress-guard.ts`                            | durable progress reducer (rejection 3, invalid args 8, planning 64, production 32) over ledger + disk evidence                                                                    |
+| `faults.ts`, `redact.ts`                                               | fault taxonomy, Retry-After parsing, 429 backoff, redaction                                                                                                                       |
+| `session-store.ts`                                                     | `_agent/runtime-session.v1.jsonl` append log, crash recovery, transcript repair                                                                                                   |
+| `trace-projection.ts`                                                  | `_agent/agent-trace.jsonl` rows compatible with the host `AgentTraceRow` contract, truth-guarded                                                                                  |
+| `user-question.ts`                                                     | optional `ask_user_question` suspension tool and `_agent/assistant-questions.v1.json` broker                                                                                      |
+| `tool-adapter.ts`                                                      | `SlideToolDefinition` → `AgentTool` (INVALID_ARGS, images, deferred `onContentDelivered`, timeout, serial gate)                                                                   |
+| `lease-keeper.ts`                                                      | acquire / heartbeat / loss detection / release of the slides-tools writer lease                                                                                                   |
+| `local-project-port.ts`                                                | standalone `SlideProjectPort` under `<dataRoot>/output/dsh-slices/run-*`                                                                                                          |
+| `runtime-config.ts`, `runtime-support.ts`, `runtime.ts`                | options, tool assembly, budget-aware stream, `SlidesAgentRuntime` / `createSlidesRuntime`                                                                                         |
 
 ## Turn lifecycle
 
@@ -57,15 +58,26 @@ message. Per turn the runtime:
    post-`transformContext` and completed without error, abort, or turn fault
    (while the writer lease is still held);
 5. retries a provider context overflow (by text pattern, pi-ai classifier, or
-   structured `CONTEXT_WINDOW_EXCEEDED` code) once with an escalated compaction
-   tier, and a 429 with `Retry-After` or the 15s/30s/60s/2m/5m backoff (default
-   3 attempts); auth, quota and other faults end the turn as `failed`;
-6. runs `PostTurnHook[]` sequentially (default none), re-verifying lease
-   authorization and passing the turn `AbortSignal` before each hook and
-   recomputing the turn result if a mid-hook takeover occurred, then appends
-   `fault` / `turn/end` and releases the lease only when still authorized (a
-   refused, lost, or editor-preempted turn skips remaining hooks and `_agent/`
-   writes and leaves the current holder's lease untouched).
+   structured `CONTEXT_WINDOW_EXCEEDED` code) once by escalating to the lowest
+   compaction tier that strictly shrinks the projection, auto-continues replies
+   cut off by `max-tokens` without tool calls up to `maxTokensAutoRetries`
+   (default 2) while stepping reasoning down one notch (down to explicit `off`),
+   fails pre-flight with `context-window-too-small` when protected context
+   cannot fit with `minAnswerTokens` (default 4,096), and retries 429 with
+   `Retry-After` or the 15s/30s/60s/2m/5m backoff (default 3 attempts); auth,
+   quota and other faults end the turn as `failed`;
+
+`SlidesRuntimeOptions` also supports opt-in tools (`includeTools`),
+`initialSummaryContext`, and per-turn `prompt({ text, seedFromSummary })` to
+seed a fresh in-memory model context from a compact disk summary (used by the
+host on comment/review turns and model switches) while keeping
+`_agent/runtime-session.v1.jsonl` append-only. See
+[ADR-0013](../adr/0013-context-budget-and-sectioned-references.md). 6. runs `PostTurnHook[]` sequentially (default none), re-verifying lease
+authorization and passing the turn `AbortSignal` before each hook and
+recomputing the turn result if a mid-hook takeover occurred, then appends
+`fault` / `turn/end` and releases the lease only when still authorized (a
+refused, lost, or editor-preempted turn skips remaining hooks and `_agent/`
+writes and leaves the current holder's lease untouched).
 
 `open_project` binds the project mid-turn: the writer lease is acquired first;
 only on success do buffered log and trace rows flush to the new `_agent/`.

@@ -32,13 +32,12 @@ import { runWithWriteAuthority } from "../write-authority.js";
 import type { SkillPageInput } from "./skill-pages.js";
 import { resolveRepoRoot } from "../catalog.js";
 import {
-  listOpenKimiSourceRequirements,
   resolveOpenKimiPresetDesignSourceId,
   verifyOpenKimiPack,
   type DesignDirection,
-  type SourceRequirement,
   type VerifiedOpenKimiPack,
 } from "./openkimi-source-pack.js";
+import { ledgerReferenceLayout, resolveLedgerReferenceRequirements } from "./reference-layout.js";
 import {
   MISSING_HOSTED_WEB_SEARCH_RECEIPT,
   briefNeedsLiveWebSearch,
@@ -63,9 +62,7 @@ import {
   recordWebSearchExecuted,
   requireComposeReady,
   requireTodo,
-  stableSha256,
   type PageLayoutIssue,
-  type ReferenceRequirement,
   type RunToolContext,
 } from "./run-ledger.js";
 
@@ -169,35 +166,27 @@ function resolveDesignDirection(runtime: DomainRuntime, pack: VerifiedOpenKimiPa
   };
 }
 
-function toLedgerRequirement(pack: VerifiedOpenKimiPack, requirement: SourceRequirement): ReferenceRequirement {
-  const entry = pack.entriesById.get(requirement.sourceId);
-  if (!entry) throw new Error(`OpenKimi requirement is missing: ${requirement.sourceId}`);
-  return {
-    sourceId: requirement.sourceId,
-    fileSha256: entry.sha256,
-    chunkIndexes: requirement.requiredChunkIndexes,
-    reason: requirement.kind === "categories" ? "category-guide" : requirement.kind,
-  };
-}
-
 export function initializeRunLedger(root: string): void {
   const runtime = loadRuntime(root);
   const repoRoot = repositoryRoot();
   const pack = verifyOpenKimiPack(repoRoot);
   const designDirection = resolveDesignDirection(runtime, pack);
-  const requirements = listOpenKimiSourceRequirements(pack, {
-    ...(runtime.categoryId ? { categoryId: runtime.categoryId } : {}),
-    designDirection,
-  }).map((requirement) => toLedgerRequirement(pack, requirement));
+  // An existing ledger keeps its layout: v1 ledgers on disk stay whole-file.
+  const { requirements, requirementsId, referenceLayout } = resolveLedgerReferenceRequirements(
+    pack,
+    { ...(runtime.categoryId ? { categoryId: runtime.categoryId } : {}), designDirection },
+    ledgerReferenceLayout(pack, readRunLedger(root)),
+  );
   const executionPolicy = {
     currentRenderedLayoutRequired: runtime.strictExecution === true && Boolean(runtime.editorBaseUrl?.trim()),
     structuralReviewRequired: runtime.strictExecution === true,
   } as const;
   ensureRunLedger(root, {
     manifestSha256: bytesSha256(fs.readFileSync(pack.manifestPath)),
-    requirementsId: stableSha256({ requirements }),
+    requirementsId,
     requirements,
     executionPolicy,
+    ...(referenceLayout ? { referenceLayout } : {}),
   });
 }
 
@@ -388,7 +377,9 @@ function runStrictPrecheck(
   if (name === "list_references")
     return loggedToolExecution(root, name, cleanArgs, listReferencesResult(root, context));
   if (name === "read_reference") {
-    return loggedToolExecution(root, name, cleanArgs, readReferenceResult(root, context, cleanArgs));
+    const { _confirmDelivery, ...publicArgs } = cleanArgs;
+    const options = typeof _confirmDelivery === "boolean" ? { confirmDelivery: _confirmDelivery } : {};
+    return loggedToolExecution(root, name, publicArgs, readReferenceResult(root, context, publicArgs, options));
   }
   const material = materialToolResult(root, name, context, cleanArgs);
   if (material) return loggedToolExecution(root, name, cleanArgs, material);

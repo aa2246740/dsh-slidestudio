@@ -32,7 +32,8 @@ import { loadProject } from "@open-slidestudio/pptd-v2";
 import { editorOrigin as defaultEditorOrigin, proxyToEditor, shouldProxyToEditor } from "./product-proxy.js";
 import { isForbiddenGenerateRoute, type SlidesLlmModel } from "./args.js";
 import { removeLocalProviderProfile, upsertLocalProviderProfile, type RuntimeModelCatalog } from "./local-models.js";
-import { clearRateLimitWait, isHardProviderFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
+import { clearRateLimitWait, isUnrecoverableFault, readAgentError, readRateLimitWait } from "./agent-fault.js";
+import { recordAcceptedTurnAttachments, resolveEditorEditFollowupOptions } from "./context-summary.js";
 import { hasActiveLiveTurn, markInterruptedTurn } from "./interruption.js";
 import {
   assertExpectedAttempt,
@@ -127,7 +128,7 @@ function currentExecution(
           code: fault.code,
           message: fault.detail,
           phase,
-          recoverable: !isHardProviderFault(fault),
+          recoverable: !isUnrecoverableFault(fault),
         }
       : undefined,
     binding: { provider: binding.provider, design: binding.design },
@@ -1044,11 +1045,15 @@ export function handleSlidesRequest(runtime: SlidesHostRuntime, req: IncomingMes
               typeof body.clientRequestId === "string" ? body.clientRequestId : undefined,
             );
             clearRateLimitWait(root);
+            recordAcceptedTurnAttachments(root, attachments);
           }
           // Only cancel automatic 429 recovery once validation, model switch, and session open succeed.
           runtime.cancelRateLimitWait(sessionId);
           runtime.markBusy(sessionId);
-          agent.followup(userTurnMessage(turnText));
+          agent.followup(
+            userTurnMessage(turnText),
+            resolveEditorEditFollowupOptions(root, editorEditAuthorized, editorEdit, editorReviewScopes),
+          );
         });
       } catch (error) {
         if (error instanceof SessionTransitionConflict) {

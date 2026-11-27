@@ -9,13 +9,20 @@ import {
   type SlideProjectPort,
   type SlideToolRuntimeDeps,
 } from "@open-slidestudio/slides-tools";
-import { clampMaxTokens, type ContextBudgetOptions } from "./context-budget.js";
+import {
+  boundedMultiplier,
+  clampMaxTokens,
+  requestWindow,
+  type ContextBudgetOptions,
+  type ContextProjectionStats,
+} from "./context-budget.js";
 import { failedStream, type LlmPort } from "./llm-port.js";
 import { localProjectPort } from "./local-project-port.js";
 import type { PersistentProductSnapshot } from "./progress-snapshot.js";
 import { ProgressGuard, type ProductProgressConfig } from "./progress-guard.js";
 import type { RuntimeFault } from "./faults.js";
 import { WriterLeaseKeeper, type LeaseMode } from "./lease-keeper.js";
+import { insufficientWindowFailure } from "./runtime-recovery.js";
 import { observingPort, piAiSchemaValidator } from "./runtime-support.js";
 import { estimateMessagesTokens } from "./token-estimate.js";
 import { adaptSlideTool, SerialGate, type ProjectBinding, type RuntimeToolArgsError } from "./tool-adapter.js";
@@ -34,6 +41,7 @@ export type SlidesRuntimeOptions = {
   readonly systemPrompt?: string;
   /** Substituted for `{{cwd}}` in the default persona. */
   readonly workingDirectory?: string;
+  readonly includeTools?: ReadonlySet<string>;
   readonly excludeTools?: ReadonlySet<string>;
   readonly extraTools?: readonly AgentTool[];
   /** Enable the built-in `ask_user_question` suspension tool (interactive hosts only). */
@@ -54,6 +62,25 @@ export type SlidesRuntimeOptions = {
   };
   readonly persistImages?: boolean;
   readonly thinkingLevel?: ThinkingLevel;
+  /** Auto-continue attempts per turn after a reply hits the output limit without a tool call (default 2). */
+  readonly maxTokensAutoRetries?: number;
+  /** Nudge injected before such an auto-continue. */
+  readonly maxTokensNudge?: string;
+  /**
+   * Start from a fresh context seeded with this compact disk summary instead of
+   * replaying the recovered raw history. The session log stays append-only.
+   */
+  readonly initialSummaryContext?: string;
+};
+
+/** Optional request-time hooks of `streamWithBudget`. */
+export type StreamBudgetHooks = {
+  /** Stats of the projection that produced this request; an insufficient window fails before dispatch. */
+  readonly projection?: () => ContextProjectionStats | undefined;
+  /** Uncalibrated input estimate of the dispatched request (feeds online calibration). */
+  readonly onEstimate?: (estimatedTokens: number) => void;
+  /** Active thinking level; when `"off"`, explicitly clears `reasoning` on the stream options. */
+  readonly thinkingLevel?: () => ThinkingLevel;
 };
 
 export type ToolAssembly = {
@@ -96,7 +123,10 @@ export function buildRuntimeTools(options: SlidesRuntimeOptions, assembly: ToolA
   };
   const serial = new SerialGate();
   const acceptsImages = () => options.llm.route.inputModalities.includes("image");
-  const adapted = createSlideTools(deps, options.excludeTools ? { exclude: options.excludeTools } : {}).map((def) =>
+  const adapted = createSlideTools(deps, {
+    ...(options.includeTools ? { include: options.includeTools } : {}),
+    ...(options.excludeTools ? { exclude: options.excludeTools } : {}),
+  }).map((def) =>
     adaptSlideTool(def, {
       caller: assembly.caller,
       sessionId: assembly.sessionId,
@@ -122,18 +152,28 @@ export function streamWithBudget(
   llm: LlmPort,
   budget: () => ContextBudgetOptions,
   onRequestMessages?: (messages: readonly import("@earendil-works/pi-agent-core").AgentMessage[]) => void,
+  hooks: StreamBudgetHooks = {},
 ): StreamFn {
   return (model, context, streamOptions) => {
     if (streamOptions?.signal?.aborted) {
       return failedStream(model, { code: "ABORTED", message: "the run was aborted before the request" }, true);
     }
-    onRequestMessages?.(context.messages);
     const options = budget();
-    const inputTokens = estimateMessagesTokens(context.messages, options.imageTokenEstimate);
+    const window = requestWindow(options);
+    const stats = hooks.projection?.();
+    if (stats?.insufficientWindow) return failedStream(model, insufficientWindowFailure(stats, window));
+    onRequestMessages?.(context.messages);
+    const estimated = estimateMessagesTokens(context.messages, options.imageTokenEstimate);
+    hooks.onEstimate?.(estimated);
+    const inputTokens = Math.ceil(estimated * boundedMultiplier(options.tokenMultiplier));
     const requested = streamOptions?.maxTokens ?? llm.route.maxTokens;
-    const window = Math.min(options.contextWindow, options.gateway?.maxRequestTokens ?? Number.POSITIVE_INFINITY);
     const maxTokens = clampMaxTokens({ contextWindow: window, inputTokens, requested });
-    return llm.stream(model, context, { ...streamOptions, maxTokens });
+    const nextOptions = {
+      ...streamOptions,
+      maxTokens,
+      ...(hooks.thinkingLevel?.() === "off" ? { reasoning: undefined } : {}),
+    };
+    return llm.stream(model, context, nextOptions);
   };
 }
 

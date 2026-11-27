@@ -4,6 +4,7 @@
  * backoff. Every detail string is redacted before it can reach disk or UI.
  */
 import type { ModelPolicyProfile } from "@open-slidestudio/presentation-run";
+import { CONTEXT_WINDOW_TOO_SMALL_CODE } from "./context-budget.js";
 import type { LlmFailure } from "./llm-port.js";
 import { redactText } from "./redact.js";
 
@@ -18,6 +19,8 @@ export type RuntimeFault = {
 export const RATE_LIMIT_BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
 export const RATE_LIMIT_BACKOFF_CAP_MS = 15 * 60_000;
 const FAULT_DETAIL_MAX = 800;
+/** The model window cannot hold the protected context (system, user, plan anchors, latest step). */
+export const CONTEXT_WINDOW_TOO_SMALL_FAULT = "context-window-too-small";
 
 export const BOUNDED_TRIP_CODES: ReadonlySet<string> = new Set([
   "tool-invalid-args-loop",
@@ -35,6 +38,8 @@ export const PAUSE_FAULT_CODES: ReadonlySet<string> = new Set([
   "provider-unavailable",
   "operator-stop",
   "host-interrupted",
+  "turn-max-tokens",
+  CONTEXT_WINDOW_TOO_SMALL_FAULT,
   ...BOUNDED_TRIP_CODES,
 ]);
 
@@ -124,6 +129,9 @@ export function classifyFault(error: unknown): RuntimeFault {
   const detail = redactText(raw.detail).slice(0, FAULT_DETAIL_MAX);
   const serialization = serializationFault(detail);
   if (serialization) return serialization;
+  if (raw.code === CONTEXT_WINDOW_TOO_SMALL_CODE || raw.code === CONTEXT_WINDOW_TOO_SMALL_FAULT) {
+    return { code: CONTEXT_WINDOW_TOO_SMALL_FAULT, detail };
+  }
   const rec = { code: raw.code, detail };
   return { code: providerCode(rec) ?? (rec.code || "agent-error"), detail };
 }
@@ -142,6 +150,9 @@ function statusCode(status: number | undefined, policy?: ModelPolicyProfile): st
  */
 export function classifyLlmFailure(failure: LlmFailure, policy?: ModelPolicyProfile): RuntimeFault {
   if (failure.code === "ABORTED") return { code: "operator-stop", detail: redactText(failure.message) };
+  if (failure.code === CONTEXT_WINDOW_TOO_SMALL_CODE) {
+    return { code: CONTEXT_WINDOW_TOO_SMALL_FAULT, detail: redactText(failure.message).slice(0, FAULT_DETAIL_MAX) };
+  }
   if (/CONTEXT_(?:WINDOW|BUDGET|HISTORY)/.test(failure.code)) {
     return { code: "context-overflow", detail: redactText(failure.message).slice(0, FAULT_DETAIL_MAX) };
   }

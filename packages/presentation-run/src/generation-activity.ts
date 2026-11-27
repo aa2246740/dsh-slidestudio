@@ -26,6 +26,8 @@ const QUIET_FACT_TYPES: ReadonlySet<RunFact["type"]> = new Set([
   "plan.missing-items-declared",
   "layout.revision-committed",
   "template.component-used",
+  "reference.chunk-prepared",
+  "reference.epoch-carried",
 ]);
 
 /** A persisted, presentation-safe event for the generation-history UI. */

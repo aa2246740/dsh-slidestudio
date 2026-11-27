@@ -11,6 +11,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   classifyFault,
+  isPauseFault as runtimeIsPauseFault,
   ProgressGuard,
   ToolInvalidArgsLoopGuard as RuntimeLoopGuard,
   parseRetryAfterMs as runtimeRetryAfter,
@@ -18,7 +19,7 @@ import {
   type GuardEvent,
   type PersistentProductSnapshot,
 } from "@open-slidestudio/slides-runtime";
-import { classifyAgentError, parseRetryAfterMs, rateLimitWaitMs } from "./agent-fault.js";
+import { classifyAgentError, isPauseFault, parseRetryAfterMs, rateLimitWaitMs } from "./agent-fault.js";
 import { ProductProgressSessionGuard } from "./product-progress-guard.js";
 import { ToolInvalidArgsLoopGuard } from "./tool-loop-guard.js";
 
@@ -147,11 +148,17 @@ test("host and runtime agree on auth/rate-limit-over-quota and PI_AI_ERROR exclu
     [{ code: "PI_AI_ERROR", message: "Provider returned error: maximum context length exceeded" }, "PI_AI_ERROR"],
     [{ code: "PI_AI_ERROR", message: "Provider returned error: invalid_argument tool not supported" }, "PI_AI_ERROR"],
     [{ code: "PI_AI_ERROR", message: "Provider returned error: 2056 Token Plan 用量上限" }, "provider-token-plan"],
+    [{ code: "CONTEXT_WINDOW_TOO_SMALL", message: "模型上下文窗口过小" }, "context-window-too-small"],
+    [{ code: "context-window-too-small", message: "模型上下文窗口过小" }, "context-window-too-small"],
   ];
   for (const [input, expectedCode] of cases) {
     const host = classifyAgentError(input);
     const runtime = classifyFault(input);
     assert.equal(host.code, expectedCode, JSON.stringify(input));
     assert.deepEqual(runtime, host, JSON.stringify(input));
+  }
+  for (const code of ["turn-max-tokens", "context-window-too-small", "provider-token-plan", "provider-rate-limit"]) {
+    assert.equal(isPauseFault({ code, detail: "" }), true, `host pause fault: ${code}`);
+    assert.equal(runtimeIsPauseFault({ code }), true, `runtime pause fault: ${code}`);
   }
 });

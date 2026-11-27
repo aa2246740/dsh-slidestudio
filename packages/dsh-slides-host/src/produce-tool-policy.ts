@@ -17,6 +17,8 @@ import {
   addCapabilityTools,
   applyProjectEditScopes,
   CANONICAL_SLIDE_TOOL_NAMES,
+  OPT_IN_SLIDE_TOOL_NAMES,
+  projectHasMaterials,
   readProjectLease,
   toolRefusalMessage,
   withProjectLeaseLock,
@@ -48,6 +50,7 @@ const CAPABILITY_FILTERED_PRODUCE_TOOLS = new Set<string>(CAPABILITY_FILTERED_PR
 /** Page, layout and plan writes that a turn's allowlist can withhold (review, element, editor and layout locks). */
 const ALLOWLIST_GATED_PRODUCE_TOOLS = new Set<string>([
   "write_page",
+  "patch_page_elements",
   "write_layout",
   "write_todo",
   "batch_remove_footers",
@@ -154,12 +157,42 @@ export function sessionProduceCapabilities(deps: SessionPolicyDeps, sessionId?: 
   });
 }
 
+function jsonHasNonEmptyAttachments(file: string): boolean {
+  if (!fs.existsSync(file)) return false;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { attachments?: unknown };
+    return Array.isArray(parsed.attachments) && parsed.attachments.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the project has material-pack assets, initial attachments, or follow-up turn attachments. */
+export function sessionHasAttachments(projectRoot: string): boolean {
+  if (projectHasMaterials(projectRoot)) return true;
+  if (jsonHasNonEmptyAttachments(path.join(projectRoot, "_agent", "generation-input.v1.json"))) return true;
+  return jsonHasNonEmptyAttachments(path.join(projectRoot, "_agent", "turn-attachments.v1.json"));
+}
+
 export function sessionProduceToolAllowlist(deps: SessionPolicyDeps, sessionId?: string): ReadonlySet<string> {
   const caps = sessionProduceCapabilities(deps, sessionId);
   const projectRoot = resolveBindingRoot(deps, sessionId);
   if (projectRoot && discussionOnly(projectRoot)) return DISCUSSION_TOOLS;
   const allowed = new Set(produceToolAllowlist(caps));
-  return projectRoot ? applyProjectEditScopes(allowed, projectRoot) : allowed;
+  if (!projectRoot) return allowed;
+  return applyProjectEditScopes(allowed, projectRoot, {
+    hasAttachments: sessionHasAttachments(projectRoot),
+    patchPageElements: true,
+  });
+}
+
+/** Opt-in tools (such as `patch_page_elements`) active for this turn's allowlist. */
+export function includedToolsFor(allowed: ReadonlySet<string>): ReadonlySet<string> {
+  const included = new Set<string>();
+  for (const name of OPT_IN_SLIDE_TOOL_NAMES) {
+    if (allowed.has(name) && isSliceToolStepVisible(name, allowed)) included.add(name);
+  }
+  return included;
 }
 
 /** Canonical tools a turn must not offer: Hub-hidden tools plus everything outside the turn allowlist. */

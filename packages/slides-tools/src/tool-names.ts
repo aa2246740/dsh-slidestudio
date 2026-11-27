@@ -33,6 +33,14 @@ export const CANONICAL_SLIDE_TOOL_NAMES = [
 
 export type CanonicalSlideToolName = (typeof CANONICAL_SLIDE_TOOL_NAMES)[number];
 
+/**
+ * Tools outside the frozen canonical contract. `createSlideTools` builds them
+ * only when a host opts in through `include`, so existing hosts see no change.
+ */
+export const OPT_IN_SLIDE_TOOL_NAMES = ["patch_page_elements"] as const;
+
+export type OptInSlideToolName = (typeof OPT_IN_SLIDE_TOOL_NAMES)[number];
+
 /** Tools that never take the project writer lease. */
 export const READ_ONLY_SLIDE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "inspect_capabilities",

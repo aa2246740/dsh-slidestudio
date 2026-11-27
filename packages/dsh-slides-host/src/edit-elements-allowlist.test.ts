@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { excludedToolsFor, sessionProduceToolAllowlist } from "./produce-tool-policy.js";
+import { excludedToolsFor, includedToolsFor, sessionProduceToolAllowlist } from "./produce-tool-policy.js";
 import { SliceSessionStore } from "./slice-session.js";
 
 test("ordinary generation keeps edit_elements hidden until an active elements scope exists", () => {
@@ -25,10 +25,17 @@ test("ordinary generation keeps edit_elements hidden until an active elements sc
   assert.equal(ordinary.has("edit_elements"), false);
   assert.equal(ordinary.has("render_deck"), false);
   assert.equal(ordinary.has("review_deck"), false);
+  // Stage slimming drops write_layout and attachment-only material tools on plain decks, while offering patch_page_elements.
+  assert.equal(ordinary.has("write_layout"), false);
+  assert.equal(ordinary.has("read_material"), false);
+  assert.equal(ordinary.has("patch_page_elements"), true);
+  assert.equal(includedToolsFor(ordinary).has("patch_page_elements"), true);
 
   // The runtime never offers what the turn allowlist hides.
   const ordinaryExcluded = excludedToolsFor(ordinary);
   assert.equal(ordinaryExcluded.has("edit_elements"), true);
+  assert.equal(ordinaryExcluded.has("write_layout"), true);
+  assert.equal(ordinaryExcluded.has("read_material"), true);
   assert.equal(ordinaryExcluded.has("web_search"), true);
   assert.equal(ordinaryExcluded.has("open_in_editor"), true);
 
@@ -42,9 +49,10 @@ test("ordinary generation keeps edit_elements hidden until an active elements sc
     }),
   );
   const scoped = sessionProduceToolAllowlist(deps, sessionId);
-  // A page-scoped editor turn never defines layouts: write_layout is the one generation tool it drops.
-  assert.equal(ordinary.has("write_layout"), true);
+  // An elements review lock withholds both write_page and patch_page_elements and adds edit_elements.
   assert.equal(scoped.has("write_layout"), false);
+  assert.equal(scoped.has("patch_page_elements"), false);
+  assert.equal(includedToolsFor(scoped).has("patch_page_elements"), false);
   assert.equal(scoped.size, ordinary.size - 1);
   assert.equal(scoped.has("edit_elements"), true);
   assert.equal(scoped.has("write_page"), false);
@@ -72,11 +80,12 @@ test("ordinary generation keeps edit_elements hidden until an active elements sc
       }),
     );
     const wholePage = sessionProduceToolAllowlist(deps, sessionId);
-    // The review lock adds edit_page_background and drops the generation-only write_layout.
-    assert.equal(wholePage.size, ordinary.size);
+    // The review lock adds edit_page_background while keeping write_page and patch_page_elements.
+    assert.equal(wholePage.size, ordinary.size + 1);
     assert.equal(wholePage.has("write_layout"), false);
     assert.equal(wholePage.has("edit_page_background"), true);
     assert.equal(wholePage.has("edit_elements"), false);
     assert.equal(wholePage.has("write_page"), true);
+    assert.equal(wholePage.has("patch_page_elements"), true);
   }
 });

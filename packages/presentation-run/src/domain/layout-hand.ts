@@ -3,6 +3,7 @@
  * replacement. Pages never repeat this chrome: saveProject copies it into every page that uses the
  * layout, so the checks and the page counts for a changed layout are made here, once.
  */
+import { cappedIssueDetail, WRITE_PAGE_DETAIL_MAX_CHARS } from "./rejection-detail.js";
 import {
   chromeSha256,
   layoutSchemaIssues,
@@ -191,12 +192,18 @@ function commit(
   const schema = layoutSchemaIssues(candidate)[0];
   if (schema) return rejected(schema.code, schema.detail);
   // Off-palette colour is refused once for the whole layout, exactly as write_page refuses it.
+  const packContext = projectPackColorContext(root);
   const colour = writePageColorIssues(asSkillPage(definition), project.presentation.theme, {
-    ...projectPackColorContext(root),
+    ...packContext,
     tool: NAME,
   });
   if (colour.length) {
-    const lines = colour.map((issue) => issue.message).join("\n");
+    // Capped like write_page: every offending field, the palette listed once.
+    const lines = cappedIssueDetail(
+      colour.map((issue) => issue.message),
+      packContext.adoptedPackHexes,
+      WRITE_PAGE_DETAIL_MAX_CHARS - 64,
+    );
     return rejected(
       colour[0]!.code,
       `${KIND_LABEL[scope]}「${definition.id}」里有颜色不在已采用的配色中，本次未保存：\n${lines}`,

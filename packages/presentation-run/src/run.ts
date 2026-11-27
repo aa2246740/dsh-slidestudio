@@ -25,7 +25,7 @@ import {
   commitAdoptedDesignSources,
   currentAdoptedSourceSelection,
 } from "./domain/design-adoption.js";
-import { planningReferencePreflight } from "./domain/design-source-preflight.js";
+import { planningReferencePreflight, writePageReferencePreflight } from "./domain/design-source-preflight.js";
 import {
   designAuthorityDecision,
   designAuthoritySourceIssue,
@@ -421,6 +421,14 @@ export function createPresentationRun(deps: PresentationRunDeps = {}): Presentat
         const writePage = async () => {
           const chart = assertChartEvidence(args);
           if (!chart.ok) return fail(name, chart.detail);
+          // Sectioned ledgers: chart/table/image/… pages need their pptd.md section read this epoch.
+          const sections = writePageReferencePreflight(
+            repoRoot,
+            context.projectRoot,
+            args,
+            epochFor(context.sessionId),
+          );
+          if (sections) return sections;
           const binding = readBinding(context.projectRoot);
           const rawPageSources = sourceIdList(args.adoptedSourceIds, args.adopt);
           const pagePlan = resolvePlanningAdoption({ requested: rawPageSources });

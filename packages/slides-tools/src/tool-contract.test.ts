@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { runPostTurnHooks, SlideToolArgsError, type PostTurnHook } from "./contract.js";
 import { SLIDES_DIRECTOR_PERSONA, SLIDES_DIRECTOR_PERSONA_LINES } from "./persona.js";
 import { compileParameterSpec, SchemaDslError } from "./schema-dsl.js";
-import { listCanonicalSlideTools, toolSchemasSnapshot } from "./suite.js";
+import { listCanonicalSlideTools, slideToolSetSchemaBytes, toolSchemasSnapshot } from "./suite.js";
+import { applyProduceStagePolicy, applyProjectEditScopes, MATERIAL_SLIDE_TOOL_NAMES } from "./tool-allowlist.js";
+import { makeProject, textPage } from "./testkit.js";
 import { CANONICAL_SLIDE_TOOL_NAMES, READ_ONLY_SLIDE_TOOL_NAMES } from "./tool-names.js";
 
 const GOLDEN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/tool-schemas.v1.json");
@@ -130,4 +132,75 @@ test("the director persona is a single host-neutral source", () => {
   assert.equal(SLIDES_DIRECTOR_PERSONA, SLIDES_DIRECTOR_PERSONA_LINES.join("\n"));
   assert.match(SLIDES_DIRECTOR_PERSONA, /^You are the DSH SlideStudio slides director/);
   assert.match(SLIDES_DIRECTOR_PERSONA, /never wrap them in an arguments object/);
+});
+
+/** The tools a Hub generation turn offers before stage slimming (no vision, image or editor scopes). */
+const PRODUCE_GENERATION_TOOLS = [
+  "open_project",
+  "inspect_capabilities",
+  "list_references",
+  "read_reference",
+  "list_materials",
+  "read_material",
+  "query_material",
+  "commit_design",
+  "write_todo",
+  "read_page",
+  "batch_remove_footers",
+  "delete_pages",
+  "write_page",
+  "write_layout",
+  "render_page",
+  "review_pages",
+  "compose_deck",
+  "export_deck",
+];
+
+test("produce stage slimming keeps generation tool schemas inside the context budget", () => {
+  const before = slideToolSetSchemaBytes(PRODUCE_GENERATION_TOOLS);
+  assert.ok(before > 100_000, `unslimmed produce schemas are ${before} bytes`);
+  const withMaterials = applyProduceStagePolicy(new Set(PRODUCE_GENERATION_TOOLS), undefined, { hasAttachments: true });
+  const withoutMaterials = applyProduceStagePolicy(new Set(PRODUCE_GENERATION_TOOLS), undefined, {
+    hasAttachments: false,
+  });
+  for (const allowed of [withMaterials, withoutMaterials]) {
+    assert.equal(allowed.has("write_layout"), false, "write_layout leaves normal generation");
+    assert.equal(allowed.has("patch_page_elements"), true, "patches ride with write_page");
+  }
+  assert.ok(withMaterials.has("read_material"));
+  for (const name of MATERIAL_SLIDE_TOOL_NAMES) assert.equal(withoutMaterials.has(name), false, name);
+  const omitted = applyProduceStagePolicy(new Set(PRODUCE_GENERATION_TOOLS), undefined);
+  assert.ok(omitted.has("query_material"), "an omitted hasAttachments keeps material tools");
+  const withBytes = slideToolSetSchemaBytes(withMaterials);
+  const withoutBytes = slideToolSetSchemaBytes(withoutMaterials);
+  assert.ok(withBytes <= 72 * 1024, `with materials: ${withBytes} bytes`);
+  assert.ok(withoutBytes <= 66 * 1024, `without materials: ${withoutBytes} bytes`);
+  assert.ok(before - withoutBytes >= 40_000, `saved ${before - withoutBytes} bytes`);
+});
+
+test("layout work keeps write_layout and withholds patches with write_page", () => {
+  assert.ok(applyProduceStagePolicy(new Set(["write_layout"]), undefined, { layouts: true }).has("write_layout"));
+  const noWrite = applyProduceStagePolicy(new Set(["read_page", "patch_page_elements"]), undefined);
+  assert.equal(noWrite.has("patch_page_elements"), false, "no write_page, no patch");
+  const optedOut = applyProduceStagePolicy(new Set(["write_page"]), undefined, { patchPageElements: false });
+  assert.equal(optedOut.has("patch_page_elements"), false);
+  const layout = {
+    id: "body",
+    name: "正文",
+    elements: [{ elementId: "rule", elementType: "line", bounds: [40, 80, 880, 0] }],
+  };
+  const withLayouts = makeProject(
+    [{ file: "2_body.page", page: textPage("2_body", [] as never, { layoutId: "body" }) }],
+    [layout] as never,
+  );
+  assert.ok(applyProduceStagePolicy(new Set(["write_layout"]), withLayouts).has("write_layout"));
+  const plain = makeProject([{ file: "2_body.page", page: textPage("2_body", [] as never) }]);
+  assert.equal(applyProduceStagePolicy(new Set(["write_layout"]), plain).has("write_layout"), false);
+  // Without a produce policy the edit scopes behave exactly as before.
+  const legacy = applyProjectEditScopes(new Set(["write_page", "write_layout"]), plain);
+  assert.deepEqual([...legacy].sort(), ["write_layout", "write_page"]);
+  const staged = applyProjectEditScopes(new Set(["write_page", "write_layout", "read_material"]), plain, {
+    hasAttachments: false,
+  });
+  assert.deepEqual([...staged].sort(), ["patch_page_elements", "write_page"]);
 });

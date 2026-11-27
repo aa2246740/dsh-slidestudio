@@ -279,7 +279,8 @@ export async function toDshGenerateOptions(
     description: tool.description,
     parameters: tool.parameters as Record<string, unknown>,
   }));
-  const effort = options?.reasoning ?? route.reasoningEffort;
+  const hasExplicitReasoning = options !== undefined && Object.prototype.hasOwnProperty.call(options, "reasoning");
+  const effort = hasExplicitReasoning ? options.reasoning : route.reasoningEffort;
   const temp = options?.temperature ?? temperature;
   return {
     provider: route.providerId,

@@ -17,6 +17,12 @@
       "since": "0.3.0",
       "description": "Register the bundled slides-mcp server with the DSH 0.2.2-rc.5+ MCP manager (mcpManager.register) so DSH agents can call the SlideStudio tools over MCP. Hosts without mcpManager (rc.2) skip it with a warning.",
       "owner": "dsh-slidestudio"
+    },
+    "reference_delivery_confirmation": {
+      "default": true,
+      "since": "0.3.2",
+      "description": "Require read_reference chunks to reach the model untruncated before counting toward reference preflight gates in Hub runtimes. SLIDESTUDIO_REFERENCE_DELIVERY_CONFIRMATION overrides this flag.",
+      "owner": "dsh-slides-host"
     }
   }
 }

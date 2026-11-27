@@ -29,6 +29,8 @@ export type LlmRoute = {
   readonly maxTokens: number;
   readonly inputModalities: readonly LlmInputModality[];
   readonly reasoningEffort?: ThinkingLevel;
+  /** Supported reasoning effort ids declared by the model/host, when known. */
+  readonly supportedReasoningEfforts?: readonly string[];
 };
 
 /** Structured provider failure. `code` is the provider/host code (e.g. `RATE_LIMIT`, `AUTH`). */

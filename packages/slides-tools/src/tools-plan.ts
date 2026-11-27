@@ -2,6 +2,7 @@
 import { TODO_EXHIBIT_KINDS, type CommandReceipt } from "@open-slidestudio/presentation-run";
 import type { SlideToolDefinition, SlideToolResult } from "./contract.js";
 import { PLAN_DESIGN_PARAMETERS } from "./design-aspects-parameter.js";
+import { designContractCard } from "./design-contract.js";
 import { rejectKindThemePack } from "./kind-theme-gate.js";
 import { WRITE_TODO_DATA_PARAMETERS, writeTodoItemsParameter } from "./plan-material-params.js";
 import { isLeaseRefusalData, present, result, slideTool, type SlideToolRuntimeDeps } from "./tool-kit.js";
@@ -29,7 +30,10 @@ export const SLIDE_PLAN_ITEMS_PARAMETER = {
     "Complete ordered plan: {pageId, title, layoutFamily, exhibits, note?, purpose?, layoutId?}. layoutId names the page layout the page is planned to use. Use an explicit empty exhibits array when none are needed. One page is valid.",
 } as const;
 
-function planOutcome(receipt: CommandReceipt): SlideToolResult {
+function planOutcome(
+  receipt: CommandReceipt,
+  designContract?: (payload: Record<string, unknown>) => unknown,
+): SlideToolResult {
   if (!receipt.ok) {
     if (isLeaseRefusalData(receipt.payload)) return result(receipt.payload);
     return result({
@@ -40,7 +44,8 @@ function planOutcome(receipt: CommandReceipt): SlideToolResult {
       painted: false,
     });
   }
-  return result({ ...receipt.payload, outcome: "committed" });
+  const committed = { ...receipt.payload, outcome: "committed" };
+  return result(designContract ? { ...committed, designContract: designContract(committed) } : committed);
 }
 
 async function commitPlan(
@@ -51,7 +56,12 @@ async function commitPlan(
 ): Promise<SlideToolResult> {
   const rejected = rejectKindThemePack(ctx.projectRoot, args);
   if (rejected) return result(rejected);
-  return planOutcome(await present(deps, ctx, name, args));
+  // commit_design also restates the adopted design as a compact contract card (a plan anchor).
+  const card =
+    name === "commit_design"
+      ? (payload: Record<string, unknown>) => designContractCard(ctx.projectRoot, payload)
+      : undefined;
+  return planOutcome(await present(deps, ctx, name, args), card);
 }
 
 export function commitDesignTool(deps: SlideToolRuntimeDeps): SlideToolDefinition {

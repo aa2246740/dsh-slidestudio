@@ -117,7 +117,7 @@ export function listReferencesTool(deps: SlideToolRuntimeDeps): SlideToolDefinit
         type: "string",
         description: "Optional family from familyTotals, such as academic, consulting or general",
       },
-      kind: { type: "string", description: "source or visual" },
+      kind: { type: "string", description: "source, visual or design" },
       tag: { type: "string", description: "Optional substring filter" },
     },
     readOnly: true,
@@ -130,14 +130,19 @@ export function listReferencesTool(deps: SlideToolRuntimeDeps): SlideToolDefinit
 export function readReferenceTool(deps: SlideToolRuntimeDeps): SlideToolDefinition {
   return slideTool(deps, {
     name: "read_reference",
-    description: "Read one OpenKimi source chunk by sourceId and chunkIndex. Marks the source consulted.",
+    description:
+      "Read one OpenKimi source or section chunk (for example openkimi:reference/pptd.md::chart) by sourceId and chunkIndex. Marks the source consulted.",
     parameters: {
       sourceId: { type: "string", required: true },
       chunkIndex: { type: "integer", required: true },
     },
     readOnly: true,
     async execute(args, ctx) {
-      return receiptResult(await present(deps, ctx, "read_reference", args));
+      const commandArgs =
+        deps.confirmReferenceDelivery !== undefined
+          ? { ...args, _confirmDelivery: deps.confirmReferenceDelivery }
+          : args;
+      return receiptResult(await present(deps, ctx, "read_reference", commandArgs));
     },
   });
 }

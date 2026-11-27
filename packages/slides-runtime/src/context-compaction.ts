@@ -9,6 +9,7 @@ export const ELISION = "[历史内容已为模型上下文缩短；请用工具�
 export const DEEP_ELISION = "[已省略；请用工具重读]";
 export const REASONING_ELISION = "[earlier reasoning omitted]";
 export const IMAGE_OFFLOADED = "[图片已从上下文移出以控制预算；需要时请重新渲染或读取。]";
+export const SUMMARY_LABEL = "[历史工具结果已摘要]";
 
 const IDENTITY_KEYS = new Set([
   "pageId",
@@ -89,20 +90,26 @@ export function isFailedToolResult(message: AgentMessage): boolean {
 }
 
 /** Short structured summary of a tool result's JSON envelope, or a bounded text excerpt. */
-export function summarizeToolResult(message: AgentMessage, excerptChars = 160): string {
+export function summarizeToolResult(message: AgentMessage, excerptChars = 160, label = SUMMARY_LABEL): string {
   const [first] = textsOf(message);
   const name = String((message as unknown as Mutable).toolName ?? "tool");
-  if (first === undefined) return `[历史工具结果已摘要] ${name}`;
+  if (first === undefined) return `${label} ${name}`;
   try {
     const parsed = JSON.parse(first) as Record<string, unknown>;
     const picked = Object.fromEntries(
       SUMMARY_KEYS.filter((key) => key in parsed && scalarIdentity(parsed[key])).map((key) => [key, parsed[key]]),
     );
     const detail = typeof parsed.detail === "string" ? { detail: shorten(parsed.detail, excerptChars, "…") } : {};
-    return `[历史工具结果已摘要] ${name} ${JSON.stringify({ ...picked, ...detail })}`;
+    return `${label} ${name} ${JSON.stringify({ ...picked, ...detail })}`;
   } catch {
-    return `[历史工具结果已摘要] ${name}: ${shorten(first, excerptChars, "…")}`;
+    return `${label} ${name}: ${shorten(first, excerptChars, "…")}`;
   }
+}
+
+/** Whether any text of `message` carries a compaction marker (shortened, summarized or elided). */
+export function hasCompactionMarker(message: AgentMessage, extraMarkers: readonly string[] = []): boolean {
+  const markers = [ELISION, DEEP_ELISION, SUMMARY_LABEL, ...extraMarkers];
+  return textsOf(message).some((text) => markers.some((marker) => text.includes(marker)));
 }
 
 /** Replace inline images with a text placeholder; returns how many were offloaded. */

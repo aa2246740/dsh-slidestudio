@@ -50,6 +50,8 @@ export type WritePageOutcome =
       readonly outcome: "rejected";
       readonly detail: string;
       readonly error?: string;
+      readonly next?: string;
+      readonly missingReferenceChunks?: readonly unknown[];
       readonly painted?: false;
     } & WritePageFeedback);
 
