@@ -473,3 +473,17 @@ test("cyclic replayState in a bound SlidesAgentRuntime persists assistant reply 
   await assert.rejects(() => rt2.resume(), /nothing to resume/);
   fs.rmSync(dataRoot, { recursive: true, force: true });
 });
+
+test("explicit reasoning: undefined omits reasoningEffort instead of falling back to route default", async () => {
+  const { llm, requests } = fakeLlm(
+    chunks([
+      { type: "text-delta", index: 0, text: "ok" },
+      { type: "finish", reason: { kind: "stop" } },
+    ]),
+  );
+  const port = new DshLlmPort({ llm, route: { ...ROUTE, reasoningEffort: "high" } });
+  await collect(port, [user("default")], {});
+  await collect(port, [user("off")], { reasoning: undefined });
+  assert.equal(requests[0]?.reasoningEffort, "high");
+  assert.equal("reasoningEffort" in requests[1]!, false);
+});

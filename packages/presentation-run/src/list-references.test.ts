@@ -6,6 +6,8 @@ import { test, type TestContext } from "node:test";
 import { buildCatalogDto, loadReferenceCatalog, resolveRepoRoot } from "./catalog.js";
 import { writeDomainRuntime } from "./domain/domain-hands.js";
 import { readRunLedger } from "./domain/run-ledger.js";
+import { OPENKIMI_SECTIONED_REFERENCE_LAYOUT } from "./domain/openkimi-pptd-sections.js";
+import { LIST_REFERENCES_HINT } from "./list-references.js";
 import { listSourceReceipts } from "./receipts.js";
 import { createPresentationRun } from "./run.js";
 
@@ -43,7 +45,7 @@ test("unfiltered list_references returns only chunk status and totals within 409
   t.diagnostic(`unfiltered receipt: ${bytes} bytes`);
   assert.ok(bytes <= 4096, `complete serialized receipt is ${bytes} bytes`);
   assert.equal(result.ok, true);
-  assert.equal(result.payload.hint, "需要目录请带 family 或 kind 参数");
+  assert.equal(result.payload.hint, LIST_REFERENCES_HINT);
   assert.deepEqual(Object.keys(result.payload).sort(), [
     "familyTotals",
     "hint",
@@ -164,7 +166,9 @@ test("listing never satisfies required reads and preserves planning and compose 
       reason: requirement.reason,
     })),
   );
-  assert.equal(required.length, 17);
+  // Sectioned v2: SKILL 2 + pptd core 3 + categories 1 + scenario 3 + preset 3 (v1 whole-file pptd was 17).
+  assert.equal(required.length, 12);
+  assert.equal(ledger.sourcePack.referenceLayout, OPENKIMI_SECTIONED_REFERENCE_LAYOUT);
   const missing = required.map(({ sourceId, chunkIndex }) => ({ sourceId, chunkIndex }));
   for (const args of [{}, { family: "finance" }, { kind: "visual" }, { tag: "no-match" }]) {
     const result = await run.execute({ name: "list_references", args }, context);
@@ -216,7 +220,7 @@ test("blank or invalid filters cannot accidentally return the whole directory", 
   ]) {
     const result = await run.execute({ name: "list_references", args }, context);
     assert.equal(result.payload.sources, undefined);
-    assert.equal(result.payload.hint, "需要目录请带 family 或 kind 参数");
+    assert.equal(result.payload.hint, LIST_REFERENCES_HINT);
     assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") <= 4096);
   }
 });

@@ -1,14 +1,17 @@
 /**
  * Offline token estimation for mixed Chinese/English content. CJK ideographs,
  * kana, hangul and full-width punctuation cost roughly one token each; other
- * text costs roughly one token per four UTF-8 bytes. Images use a fixed
- * per-block estimate. Estimates are deliberately conservative (rounded up).
+ * text costs roughly one token per 3.5 UTF-8 bytes (JSON tool arguments and
+ * code tokenize denser than prose). Images use a fixed per-block estimate.
+ * Estimates are deliberately conservative (rounded up); `TokenCalibration`
+ * corrects them online from provider-reported usage.
  */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Usage } from "@earendil-works/pi-ai";
 
 export const DEFAULT_IMAGE_TOKEN_ESTIMATE = 1_200;
 const MESSAGE_OVERHEAD_TOKENS = 4;
-const BYTES_PER_LATIN_TOKEN = 4;
+const BYTES_PER_LATIN_TOKEN = 3.5;
 
 const CJK =
   /[\u3000-\u303f\u3040-\u30ff\u3100-\u312f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/u;
@@ -78,4 +81,62 @@ export function imageLoad(messages: readonly AgentMessage[]): { readonly count: 
     }
   }
   return { count, bytes };
+}
+
+/** Bounds of the online calibration multiplier. */
+export const CALIBRATION_BOUNDS = { min: 0.7, max: 1.8 } as const;
+
+/** Provider-reported input tokens of one request (prompt-cache reads/writes included). */
+export function reportedInputTokens(usage: Partial<Usage> | undefined): number {
+  if (!usage) return 0;
+  const part = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);
+  return part(usage.input) + part(usage.cacheRead) + part(usage.cacheWrite);
+}
+
+/**
+ * Online estimate calibration: the estimate of the last dispatched request is
+ * compared with the provider's real `usage.input` once its reply arrives, and
+ * the ratio (bounded to `CALIBRATION_BOUNDS`) scales later estimates so the
+ * budget of a 64k/128k window stays accurate for the active tokenizer.
+ */
+export class TokenCalibration {
+  private factor = 1;
+  private pendingEstimate?: number;
+
+  constructor(
+    private readonly bounds: { readonly min: number; readonly max: number } = CALIBRATION_BOUNDS,
+    /** Weight of the newest observation (1 = latest ratio wins). */
+    private readonly weight = 1,
+  ) {}
+
+  get multiplier(): number {
+    return this.factor;
+  }
+
+  /** Record the uncalibrated estimate of the request that was just sent. */
+  recordRequest(estimatedTokens: number): void {
+    this.pendingEstimate = estimatedTokens > 0 ? estimatedTokens : undefined;
+  }
+
+  /** Fold the real usage of the pending request in; returns the multiplier now in force. */
+  observeUsage(usage: Partial<Usage> | undefined): number {
+    const estimate = this.pendingEstimate;
+    const actual = reportedInputTokens(usage);
+    this.pendingEstimate = undefined;
+    if (!estimate || actual <= 0) return this.factor;
+    const ratio = Math.min(this.bounds.max, Math.max(this.bounds.min, actual / estimate));
+    const next = this.factor + (ratio - this.factor) * Math.min(1, Math.max(0, this.weight));
+    this.factor = Math.min(this.bounds.max, Math.max(this.bounds.min, next));
+    return this.factor;
+  }
+
+  /** Scale an uncalibrated estimate. */
+  apply(tokens: number): number {
+    return Math.ceil(tokens * this.factor);
+  }
+
+  reset(): void {
+    this.factor = 1;
+    this.pendingEstimate = undefined;
+  }
 }

@@ -12,6 +12,11 @@ export const GENERATION_STATUS_I18N = {
   用新模型继续: "Continue with new model",
   "模型单轮输出达到长度上限，任务已自动暂停。":
     "The model reached its single-turn output limit and the task paused automatically.",
+  当前模型上下文窗口过小: "Current model context window is too small",
+  "当前模型的上下文窗口不足以容纳完整演示文稿生成，请切换到至少 64k 上下文窗口的模型后再继续。":
+    "This model's context window is too small for full presentation generation. Switch to a model with at least a 64k context window before continuing.",
+  "请在下方切换到上下文窗口不小于 64k 的模型（推荐 128k 及以上）后再继续。":
+    "Switch below to a model with at least a 64k context window (128k or larger recommended) before continuing.",
   页面规划尚未完成: "Page plan is not complete yet",
   页面规划需要补全: "Page plan needs completion",
   整稿结构检查尚未通过: "Deck structure check has not passed yet",

@@ -56,6 +56,8 @@ export type SessionRecoveryDeps = {
   /** True only when a runtime turn is actively queued or executing (excludes failover's own busy bit). */
   readonly isRunning?: (sessionId: string) => boolean;
   readonly clearSteers?: (sessionId: string) => void;
+  /** Called after automatic provider failover rebinds the session so the next turn seeds from disk summary. */
+  readonly onProviderSwitched?: (sessionId: string) => void;
   /** Grok fallback target (the next ready non-Grok route), when one exists. */
   readonly grokFallbackTarget: () => Target | undefined;
   readonly openrouterKeyPresent: () => boolean;
@@ -280,6 +282,7 @@ export class SessionRecovery {
           return;
         }
         clearAgentError(currentRoot);
+        this.deps.onProviderSwitched?.(sessionId);
         this.deps.markBusy(sessionId);
         this.deps.continueSession(sessionId, reasonText(target));
       };

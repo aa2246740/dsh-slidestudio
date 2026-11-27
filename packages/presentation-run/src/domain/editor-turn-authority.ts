@@ -22,6 +22,7 @@ export const EDITOR_AUTHORITY_LOST_DETAIL =
  */
 export const LAPSED_EDITOR_WRITE_TOOLS: readonly string[] = [
   "write_page",
+  "patch_page_elements",
   "write_layout",
   "edit_elements",
   "edit_page_background",

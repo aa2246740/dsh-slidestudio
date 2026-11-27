@@ -14,13 +14,14 @@ import {
   type AgentTool,
   type BeforeToolCallContext,
   type BeforeToolCallResult,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { resolveModelPolicyProfile, type ModelPolicyProfile } from "@open-slidestudio/presentation-run";
 import { runPostTurnHooks, type PostTurnHook, type SlideCaller } from "@open-slidestudio/slides-tools";
-import { ContextBudget, isContextOverflowMessage, type ContextBudgetOptions } from "./context-budget.js";
-import { classifyFault, classifyLlmFailure, rateLimitWaitMs, type RuntimeFault } from "./faults.js";
+import { ContextBudget, type ContextBudgetOptions } from "./context-budget.js";
+import { classifyFault, type RuntimeFault } from "./faults.js";
 import { isLeaseFaultCode, type WriterLeaseKeeper } from "./lease-keeper.js";
-import { readLlmFailure } from "./llm-port.js";
 import type { ProgressGuard } from "./progress-guard.js";
 import type { GuardEvent } from "./guard-events.js";
 import {
@@ -32,12 +33,16 @@ import {
   type SlidesRuntimeOptions,
 } from "./runtime-config.js";
 import {
+  flushImageDeliveries,
+  recoverTurnFailures,
+  reportDeliveredReferences,
+  seededContext,
+  trackOutgoing,
+} from "./runtime-recovery.js";
+import {
   createTurnState,
-  imageResultCallIds,
-  lastAssistant,
   notifyListeners,
   resolveTurnOutcome,
-  sleep,
   toolResultEvent,
   turnEndReason,
   userPromptMessage,
@@ -49,6 +54,7 @@ import {
   type TurnState,
 } from "./runtime-support.js";
 import { RuntimeSessionStore, type RecoveredSession } from "./session-store.js";
+import { TokenCalibration } from "./token-estimate.js";
 import { ToolInvalidArgsLoopGuard } from "./tool-loop-guard.js";
 import type { ProjectBinding } from "./tool-adapter.js";
 import { assistantRows, readTraceHighWater, resultRow, toolRow, TraceWriter, turnRow } from "./trace-projection.js";
@@ -68,6 +74,10 @@ export class SlidesAgentRuntime {
   private readonly store: RuntimeSessionStore;
   private readonly trace: TraceWriter;
   private readonly toolLoop = new ToolInvalidArgsLoopGuard();
+  /** Online estimate calibration from provider-reported input usage. */
+  readonly calibration = new TokenCalibration();
+  private readonly reportedReferences = new Set<string>();
+  private pendingSeed?: string;
   private readonly progress?: ProgressGuard;
   private readonly lease?: WriterLeaseKeeper;
   private readonly postTurnHooks: readonly PostTurnHook[];
@@ -111,7 +121,9 @@ export class SlidesAgentRuntime {
     this.toolNames = new Set(tools.map((tool) => tool.name));
     const recovered = options.project ? this.inspectProject(options.project, tools) : undefined;
     if (recovered) this.recovery = recovered;
-    this.agent = this.createAgent(tools, recovered?.messages ?? []);
+    this.pendingSeed = options.initialSummaryContext?.trim() || undefined;
+    const seeded = this.pendingSeed ? seededContext(this.pendingSeed, this.systemPrompt(), tools) : undefined;
+    this.agent = this.createAgent(tools, seeded ?? recovered?.messages ?? []);
   }
 
   /** Read-only recovery inspection; disk closure waits until this runtime acquires the writer lease. */
@@ -154,15 +166,18 @@ export class SlidesAgentRuntime {
       initialState: {
         systemPrompt: this.systemPrompt(),
         model: this.options.llm.model,
-        thinkingLevel: this.options.thinkingLevel ?? this.options.llm.route.reasoningEffort ?? "off",
+        thinkingLevel: this.thinkingLevel(),
         tools,
         messages,
       },
       streamFn: streamWithBudget(
         this.options.llm,
         () => this.budgetOptions(),
-        (outgoing) => {
-          if (this.current) this.current.inFlightImageCallIds = imageResultCallIds(outgoing);
+        (outgoing) => trackOutgoing(this.current, outgoing, this.options.contextBudget),
+        {
+          projection: () => this.budget.lastProjection,
+          onEstimate: (tokens) => this.calibration.recordRequest(tokens),
+          thinkingLevel: () => this.agent.state.thinkingLevel,
         },
       ),
       transformContext: this.budget.transform,
@@ -174,11 +189,16 @@ export class SlidesAgentRuntime {
     return agent;
   }
 
+  private thinkingLevel(): ThinkingLevel {
+    return this.options.thinkingLevel ?? this.options.llm.route.reasoningEffort ?? "off";
+  }
+
   private budgetOptions(): ContextBudgetOptions {
     const route = this.options.llm.route;
     return {
       contextWindow: route.contextWindow,
       maxOutputTokens: route.maxTokens,
+      tokenMultiplier: this.calibration.multiplier,
       ...this.options.contextBudget,
     };
   }
@@ -221,7 +241,8 @@ export class SlidesAgentRuntime {
 
   /** Start a new turn from a user prompt. */
   prompt(input: PromptInput): Promise<RuntimeTurnResult> {
-    return this.runTurn(() => this.agent.prompt(userPromptMessage(input)));
+    const seed = typeof input === "string" ? undefined : input.seedFromSummary?.trim();
+    return this.runTurn(() => this.agent.prompt(userPromptMessage(input)), false, seed || undefined);
   }
 
   /** Continue an interrupted turn from the persisted transcript (freshly synced under lease when bound). */
@@ -282,7 +303,7 @@ export class SlidesAgentRuntime {
     return this.lease.isAuthorized(this.bound.projectRoot);
   }
 
-  private async runTurn(start: () => Promise<void>, isResume = false): Promise<RuntimeTurnResult> {
+  private async runTurn(start: () => Promise<void>, isResume = false, seed?: string): Promise<RuntimeTurnResult> {
     if (this.disposed) throw new Error("the runtime was disposed");
     if (this.current) throw new Error("a turn is already running");
     const state = createTurnState(this.turnCounter + 1);
@@ -295,6 +316,8 @@ export class SlidesAgentRuntime {
         state.fault = refusal;
       } else {
         if (this.bound) this.syncBoundProject(this.bound.projectRoot);
+        this.applySeed(seed ?? this.pendingSeed);
+        this.agent.state.thinkingLevel = this.thinkingLevel();
         if (isResume) {
           this.agent.state.messages = withoutTrailingFailure(this.agent.state.messages);
           const last = this.agent.state.messages.at(-1) as { role?: unknown } | undefined;
@@ -307,7 +330,14 @@ export class SlidesAgentRuntime {
         state.turn = this.turnCounter += 1;
         this.beginTurn(state.turn);
         await start();
-        await this.recoverFailures(state);
+        await recoverTurnFailures({
+          agent: this.agent,
+          budget: this.budget,
+          options: this.options,
+          policy: this.policy,
+          state,
+          emit: (event) => this.emit(event),
+        });
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("nothing to resume:")) throw error;
@@ -389,33 +419,10 @@ export class SlidesAgentRuntime {
     if (results.length) this.emit({ type: "post-turn", results });
   }
 
-  /** Provider-overflow retry (one escalation) and bounded 429 backoff. */
-  private async recoverFailures(state: TurnState): Promise<void> {
-    let rateAttempt = 0;
-    let overflowRetried = false;
-    const maxRateAttempts = this.options.rateLimit?.maxAttempts ?? 3;
-    const wait = this.options.rateLimit?.sleep ?? sleep;
-    for (;;) {
-      const last = lastAssistant(this.agent.state.messages);
-      if (!last || last.stopReason !== "error" || state.fault) return;
-      const route = this.options.llm.route;
-      const fault = classifyLlmFailure(readLlmFailure(last) ?? { code: "UNKNOWN", message: "" }, this.policy);
-      const overflow =
-        fault.code === "context-overflow" ||
-        isContextOverflowMessage(last, route.contextWindow, this.options.contextBudget?.gateway);
-      if (overflow && !overflowRetried && this.budget.escalate()) {
-        overflowRetried = true;
-        this.emit({ type: "context/escalate", tier: this.budget.tier });
-      } else {
-        if (fault.code !== "provider-rate-limit" || rateAttempt >= maxRateAttempts) return;
-        const waitMs = rateLimitWaitMs(rateAttempt, fault.retryAfterMs);
-        rateAttempt += 1;
-        this.emit({ type: "rate-limit/wait", attempt: rateAttempt, waitMs });
-        if (!(await wait(waitMs, state.signal.signal))) return;
-      }
-      this.agent.state.messages = withoutTrailingFailure(this.agent.state.messages);
-      await this.agent.continue();
-    }
+  /** Replace the model context with a fresh summary-seeded one; the session log keeps the raw history. */
+  private applySeed(summary: string | undefined): void {
+    this.pendingSeed = undefined;
+    if (summary) this.agent.state.messages = seededContext(summary, this.systemPrompt(), this.tools);
   }
 
   private outcome(state: TurnState): RuntimeTurnResult {
@@ -499,7 +506,10 @@ export class SlidesAgentRuntime {
     if (record.role !== "assistant") return;
     this.trace.write(assistantRows({ turn: turn.turn, step: turn.step }, message));
     const delivered = turn.inFlightImageCallIds;
+    const references = turn.inFlightReferenceCallIds ?? [];
     turn.inFlightImageCallIds = new Set();
+    turn.inFlightReferenceCallIds = [];
+    this.calibration.observeUsage((message as AssistantMessage).usage);
     if (
       record.stopReason === "error" ||
       record.stopReason === "aborted" ||
@@ -508,18 +518,10 @@ export class SlidesAgentRuntime {
     ) {
       return;
     }
-    for (const callId of delivered) {
-      if (turn.signal.signal.aborted || Boolean(turn.fault)) break;
-      const hook = turn.deliveries.get(callId);
-      if (!hook) continue;
-      turn.deliveries.delete(callId);
-      if (!this.canWriteBoundProject(turn.fault)) break;
-      try {
-        await hook();
-      } catch {
-        // Delivery receipts are best effort; the image already reached the model.
-      }
+    if (this.canWriteBoundProject(turn.fault)) {
+      reportDeliveredReferences(references, this.reportedReferences, this.options.contextBudget);
     }
+    await flushImageDeliveries(turn, delivered, () => this.canWriteBoundProject(turn.fault));
   }
 }
 

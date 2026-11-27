@@ -6,8 +6,15 @@
  * runtime events and turn outcomes to the host. No DSH agent service is used.
  */
 import type { RuntimeEvent, RuntimeTurnResult, SlidesAgentRuntime } from "@open-slidestudio/slides-runtime";
+import { discussionOnly } from "./assistant-conversation.js";
 import type { LiveQuestionBroker } from "./assistant-questions.js";
-import { turnMessageText, type SessionTurnMessage, type SlidesSessionHandle } from "./session-handle.js";
+import { buildDiskContextSummary, hasPersistedDeckHistory, type DiskSummaryReason } from "./context-summary.js";
+import {
+  turnMessageText,
+  type SessionFollowupOptions,
+  type SessionTurnMessage,
+  type SlidesSessionHandle,
+} from "./session-handle.js";
 import {
   buildSessionRuntime,
   sessionRuntimeKey,
@@ -17,9 +24,9 @@ import {
 } from "./session-runtime-config.js";
 
 export type TurnAction =
-  | { readonly kind: "prompt"; readonly text: string }
+  | { readonly kind: "prompt"; readonly text: string; readonly seedFromSummary?: string }
   /** Continue the persisted transcript; prompt `fallbackText` when nothing is resumable. */
-  | { readonly kind: "resume"; readonly fallbackText: string };
+  | { readonly kind: "resume"; readonly fallbackText: string; readonly seedFromSummary?: string };
 
 export type SessionRuntimeManagerOptions = SessionRuntimeDeps & {
   /** Route limits from the LLM catalog (`ctx.llm.resolveModelInfo`). */
@@ -55,9 +62,15 @@ function sleep(ms: number): Promise<void> {
 
 export class SessionRuntimeManager {
   private readonly entries = new Map<string, Entry>();
+  private readonly pendingSeedReasons = new Map<string, DiskSummaryReason>();
   private disposed = false;
 
   constructor(private readonly options: SessionRuntimeManagerOptions) {}
+
+  /** Request a fresh summary-seeded context on this session's next turn (model switch or failover). */
+  markSeedOnNextTurn(sessionId: string, reason: DiskSummaryReason = "model-switch"): void {
+    this.pendingSeedReasons.set(sessionId, reason);
+  }
 
   has(sessionId: string): boolean {
     return this.entries.has(sessionId);
@@ -91,8 +104,12 @@ export class SessionRuntimeManager {
     if (!entry) return undefined;
     return {
       status: this.running(sessionId) ? "running" : "idle",
-      followup: (message: SessionTurnMessage) =>
-        this.enqueue(sessionId, { kind: "prompt", text: turnMessageText(message) }),
+      followup: (message: SessionTurnMessage, options?: SessionFollowupOptions) =>
+        this.enqueue(sessionId, {
+          kind: "prompt",
+          text: turnMessageText(message),
+          ...(options?.seedFromSummary ? { seedFromSummary: options.seedFromSummary } : {}),
+        }),
       steer: (message: SessionTurnMessage) => this.steer(sessionId, turnMessageText(message)),
     };
   }
@@ -195,7 +212,7 @@ export class SessionRuntimeManager {
     if (ticket <= entry.stoppedTicket) return this.stoppedResult(entry);
     await this.refresh(entry);
     if (ticket <= entry.stoppedTicket) return this.stoppedResult(entry);
-    const pending = this.start(entry.runtime, action);
+    const pending = this.start(entry, action);
     if (entry.runtime.running) {
       for (const text of entry.steers.splice(0)) entry.runtime.steer(text);
     } else {
@@ -204,11 +221,36 @@ export class SessionRuntimeManager {
     return pending;
   }
 
-  private start(runtime: SlidesAgentRuntime, action: TurnAction): Promise<RuntimeTurnResult> {
-    if (action.kind === "prompt") return runtime.prompt(action.text);
-    return runtime.resume().catch((error: unknown) => {
+  private resolveTurnSeed(sessionId: string, explicitSeed: string | undefined): string | undefined {
+    if (explicitSeed?.trim()) {
+      this.pendingSeedReasons.delete(sessionId);
+      return explicitSeed.trim();
+    }
+    const pendingReason = this.pendingSeedReasons.get(sessionId);
+    if (!pendingReason) return undefined;
+    const binding = this.options.store.bindingFor(sessionId);
+    if (!binding) {
+      this.pendingSeedReasons.delete(sessionId);
+      return undefined;
+    }
+    const root = this.options.store.resolveRoot(binding);
+    // Keep pending model-switch seed unconsumed across read-only discussion turns so dialogue stays intact.
+    if (discussionOnly(root)) return undefined;
+    this.pendingSeedReasons.delete(sessionId);
+    return hasPersistedDeckHistory(root) ? buildDiskContextSummary(root, { reason: pendingReason }) : undefined;
+  }
+
+  private start(entry: Entry, action: TurnAction): Promise<RuntimeTurnResult> {
+    const seedFromSummary = this.resolveTurnSeed(entry.sessionId, action.seedFromSummary);
+    if (action.kind === "prompt") {
+      return seedFromSummary
+        ? entry.runtime.prompt({ text: action.text, seedFromSummary })
+        : entry.runtime.prompt(action.text);
+    }
+    if (seedFromSummary) return entry.runtime.prompt({ text: action.fallbackText, seedFromSummary });
+    return entry.runtime.resume().catch((error: unknown) => {
       if (error instanceof Error && error.message.startsWith("nothing to resume:")) {
-        return runtime.prompt(action.fallbackText);
+        return entry.runtime.prompt(action.fallbackText);
       }
       throw error;
     });

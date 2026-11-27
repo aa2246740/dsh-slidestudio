@@ -34,7 +34,12 @@ function readJsonl(file: string): unknown[] {
 
 function pageIdFromHands(row: Record<string, unknown>): string | undefined {
   const summary = typeof row.summary === "string" ? row.summary : "";
-  if (row.name === "write_page" || row.name === "render_page" || row.name === "review_page") {
+  if (
+    row.name === "write_page" ||
+    row.name === "patch_page_elements" ||
+    row.name === "render_page" ||
+    row.name === "review_page"
+  ) {
     const token = summary.split("·")[0]?.trim();
     if (token && !/execution gate/i.test(token)) return token;
   }

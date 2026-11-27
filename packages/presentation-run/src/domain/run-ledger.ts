@@ -25,6 +25,9 @@ import type { MaterialChunkFact, MaterialReadFact } from "./material-read-progre
 export type { MaterialChunkFact } from "./material-read-progress.js";
 import type { MaterialFiguresFact, PageProvenanceFact } from "./material-figures.js";
 export type { MaterialFiguresFact, PageProvenanceFact } from "./material-figures.js";
+import { isReferenceReadFact, type ReferenceChunkPreparedFact, type ReferenceEpochCarriedFact } from "./reference-facts.js";
+export type { ReferenceChunkPreparedFact, ReferenceEpochCarriedFact } from "./reference-facts.js";
+import { OPENKIMI_SECTIONED_REFERENCE_LAYOUT } from "./openkimi-pptd-sections.js";
 
 export const RUN_LEDGER_REL = path.join("_agent", "run-ledger.v1.json");
 /** Bump whenever rendered layout acceptance semantics change. */
@@ -212,6 +215,8 @@ export type ExportSucceededFact = Readonly<{
 
 export type RunFact =
   | ReferenceChunkFact
+  | ReferenceChunkPreparedFact
+  | ReferenceEpochCarriedFact
   | MaterialReadFact
   | TodoFact
   | PageRevisionFact
@@ -243,6 +248,8 @@ export type RunLedgerV1 = Readonly<{
       currentRenderedLayoutRequired: boolean;
       structuralReviewRequired: boolean;
     }>;
+    /** Sectioned (v2) reference requirements. Absent on v1 ledgers, which stay whole-file. */
+    referenceLayout?: typeof OPENKIMI_SECTIONED_REFERENCE_LAYOUT;
   }>;
   facts: readonly RunFact[];
 }>;
@@ -349,6 +356,9 @@ function parseLedger(raw: unknown): RunLedgerV1 {
       requirementsId: String(pack.requirementsId ?? ""),
       requirements: parseRequirements(pack.requirements),
       executionPolicy: parseExecutionPolicy(pack.executionPolicy),
+      ...(pack.referenceLayout === OPENKIMI_SECTIONED_REFERENCE_LAYOUT
+        ? { referenceLayout: OPENKIMI_SECTIONED_REFERENCE_LAYOUT }
+        : {}),
     },
     facts: rec.facts as RunFact[],
   };
@@ -782,7 +792,7 @@ export function inspectRunLedger(
     "";
   const reads = new Set(
     ledger.facts
-      .filter((fact): fact is ReferenceChunkFact => fact.type === "reference.chunk-returned")
+      .filter(isReferenceReadFact)
       .map((fact) => `${fact.sourceId}:${fact.fileSha256}:${fact.chunkIndex}:${fact.chunkSha256}`),
   );
   const missingReferenceChunks: { sourceId: string; chunkIndex: number }[] = [];
@@ -790,7 +800,7 @@ export function inspectRunLedger(
     for (const chunkIndex of requirement.chunkIndexes) {
       const match = ledger.facts.some(
         (fact) =>
-          fact.type === "reference.chunk-returned" &&
+          isReferenceReadFact(fact) &&
           (!epoch || fact.contextEpochId === epoch) &&
           fact.sourceId === requirement.sourceId &&
           fact.fileSha256 === requirement.fileSha256 &&

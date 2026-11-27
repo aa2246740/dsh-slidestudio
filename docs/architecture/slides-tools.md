@@ -18,12 +18,25 @@ The package has **no host SDK dependency**: a unit test fails on any
 | `SlideToolDefinition` | `{ name, description, inputSchema (JSON Schema), readOnly, render, validate?, execute(args, ctx) }`            |
 | `PostTurnHook`        | optional overlay seam run after a host turn; core registers none and `runPostTurnHooks` contains hook failures |
 
-`createSlideTools(deps)` builds the 29 canonical tools (the 28 product tools
-plus `open_in_editor`). `listCanonicalSlideTools()` and `toolSchemasSnapshot()`
-expose the contract for inspection; `fixtures/tool-schemas.v1.json` freezes it.
+`createSlideTools(deps, { include?, exclude? })` builds the 29 canonical tools
+(the 28 product tools plus `open_in_editor`) and optional opt-in tools listed
+in `OPT_IN_SLIDE_TOOL_NAMES` (currently `patch_page_elements`, a <= 2 KB
+targeted element patch tool that merges changes into the canonical page on disk
+and persists through `executeWritePageOnce` with zero dual IR).
+`listCanonicalSlideTools()`, `toolSchemasSnapshot()`, `slideToolSchemaBytes()`
+and `slideToolSetSchemaBytes()` expose the contract and schema-size budgets for
+inspection; `fixtures/tool-schemas.v1.json` freezes the 29 canonical tools.
+`applyProduceStagePolicy` (also callable through `applyProjectEditScopes`) trims
+`write_layout` outside layout work and drops `MATERIAL_SLIDE_TOOL_NAMES` when
+`hasAttachments` is `false`, while letting `patch_page_elements` ride with
+`write_page`. `commit_design` returns a `< 1 KB` `designContract` card
+(`design-contract.v1`), and `directorBrief` accepts `DirectorBriefOptions`
+(`{ hasAttachments?, patchPageElements? }`). See
+[ADR-0013](../adr/0013-context-budget-and-sectioned-references.md).
 Hosts inject ports through `SlideToolRuntimeDeps`: the presentation-run domain,
 a JSON Schema validator, a capability snapshot, a project port for
-`open_project`, and an optional media-credential refresher.
+`open_project`, an optional media-credential refresher, and optional
+`confirmReferenceDelivery`.
 
 Images never leave a tool as host attachments. A tool returns neutral image
 blocks; the DSH adapter saves them with `attachments.saveImage`, the MCP server

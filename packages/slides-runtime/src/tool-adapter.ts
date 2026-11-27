@@ -8,6 +8,7 @@
  */
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import { ELISION, shorten } from "./context-compaction.js";
 import {
   isSlideToolArgsError,
   type SlideCaller,
@@ -133,7 +134,8 @@ export function encodeImageContent(block: SlideImageBlock): ImageContent {
 function renderText(def: SlideToolDefinition, data: Record<string, unknown>, maxChars?: number): string {
   const text = typeof def.render === "function" ? def.render(data) : JSON.stringify(data);
   if (!maxChars || text.length <= maxChars) return text;
-  return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  if (maxChars <= ELISION.length + 2) return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  return shorten(text, maxChars, ELISION);
 }
 
 export function errorResult(error: string, detail: string, extra: Record<string, unknown> = {}): AgentToolResult {

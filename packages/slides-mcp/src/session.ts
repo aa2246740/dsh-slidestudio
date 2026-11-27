@@ -104,6 +104,8 @@ export class McpSession {
       editorBaseUrl: options.editorBaseUrl,
       validateSchema: slideSchemaValidator,
       projects: mcpProjectPort(options, this.state),
+      // MCP serves external clients without a runtime delivery callback, so read_reference counts immediately.
+      confirmReferenceDelivery: false,
       ...(options.writerLeaseTtlMs ? { writerLease: { ttlMs: options.writerLeaseTtlMs } } : {}),
     };
     const all = [

@@ -1,5 +1,5 @@
 import type { MaterialRenderOptions, ModelInputModality } from "@open-slidestudio/presentation-run";
-import { briefForDirectorSession, directorBrief } from "./director-brief.js";
+import { briefForDirectorSession, directorBrief, type DirectorBriefOptions } from "./director-brief.js";
 import {
   attachmentDeliveryBlock,
   referenceMaterialsBlock,
@@ -42,6 +42,7 @@ export function initialDeckMessage(
   materials: readonly EditorAttachment[],
   provider: { readonly modelInputModalities: readonly ModelInputModality[] },
   discussion: (brief: string) => string = (brief) => brief,
+  directorOptions: DirectorBriefOptions = {},
 ): string {
   const hasMaterials = materials.length > 0;
   const options: MaterialRenderOptions = {
@@ -50,7 +51,10 @@ export function initialDeckMessage(
   const brief =
     input.conversationMode === "discuss"
       ? discussion(briefForDirectorSession(input.brief, hasMaterials))
-      : directorBrief(briefForDirectorSession(input.brief, hasMaterials), input.designSystemId);
+      : directorBrief(briefForDirectorSession(input.brief, hasMaterials), input.designSystemId, {
+          hasAttachments: hasMaterials,
+          ...directorOptions,
+        });
   return turnTextWithAttachments(
     `${brief}\n\nDocument format: Slides ${format.layout}, ${format.size[0]} x ${format.size[1]} pixels. Preserve this canvas size.`,
     materials,

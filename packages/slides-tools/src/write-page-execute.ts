@@ -211,10 +211,16 @@ async function performWrite(
   const receipt = await present(deps, ctx, "write_page", clean);
   if (!receipt.ok) {
     if (isLeaseRefusalData(receipt.payload)) return receipt.payload as unknown as WritePageOutcome;
+    const next = typeof receipt.payload.next === "string" ? receipt.payload.next : undefined;
+    const missingReferenceChunks = Array.isArray(receipt.payload.missingReferenceChunks)
+      ? receipt.payload.missingReferenceChunks
+      : undefined;
     return {
       outcome: "rejected",
       error: String(receipt.payload.error ?? "rejected"),
       detail: receipt.detail,
+      ...(next ? { next } : {}),
+      ...(missingReferenceChunks ? { missingReferenceChunks } : {}),
       painted: false,
     };
   }

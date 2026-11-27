@@ -9,8 +9,17 @@ import { PALETTE_PART, paletteUnavailableReason } from "./palette-source.js";
 import { checkPlanningReportRequirements } from "./report-authority.js";
 import type { ReportRequirement } from "./report-requirements.js";
 import { inspectRunLedger, readRunLedger } from "./run-ledger.js";
+import { isReferenceReadFact } from "./reference-facts.js";
 import { canonicalDesignSourceId } from "./theme-pack.js";
 import { defaultTemplateAspects, sourceDesignAspects, type DesignAspects } from "./design-aspects.js";
+
+export {
+  REFERENCE_SECTION_UNREAD_ERROR,
+  missingSectionChunks,
+  pageReferenceSectionGroups,
+  writePageReferencePreflight,
+  type MissingReferenceSection,
+} from "./reference-section-gate.js";
 
 type MissingReferenceChunk = Readonly<{ sourceId: string; chunkIndex: number }>;
 
@@ -39,6 +48,7 @@ function candidateAdoptedMissingChunks(
   repoRoot: string,
   projectRoot: string,
   adoptedSourceIds: readonly string[],
+  contextEpochId?: string,
 ): MissingReferenceChunk[] {
   if (!adoptedSourceIds.length) return [];
   const ledger = readRunLedger(projectRoot);
@@ -66,7 +76,8 @@ function candidateAdoptedMissingChunks(
     for (const chunk of entry.chunks) {
       const read = ledger.facts.some(
         (fact) =>
-          fact.type === "reference.chunk-returned" &&
+          isReferenceReadFact(fact) &&
+          (!contextEpochId || fact.contextEpochId === contextEpochId) &&
           fact.sourceId === sourceId &&
           fact.fileSha256 === entry.sha256 &&
           fact.chunkIndex === chunk.index &&
@@ -283,7 +294,7 @@ export function planningReferencePreflight(
   if (!status.initialized && !materialPreflight.missing.length && !requirementCheck.missing.length) return undefined;
   const missingReferenceChunks = uniqueMissingChunks([
     ...status.missingReferenceChunks,
-    ...candidateAdoptedMissingChunks(repoRoot, projectRoot, adoptedSourceIds),
+    ...candidateAdoptedMissingChunks(repoRoot, projectRoot, adoptedSourceIds, contextEpochId),
   ]);
   const missingMaterialChunks = uniqueMaterialChunks([
     ...materialPreflight.missing,

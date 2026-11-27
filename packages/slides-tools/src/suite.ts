@@ -4,7 +4,7 @@ import type { SlideToolDefinition, SlideToolRender } from "./contract.js";
 import { batchRemoveFootersTool } from "./batch-footers.js";
 import { materialToolDefinitions } from "./material-tools.js";
 import { withComponentRefGuard } from "./template-components.js";
-import { CANONICAL_SLIDE_TOOL_NAMES } from "./tool-names.js";
+import { CANONICAL_SLIDE_TOOL_NAMES, OPT_IN_SLIDE_TOOL_NAMES } from "./tool-names.js";
 import type { SlideToolRuntimeDeps } from "./tool-kit.js";
 import { commitDesignTool, writeTodoTool } from "./tools-plan.js";
 import {
@@ -23,13 +23,19 @@ import {
 } from "./tools-project.js";
 import { generateImageTool, searchImageTool, webSearchTool } from "./tools-research.js";
 import { composeDeckTool, exportDeckTool, renderPageTool, reviewPagesTool, reviewPageTool } from "./tools-visual.js";
-import { editElementsTool, writePageTool } from "./tools-write.js";
+import { editElementsTool, patchPageElementsTool, writePageTool } from "./tools-write.js";
 import { writeLayoutTool } from "./write-layout.js";
 
 export type CreateSlideToolsOptions = {
   /** Tool names a host does not expose. */
   readonly exclude?: ReadonlySet<string>;
+  /** Opt-in tools (`OPT_IN_SLIDE_TOOL_NAMES`) to build as well; none by default. */
+  readonly include?: ReadonlySet<string>;
 };
+
+function optInTools(deps: SlideToolRuntimeDeps, include?: ReadonlySet<string>): SlideToolDefinition[] {
+  return include?.has("patch_page_elements") ? [patchPageElementsTool(deps)] : [];
+}
 
 /** Build every canonical slide tool bound to one runtime. */
 export function createSlideTools(
@@ -62,6 +68,7 @@ export function createSlideTools(
     generateImageTool(deps),
     exportDeckTool(deps),
     openInEditorTool(deps),
+    ...optInTools(deps, options.include),
   ];
   return defs.filter((def) => !options.exclude?.has(def.name)).map(withComponentRefGuard);
 }
@@ -75,8 +82,29 @@ const INSPECTION_PRESENTATION: PresentationRun = {
 };
 
 /** Canonical definitions for inspection only (their bodies refuse to run). */
-export function listCanonicalSlideTools(): SlideToolDefinition[] {
-  return createSlideTools({ presentation: INSPECTION_PRESENTATION, editorBaseUrl: "http://127.0.0.1:0" });
+export function listCanonicalSlideTools(options: CreateSlideToolsOptions = {}): SlideToolDefinition[] {
+  return createSlideTools({ presentation: INSPECTION_PRESENTATION, editorBaseUrl: "http://127.0.0.1:0" }, options);
+}
+
+/** Bytes one tool costs in a provider request: its name, description and parameter schema as JSON. */
+export function slideToolSchemaBytes(def: Pick<SlideToolDefinition, "name" | "description" | "inputSchema">): number {
+  return Buffer.byteLength(
+    JSON.stringify({ name: def.name, description: def.description, parameters: def.inputSchema }),
+    "utf8",
+  );
+}
+
+/** Total schema bytes of the named tools (canonical and opt-in); unknown names are ignored. */
+export function slideToolSetSchemaBytes(names: Iterable<string>): number {
+  const byName = new Map(
+    listCanonicalSlideTools({ include: new Set(OPT_IN_SLIDE_TOOL_NAMES) }).map((def) => [def.name, def]),
+  );
+  let total = 0;
+  for (const name of new Set(names)) {
+    const def = byName.get(name);
+    if (def) total += slideToolSchemaBytes(def);
+  }
+  return total;
 }
 
 export type SlideToolSchemaEntry = {

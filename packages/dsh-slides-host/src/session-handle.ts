@@ -11,10 +11,15 @@ export type SessionTurnMessage = {
   readonly source: { readonly kind: "user" };
 };
 
+export type SessionFollowupOptions = {
+  /** Start this turn from a compact disk summary instead of replaying full raw history. */
+  readonly seedFromSummary?: string;
+};
+
 export interface SlidesSessionHandle {
   readonly status?: "idle" | "running";
   /** Start a new turn with this user message (fire-and-forget). */
-  followup(message: SessionTurnMessage): void;
+  followup(message: SessionTurnMessage, options?: SessionFollowupOptions): void;
   /** Inject this user message after the current assistant step of the running turn. */
   steer(message: SessionTurnMessage): void;
 }

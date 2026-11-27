@@ -76,13 +76,19 @@ function transcript(steps: number, resultChars = 6_000): AgentMessage[] {
   return messages;
 }
 
-const base: ContextBudgetOptions = { contextWindow: 200_000, maxOutputTokens: 8_000 };
+const base: ContextBudgetOptions = {
+  contextWindow: 200_000,
+  maxOutputTokens: 8_000,
+  reserveTokens: 4_096,
+  workingSet: false,
+};
 
-test("CJK-aware token estimation counts ideographs individually and Latin text per ~4 bytes", () => {
+test("CJK-aware token estimation counts ideographs individually and Latin text per ~3.5 bytes", () => {
   assert.equal(estimateTextTokens(""), 0);
   assert.equal(estimateTextTokens("季度复盘"), 4);
-  assert.equal(estimateTextTokens("abcdefgh"), 2);
-  assert.equal(estimateTextTokens("复盘 review"), 2 + Math.ceil(" review".length / 4));
+  assert.equal(estimateTextTokens("abcdefgh"), 3);
+  assert.equal(estimateTextTokens("abcdefg"), 2);
+  assert.equal(estimateTextTokens("复盘 review"), 2 + Math.ceil(" review".length / 3.5));
   assert.ok(estimateTextTokens("。，！".repeat(10)) === 30, "full-width punctuation is CJK");
 });
 
@@ -168,6 +174,13 @@ test("GatewayCompat and ContextBudgetHooks extend the projection; defaults impos
   assert.equal((hooked.messages[2] as { content: string }).content, "tier 0");
   assert.equal(seen.length, 1);
   assert.equal(contextBudgetTokens({ ...base, gateway: { maxRequestTokens: 50_000 } }), 50_000 - 8_000 - 4_096);
+  const defaults = { contextWindow: 200_000, maxOutputTokens: 8_000 };
+  assert.equal(contextBudgetTokens(defaults), 200_000 - 8_000 - 24_000, "default reserve is 12% of the window");
+  assert.equal(
+    contextBudgetTokens({ ...defaults, gateway: { maxRequestTokens: 30_000 } }),
+    30_000 - 8_000 - 4_096,
+    "the reserve never drops below 4096",
+  );
   const overflow = {
     ...(assistant([]) as AssistantMessage),
     stopReason: "error" as const,
@@ -212,10 +225,12 @@ test("ContextBudget escalates its floor tier after an overflow and never throws 
   const budget = new ContextBudget(() => base);
   const messages = transcript(2, 50);
   assert.deepEqual(await budget.transform(messages), messages);
+  const before = budget.lastProjection!.projectedTokens;
   assert.equal(budget.escalate(), true);
-  assert.equal(budget.tier, 1);
+  assert.equal(budget.tier, 2, "the no-op tier 1 (every item < 32 KB) is skipped");
   const shorter = await budget.transform(messages);
-  assert.equal(budget.lastProjection?.tier, 1);
+  assert.equal(budget.lastProjection?.tier, 2);
+  assert.ok(budget.lastProjection!.projectedTokens < before, "the escalated projection is really smaller");
   assert.equal(shorter.length, messages.length);
   while (budget.escalate()) {
     /* climb to the strongest tier */

@@ -122,7 +122,12 @@ export class SessionCommands {
     const provider = models.capabilityProvider(route.provider, model, true, catalog);
     const reasoningEffort = reasoningEffortForModel(dshHome, route.provider, model, input.reasoningEffort, catalog);
     const discuss = input.conversationMode === "discuss";
-    const brief = discuss ? discussionInstruction(input.brief) : directorBrief(input.brief, input.designSystemId);
+    const brief = discuss
+      ? discussionInstruction(input.brief)
+      : directorBrief(input.brief, input.designSystemId, {
+          hasAttachments: attachments.length > 0,
+          patchPageElements: true,
+        });
     const initialMessage = turnTextWithAttachments(
       `${brief}\n\nDocument format: Slides ${format.layout}, ${format.size[0]} x ${format.size[1]} pixels. Preserve this canvas size.`,
       attachments,
@@ -254,6 +259,9 @@ export class SessionCommands {
         if (priorSpec) await manager.open(sessionId, priorSpec).catch(() => undefined);
       },
     });
+    if (prior.provider.providerId !== route.provider || prior.provider.modelId !== selected) {
+      manager.markSeedOnNextTurn(sessionId, "model-switch");
+    }
     clearRateLimitWait(projectRoot);
   }
 

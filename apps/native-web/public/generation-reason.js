@@ -2,7 +2,12 @@ import { t } from "./i18n.js";
 
 const PILL_PHASES = new Set(["complete", "discussion", "edited"]);
 const CARD_PHASES = new Set(["paused", "failed", "cancelled", "canceled"]);
-const RESOLVE_FAULT_CODES = new Set(["provider-auth", "provider-quota", "provider-token-plan"]);
+const RESOLVE_FAULT_CODES = new Set([
+  "provider-auth",
+  "provider-quota",
+  "provider-token-plan",
+  "context-window-too-small",
+]);
 
 /** @param {unknown} value */
 function text(value) {
@@ -43,6 +48,11 @@ const FAULT_RULES = [
     match: /** @param {string} code @param {string} raw */ (code, raw) =>
       code === "turn-max-tokens" || /turn reached the output limit/i.test(raw),
     message: () => t("模型单轮输出达到长度上限，任务已自动暂停。"),
+  },
+  {
+    match: /** @param {string} code @param {string} raw */ (code, raw) =>
+      code === "context-window-too-small" || /CONTEXT_WINDOW_TOO_SMALL/i.test(raw),
+    message: () => t("当前模型的上下文窗口不足以容纳完整演示文稿生成，请切换到至少 64k 上下文窗口的模型后再继续。"),
   },
   {
     match: /** @param {string} code */ (code) => code === "repeated-invalid-args" || code === "tool-invalid-args-loop",
@@ -243,6 +253,7 @@ function cardTitle(ctx) {
   }
   if (ctx.faultCode === "provider-auth") return t("模型登录或密钥失效");
   if (ctx.faultCode === "provider-quota" || ctx.faultCode === "provider-token-plan") return t("模型额度已用尽");
+  if (ctx.faultCode === "context-window-too-small") return t("当前模型上下文窗口过小");
   if (ctx.isCancelled) return ctx.count ? t("已停止，保留 {n} 页", { n: ctx.count }) : t("已停止生成");
   if (ctx.finishingBlocked) {
     return ctx.effectivePhase === "failed"
@@ -260,6 +271,9 @@ function resolveSummaryBase(ctx) {
   }
   if (ctx.faultCode === "provider-token-plan") return t("当前模型的套餐额度已用尽，自动重试无法恢复。");
   if (ctx.faultCode === "provider-quota") return t("当前模型账户额度已用尽，自动重试无法恢复。");
+  if (ctx.faultCode === "context-window-too-small") {
+    return t("当前模型的上下文窗口不足以容纳完整演示文稿生成，请切换到至少 64k 上下文窗口的模型后再继续。");
+  }
   if (ctx.faultReason) return ctx.faultReason;
   if (ctx.isNonGenerateCard) return "";
   return unfinishedGenerationReason(ctx.activity, ctx.inspection);
@@ -295,6 +309,9 @@ function cardHint(ctx) {
   }
   if (ctx.faultCode === "provider-quota" || ctx.faultCode === "provider-token-plan") {
     return t("请在下方切换到其他已连接的模型，或充值补充额度后再继续。");
+  }
+  if (ctx.faultCode === "context-window-too-small") {
+    return t("请在下方切换到上下文窗口不小于 64k 的模型（推荐 128k 及以上）后再继续。");
   }
   if (ctx.faultCode === "provider-auth" || ctx.recoveryKind === "resolve") {
     return t("可在下方切换到其他可用模型，或在设置中更新密钥或重新登录。");
@@ -341,15 +358,16 @@ function resolveFaultContext(activity) {
   return { faultCode, faultReason: faultSource ? humanizeGenerationFault(faultSource) : "" };
 }
 
-/** @param {Record<string, any>} activity @param {string} effectivePhase @param {any} rateLimitWait @param {number} count @param {Record<string, any>} inspection */
-function resolveCardFlags(activity, effectivePhase, rateLimitWait, count, inspection) {
+/** @param {Record<string, any>} activity @param {string} effectivePhase @param {any} rateLimitWait @param {number} count @param {Record<string, any>} inspection @param {string} faultCode */
+function resolveCardFlags(activity, effectivePhase, rateLimitWait, count, inspection, faultCode) {
   const rawRecoveryKind = text(activity?.execution?.recovery?.kind) || (rateLimitWait ? "wait-or-stop" : "none");
   const isWait = Boolean(rateLimitWait) || rawRecoveryKind === "wait-or-stop";
   const isCancelled = effectivePhase === "cancelled" || effectivePhase === "canceled";
   const conversationMode = text(activity?.conversation?.mode);
   const isNonGenerateCard =
     (conversationMode === "discuss" || conversationMode === "edit") && CARD_PHASES.has(effectivePhase) && !isWait;
-  const recoveryKind = isNonGenerateCard ? "none" : rawRecoveryKind;
+  const forceResolve = !isNonGenerateCard && !isWait && RESOLVE_FAULT_CODES.has(faultCode);
+  const recoveryKind = isNonGenerateCard ? "none" : forceResolve ? "resolve" : rawRecoveryKind;
   const finishingBlocked = !isNonGenerateCard && count > 0 && inspection.composed !== true && !isCancelled && !isWait;
   return { conversationMode, isNonGenerateCard, recoveryKind, isWait, isCancelled, finishingBlocked };
 }
@@ -377,9 +395,9 @@ export function buildTerminalCardModel(activity = {}, presentation = null, optio
   if (PILL_PHASES.has(effectivePhase)) return buildPillModel(effectivePhase, count, text(opts.duration));
   const rateLimitWait = activeRateLimitWait(activity, now);
   if (!CARD_PHASES.has(effectivePhase) && !rateLimitWait) return null;
-  const flags = resolveCardFlags(activity, effectivePhase, rateLimitWait, count, inspection);
-  const { conversationMode, isNonGenerateCard, recoveryKind, isWait, isCancelled, finishingBlocked } = flags;
   const { faultCode, faultReason } = resolveFaultContext(activity);
+  const flags = resolveCardFlags(activity, effectivePhase, rateLimitWait, count, inspection, faultCode);
+  const { conversationMode, isNonGenerateCard, recoveryKind, isWait, isCancelled, finishingBlocked } = flags;
   const tone = cardTone(effectivePhase, faultCode, isWait, isNonGenerateCard, isCancelled);
   const badge = cardBadge(effectivePhase, recoveryKind, isWait, isCancelled, isNonGenerateCard);
   const title = cardTitle({

@@ -242,6 +242,7 @@ export function apply(ctx: Context, config: SlidesHostConfig = {}): void {
     isBusy: (sessionId) => busy.has(sessionId) || manager.running(sessionId),
     isRunning: (sessionId) => manager.running(sessionId),
     clearSteers: (sessionId) => manager.clearSteers(sessionId),
+    onProviderSwitched: (sessionId) => manager.markSeedOnNextTurn(sessionId, "failover"),
     grokFallbackTarget: () => {
       try {
         const next = assertSlidesGenerateReady(process.env, { xai: currentXai() });
